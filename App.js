@@ -1,10 +1,9 @@
-// src/App.js
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import MapScreen from './src/screens/Main/MapScreen';
 import FeedScreen from './src/screens/Main/FeedScreen';
-import CreateEventScreen from './src/screens/CreateEventScreen';
+import FriendsScreen from './src/screens/Main/FriendsScreen';
 import ProfileScreen from './src/screens/Main/ProfileScreen';
 import Icon from 'react-native-vector-icons/Ionicons'; // Import the icon library
 
@@ -39,12 +38,12 @@ export default function App() {
           }}
         />
         <Tab.Screen
-          name='CreateEvent'
-          component={CreateEventScreen}
+          name='Friends'
+          component={FriendsScreen}
           options={{
             tabBarIcon: ({ focused, color, size }) => (
               <Icon
-                name={focused ? 'add-circle' : 'add-circle-outline'}
+                name={focused ? 'people' : 'people-outline'}
                 color={color}
                 size={size}
               />

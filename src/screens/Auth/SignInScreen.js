@@ -1,6 +1,5 @@
-// src/screens/Auth/SignInScreen.js
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Button } from 'react-native';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../../services/firebase';
 
@@ -42,7 +41,7 @@ export default function SignInScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = {
   container: { flex: 1, justifyContent: 'center', padding: 20 },
   input: { borderWidth: 1, borderColor: '#ccc', marginVertical: 8, padding: 8 },
-});
+};

@@ -1,4 +1,3 @@
-// src/screens/Main/FeedScreen.js
 import React from 'react';
 import {
   View,

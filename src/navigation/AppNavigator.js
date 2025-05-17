@@ -1,4 +1,3 @@
-// src/App.js or wherever your navigator is defined
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -8,11 +7,11 @@ import MapScreen from '../screens/Main/MapScreen';
 import FeedScreen from '../screens/Main/FeedScreen';
 import EventDetailScreen from '../screens/Main/EventDetailScreen';
 import ProfileScreen from '../screens/Main/ProfileScreen';
-import CreateEventScreen from '../screens/CreateEventScreen';
+import CreateEventScreen from '../screens/Main/CreateEventScreen';
 
 const Stack = createNativeStackNavigator();
 
-export default function AppNavigator() {
+const AppNavigator = () => {
   return (
     <NavigationContainer>
       <Stack.Navigator
@@ -35,8 +34,11 @@ export default function AppNavigator() {
         <Stack.Screen name='Feed' component={FeedScreen} />
         <Stack.Screen name='EventDetail' component={EventDetailScreen} />
         <Stack.Screen name='Profile' component={ProfileScreen} />
+        <Stack.Screen name='Friends' component={ProfileScreen} />
         <Stack.Screen name='CreateEvent' component={CreateEventScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
-}
+};
+
+export default AppNavigator;
