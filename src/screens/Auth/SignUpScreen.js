@@ -1,4 +1,3 @@
-// src/screens/Auth/SignUpScreen.js
 import React, { useState } from 'react';
 import { View, TextInput, Button, Text, StyleSheet } from 'react-native';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
@@ -31,7 +30,7 @@ export default function SignUpScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text>Sign Up</Text>
+      <Text style={styles.header}>Sign Up</Text>
       <TextInput
         placeholder='Email'
         value={email}
@@ -61,6 +60,21 @@ export default function SignUpScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
-  input: { borderWidth: 1, borderColor: '#ccc', marginVertical: 8, padding: 8 },
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  header: {
+    fontSize: 24,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    marginVertical: 8,
+    padding: 8,
+    borderRadius: 4,
+  },
 });

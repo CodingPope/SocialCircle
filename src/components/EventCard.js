@@ -1,8 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import Icon from 'react-native-vector-icons/Ionicons';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
-export default function EventCard({ title, details }) {
+const EventCard = ({ title, details }) => {
   return (
     <View style={styles.eventCard}>
       <View style={styles.eventImagePlaceholder} />
@@ -10,14 +9,13 @@ export default function EventCard({ title, details }) {
         <Text style={styles.eventTitle}>{title}</Text>
         <Text style={styles.eventDetails}>{details}</Text>
       </View>
-      <View>
-        <TouchableOpacity style={styles.hamburgerButton}>
-          <Icon name='share-outline' size={20} color='#000' />
-        </TouchableOpacity>
-      </View>
+      <TouchableOpacity style={styles.hamburgerButton}>
+        <Text>Share</Text>
+        {/* Replace with appropriate icon implementation */}
+      </TouchableOpacity>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   eventCard: {
@@ -27,9 +25,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 10,
     alignItems: 'center',
+    // iOS shadow
     shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 5,
+    // Android elevation
     elevation: 2,
   },
   eventImagePlaceholder: {
@@ -47,4 +48,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#555',
   },
+  hamburgerButton: {
+    padding: 8,
+  },
 });
+
+export default EventCard;

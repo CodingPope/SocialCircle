@@ -1,4 +1,3 @@
-// src/screens/Main/FeedScreen.js
 import React from 'react';
 import {
   View,
@@ -24,15 +23,12 @@ function Notifications() {
   );
 }
 
-function FeedScreen() {
+function FeedScreen({ navigation }) {
   return (
     <View>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Social Circle</Text>
-      </View>
       <Text>
-        This page will have events your currently apart of {'\n'}
-        possibly a second tab to see friends public meets
+        This page will have events you're currently a part of {'\n'}
+        and Notifications
       </Text>
       <FlatList
         data={mockEvents}
@@ -96,6 +92,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'white',
     elevation: 2, // Shadow effect on Android
-    marginTop: 25, // Optional: push it down a bit on iOS},
+    marginTop: 25, // Optional: push it down a bit on iOS
   },
 });
