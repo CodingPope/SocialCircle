@@ -10,9 +10,14 @@ import EventCard from '../../components/EventCard';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 
 const mockEvents = [
-  { id: 'e1', title: 'Coffee Meetup', description: 'Meet at local cafe' },
-  { id: 'e2', title: 'Concert Night', description: 'Live music at the park' },
+  { id: 'e1', title: 'Coffee Meetup', details: 'Meet at local cafe' },
+  { id: 'e2', title: 'Concert Night', details: 'Live music at the park' },
+  { id: 'e3', title: 'Book Club', details: 'Discuss the latest novel' },
+  { id: 'e4', title: 'Yoga Session', details: 'Morning yoga in the park' },
+  { id: 'e5', title: 'Art Workshop', details: 'Learn painting techniques' },
+  { id: 'e6', title: 'Tech Talk', details: 'Latest trends in AI' },
 ];
+
 const Tab = createMaterialTopTabNavigator();
 
 function Notifications() {
