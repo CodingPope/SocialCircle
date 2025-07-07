@@ -7,7 +7,7 @@ import {
   signInWithCredential,
   onAuthStateChanged,
 } from 'firebase/auth';
-import { auth } from '../../services/firebase';
+import { auth } from '../firebase/config';
 import * as WebBrowser from 'expo-web-browser';
 
 WebBrowser.maybeCompleteAuthSession();

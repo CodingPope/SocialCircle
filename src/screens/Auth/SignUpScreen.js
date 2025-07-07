@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, TextInput, Button, Text, StyleSheet } from 'react-native';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { auth, db } from '../../services/firebase';
+import { auth, db } from '../../firebase/config';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function SignUpScreen({ navigation }) {

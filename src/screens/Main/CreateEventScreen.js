@@ -18,7 +18,7 @@ import {
   doc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { auth, db } from '../../services/firebase';
+import { auth, db } from '../../firebase/config';
 
 // Example geocoding helper function (you must implement this)
 async function geocodeAddress(address) {
