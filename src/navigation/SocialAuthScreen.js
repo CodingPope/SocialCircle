@@ -1,0 +1,67 @@
+import React, { useEffect } from 'react';
+import { View, Text, Button, StyleSheet, Platform } from 'react-native';
+import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import {
+  GoogleAuthProvider,
+  signInWithCredential,
+  onAuthStateChanged,
+} from 'firebase/auth';
+import { auth } from '../../services/firebase';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
+
+export default function SocialAuthScreen({ navigation }) {
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId: 'YOUR_EXPO_CLIENT_ID_HERE',
+    iosClientId: 'YOUR_IOS_CLIENT_ID_HERE',
+    androidClientId: 'YOUR_ANDROID_CLIENT_ID_HERE',
+  });
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token, access_token } = response.authentication;
+      const credential = GoogleAuthProvider.credential(id_token, access_token);
+      signInWithCredential(auth, credential)
+        .then(() => navigation.replace('ProfileSetup'))
+        .catch((error) => console.error('Google sign-in error', error));
+    }
+  }, [response]);
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Sign up or log in</Text>
+      <Button title='Continue with Google' onPress={() => promptAsync()} />
+      {Platform.OS === 'ios' && (
+        <AppleAuthentication.AppleAuthenticationButton
+          buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+          cornerRadius={5}
+          style={{ width: 200, height: 44, marginTop: 10 }}
+          onPress={async () => {
+            try {
+              const appleCredential = await AppleAuthentication.signInAsync({
+                requestedScopes: [
+                  AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                  AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                ],
+              });
+
+              // TODO: Convert to Firebase credential and sign in
+              console.log('Apple credential:', appleCredential);
+              navigation.replace('ProfileSetup');
+            } catch (e) {
+              console.log('Apple sign-in error:', e);
+            }
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  title: { fontSize: 24, marginBottom: 20 },
+});
