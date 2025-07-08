@@ -13,7 +13,7 @@ import BottomSheet from '@gorhom/bottom-sheet';
 import EventPopUpCard from '../../components/EventPopUpCard';
 import CreateEventScreen from './CreateEventScreen';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../services/firebase';
+import { functions } from '../../firebase/config';
 
 export default function MapScreen({ navigation }) {
   const [events, setEvents] = useState([]);
