@@ -1,15 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useAuth } from './src/context/AuthContext';
+import { db } from './src/firebase/config';
+import { doc, getDoc } from 'firebase/firestore';
 import MapScreen from './src/screens/Main/MapScreen';
 import FeedScreen from './src/screens/Main/FeedScreen';
 import FriendsScreen from './src/screens/Main/FriendsScreen';
 import ProfileScreen from './src/screens/Main/ProfileScreen';
-import LoginScreen from './src/screens/Auth/LoginScreen';
-import InterestScreen from './src/screens/Auth/InterestScreen';
+import AuthScreen from './src/screens/Auth/AuthScreen';
+import NameDobScreen from './src/screens/Auth/Onboarding/NameDobScreen';
+import LocationScreen from './src/screens/Auth/Onboarding/LocationScreen';
+import InterestsScreen from './src/screens/Auth/Onboarding/InterestsScreen';
+import ProfileSetupScreen from './src/screens/Auth/Onboarding/ProfileSetupScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -58,19 +64,49 @@ const MainTabs = () => (
   </Tab.Navigator>
 );
 
+const AuthStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name='Auth' component={AuthScreen} />
+  </Stack.Navigator>
+);
+
+const OnboardingStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name='NameDob' component={NameDobScreen} />
+    <Stack.Screen name='Location' component={LocationScreen} />
+    <Stack.Screen name='Interests' component={InterestsScreen} />
+    <Stack.Screen name='ProfileSetup' component={ProfileSetupScreen} />
+  </Stack.Navigator>
+);
+
 export default function App() {
   const { user } = useAuth();
+  const [profileComplete, setProfileComplete] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const check = async () => {
+      if (user) {
+        const snap = await getDoc(doc(db, 'users', user.uid));
+        if (snap.exists() && snap.data().firstName) {
+          setProfileComplete(true);
+        } else {
+          setProfileComplete(false);
+        }
+      }
+      setChecking(false);
+    };
+    check();
+  }, [user]);
+
+  if (checking) {
+    return <ActivityIndicator style={{ flex: 1 }} />;
+  }
 
   return (
     <NavigationContainer>
-      {user ? (
-        <MainTabs />
-      ) : (
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name='Login' component={LoginScreen} />
-          <Stack.Screen name='Interests' component={InterestScreen} />
-        </Stack.Navigator>
-      )}
+      {!user && <AuthStack />}
+      {user && (profileComplete ? <MainTabs /> : <OnboardingStack />)}
     </NavigationContainer>
   );
 }
