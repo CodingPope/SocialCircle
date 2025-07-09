@@ -14,9 +14,10 @@ WebBrowser.maybeCompleteAuthSession();
 
 export default function SocialAuthScreen({ navigation }) {
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: 'YOUR_EXPO_CLIENT_ID_HERE',
-    iosClientId: 'YOUR_IOS_CLIENT_ID_HERE',
-    androidClientId: 'YOUR_ANDROID_CLIENT_ID_HERE',
+    expoClientId: process.env.GOOGLE_EXPO_CLIENT_ID, // your “Web” client
+    iosClientId: process.env.GOOGLE_IOS_CLIENT_ID, // the one you just created
+    androidClientId: process.env.GOOGLE_IOS_CLIENT_ID, // also host.exp.exponent
+    webClientId: process.env.GOOGLE_EXPO_CLIENT_ID, // often same as expoClientId
   });
 
   useEffect(() => {

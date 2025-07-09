@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Button, ActivityIndicator, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  Button,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import {
@@ -21,7 +28,8 @@ export default function AuthScreen({ navigation }) {
   const [error, setError] = useState('');
 
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: 'YOUR_EXPO_CLIENT_ID',
+    expoClientId: process.env.GOOGLE_EXPO_CLIENT_ID, // your “Web” client
+    iosClientId: process.env.GOOGLE_IOS_CLIENT_ID, // the one you just created
   });
 
   useEffect(() => {
@@ -30,7 +38,10 @@ export default function AuthScreen({ navigation }) {
         try {
           setLoading(true);
           const { id_token, access_token } = response.authentication;
-          const credential = GoogleAuthProvider.credential(id_token, access_token);
+          const credential = GoogleAuthProvider.credential(
+            id_token,
+            access_token
+          );
           const cred = await signInWithCredential(auth, credential);
           await setDoc(
             doc(db, 'users', cred.user.uid),
@@ -54,7 +65,11 @@ export default function AuthScreen({ navigation }) {
       if (mode === 'login') {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        const cred = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
         await setDoc(doc(db, 'users', cred.user.uid), {
           rating: 0,
           createdAt: serverTimestamp(),
@@ -73,26 +88,33 @@ export default function AuthScreen({ navigation }) {
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <TextInput
         style={styles.input}
-        placeholder="Email"
-        autoCapitalize="none"
+        placeholder='Email'
+        autoCapitalize='none'
         value={email}
         onChangeText={setEmail}
       />
       <TextInput
         style={styles.input}
-        placeholder="Password"
+        placeholder='Password'
         secureTextEntry
         value={password}
         onChangeText={setPassword}
       />
-      <Button title={mode === 'login' ? 'Login' : 'Create Account'} onPress={handleSubmit} />
       <Button
-        title={mode === 'login' ? 'Need an account? Sign Up' : 'Have an account? Login'}
+        title={mode === 'login' ? 'Login' : 'Create Account'}
+        onPress={handleSubmit}
+      />
+      <Button
+        title={
+          mode === 'login'
+            ? 'Need an account? Sign Up'
+            : 'Have an account? Login'
+        }
         onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
       />
       <View style={{ marginTop: 20 }}>
         <Button
-          title="Continue with Google"
+          title='Continue with Google'
           onPress={() => promptAsync()}
           disabled={!request}
         />

@@ -33,13 +33,12 @@ export default function MapScreen({ navigation }) {
     const fetchEvents = async () => {
       try {
         const getEvents = httpsCallable(functions, 'getEvents');
-        const result = await getEvents();
-        setEvents(result.data.events);
-      } catch (error) {
-        console.error('Error fetching events:', error);
+        const { data } = await getEvents();
+        setEvents(data.events);
+      } catch (e) {
+        console.error('Error fetching events:', e);
       }
     };
-
     fetchEvents();
   }, []);
 
