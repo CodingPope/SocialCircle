@@ -1,47 +1,23 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, Button } from 'react-native';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../../firebase/config';
-
-export default function SignInScreen({ navigation }) {
+export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSignIn = async () => {
+    setLoading(true);
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      navigation.replace('Map');
+      // ← NO navigation.replace here
     } catch (err) {
-      console.log('Sign in error', err);
+      Alert.alert('Login failed', err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <Text>Sign In</Text>
-      <TextInput
-        placeholder='Email'
-        value={email}
-        onChangeText={setEmail}
-        style={styles.input}
-      />
-      <TextInput
-        placeholder='Password'
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-        style={styles.input}
-      />
-      <Button title='Sign In' onPress={handleSignIn} />
-      <Button
-        title='Go to Sign Up'
-        onPress={() => navigation.navigate('SignUp')}
-      />
-    </View>
+  return loading ? (
+    <ActivityIndicator style={{ marginTop: 16 }} />
+  ) : (
+    <Button title='Login' onPress={handleSignIn} />
   );
 }
-
-const styles = {
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
-  input: { borderWidth: 1, borderColor: '#ccc', marginVertical: 8, padding: 8 },
-};

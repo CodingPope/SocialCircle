@@ -7,6 +7,7 @@ import {
   View,
   StyleSheet,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 const CustomDropdown = ({
   selectedValue,

@@ -15,7 +15,7 @@ import AuthScreen from './src/screens/Auth/AuthScreen';
 import NameDobScreen from './src/screens/Auth/Onboarding/NameDobScreen';
 import LocationScreen from './src/screens/Auth/Onboarding/LocationScreen';
 import InterestsScreen from './src/screens/Auth/Onboarding/InterestsScreen';
-import ProfileSetupScreen from './src/screens/Auth/Onboarding/ProfileSetupScreen';
+import SexScreen from './src/screens/Auth/Onboarding/SexScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -27,7 +27,11 @@ const MainTabs = () => (
       component={MapScreen}
       options={{
         tabBarIcon: ({ focused, color, size }) => (
-          <Icon name={focused ? 'map' : 'map-outline'} color={color} size={size} />
+          <Icon
+            name={focused ? 'map' : 'map-outline'}
+            color={color}
+            size={size}
+          />
         ),
         headerShown: false,
       }}
@@ -47,7 +51,11 @@ const MainTabs = () => (
       component={FriendsScreen}
       options={{
         tabBarIcon: ({ focused, color, size }) => (
-          <Icon name={focused ? 'people' : 'people-outline'} color={color} size={size} />
+          <Icon
+            name={focused ? 'people' : 'people-outline'}
+            color={color}
+            size={size}
+          />
         ),
       }}
     />
@@ -56,7 +64,11 @@ const MainTabs = () => (
       component={ProfileScreen}
       options={{
         tabBarIcon: ({ focused, color, size }) => (
-          <Icon name={focused ? 'person' : 'person-outline'} color={color} size={size} />
+          <Icon
+            name={focused ? 'person' : 'person-outline'}
+            color={color}
+            size={size}
+          />
         ),
         headerShown: false,
       }}
@@ -73,9 +85,9 @@ const AuthStack = () => (
 const OnboardingStack = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name='NameDob' component={NameDobScreen} />
+    <Stack.Screen name='Sex' component={SexScreen} />
     <Stack.Screen name='Location' component={LocationScreen} />
     <Stack.Screen name='Interests' component={InterestsScreen} />
-    <Stack.Screen name='ProfileSetup' component={ProfileSetupScreen} />
   </Stack.Navigator>
 );
 
@@ -88,8 +100,18 @@ export default function App() {
     const check = async () => {
       if (user) {
         const snap = await getDoc(doc(db, 'users', user.uid));
-        if (snap.exists() && snap.data().firstName) {
-          setProfileComplete(true);
+        if (snap.exists()) {
+          const data = snap.data();
+          const isOnboarded =
+            data.firstName &&
+            data.lastName &&
+            data.dob &&
+            data.sex &&
+            Array.isArray(data.interests) &&
+            data.interests.length > 0 &&
+            data.location?.latitude != null &&
+            data.location?.longitude != null;
+          setProfileComplete(isOnboarded);
         } else {
           setProfileComplete(false);
         }

@@ -6,13 +6,22 @@ export default function EventDetailScreen({ route }) {
 
   return (
     <View style={styles.container}>
-      <Text>Event Detail</Text>
-      <Text>{eventId}</Text>
-      {/* Later: Fetch event info from Firestore, show attendees, comments, RSVP button */}
+      <Text style={styles.title}>Event Detail</Text>
+      <Text>Event ID: {eventId}</Text>
+      {/* TODO: Implement event detail UI */}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: {
+    flex: 1,
+    padding: 16,
+    backgroundColor: '#fff',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
 });

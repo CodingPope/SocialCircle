@@ -5,11 +5,48 @@
  * - Close and re-open the app -> should go straight into main app as logged in.
  */
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
+  Alert,
+} from 'react-native';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import {
+  GoogleAuthProvider,
+  signInWithCredential,
+  OAuthProvider,
+} from 'firebase/auth';
+import * as Google from 'expo-auth-session/providers/google';
+import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../../../.env';
+import { Platform } from 'react-native';
+
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
+// Apple Sign-In handler
+async function handleAppleSignIn() {
+  const appleAuthResponse = await AppleAuthentication.signInAsync({
+    requestedScopes: [
+      AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+      AppleAuthentication.AppleAuthenticationScope.EMAIL,
+    ],
+  });
+  if (appleAuthResponse.identityToken) {
+    const provider = new OAuthProvider('apple.com');
+    const credential = provider.credential({
+      idToken: appleAuthResponse.identityToken,
+    });
+    await signInWithCredential(auth, credential);
+  }
+}
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../firebase/config';
 
@@ -18,6 +55,28 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState('login'); // or 'signup'
   const [error, setError] = useState('');
+  const [showReset, setShowReset] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+
+  // Set up Google sign-in hook at the top level
+  // Use platform-specific client ID
+  const clientId =
+    Platform.OS === 'ios' ? GOOGLE_IOS_CLIENT_ID : GOOGLE_CLIENT_ID;
+  const [googleRequest, googleResponse, googlePromptAsync] =
+    Google.useIdTokenAuthRequest({
+      clientId,
+    });
+  console.log('Google Auth Request:', googleRequest);
+
+  React.useEffect(() => {
+    if (googleResponse?.type === 'success') {
+      const { id_token } = googleResponse.params;
+      const credential = GoogleAuthProvider.credential(id_token);
+      signInWithCredential(auth, credential).catch((err) => {
+        setError(err.message);
+      });
+    }
+  }, [googleResponse]);
 
   const handleLogin = async () => {
     setError('');
@@ -36,7 +95,6 @@ export default function LoginScreen({ navigation }) {
         email,
         createdAt: serverTimestamp(),
       });
-      navigation.replace('Interests');
     } catch (e) {
       setError(e.message);
     }
@@ -44,36 +102,193 @@ export default function LoginScreen({ navigation }) {
 
   const onSubmit = mode === 'login' ? handleLogin : handleSignUp;
 
+  const handlePasswordReset = async () => {
+    if (!resetEmail) {
+      Alert.alert('Error', 'Please enter your email address.');
+      return;
+    }
+    try {
+      await auth.sendPasswordResetEmail(resetEmail);
+      Alert.alert('Success', 'Password reset email sent! Check your inbox.');
+      setShowReset(false);
+      setResetEmail('');
+    } catch (error) {
+      Alert.alert('Error', error.message);
+    }
+  };
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{mode === 'login' ? 'Login' : 'Sign Up'}</Text>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <TextInput
-        style={styles.input}
-        placeholder='Email'
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize='none'
-      />
-      <TextInput
-        style={styles.input}
-        placeholder='Password'
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-      <Button title={mode === 'login' ? 'Login' : 'Create Account'} onPress={onSubmit} />
-      <Button
-        title={mode === 'login' ? 'Need an account? Sign Up' : 'Have an account? Login'}
-        onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
-      />
-    </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={100}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <Text style={styles.title}>
+          {mode === 'login' ? 'Login' : 'Sign Up'}
+        </Text>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <TextInput
+          style={styles.input}
+          placeholder='Email'
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize='none'
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='Password'
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
+        <TouchableOpacity style={styles.button} onPress={onSubmit}>
+          <Text style={styles.buttonText}>
+            {mode === 'login' ? 'Login' : 'Create Account'}
+          </Text>
+        </TouchableOpacity>
+        {mode === 'login' &&
+          (googleRequest ? (
+            <TouchableOpacity
+              style={styles.googleButton}
+              onPress={() => googlePromptAsync()}
+            >
+              <Text
+                style={{ color: '#DB4437', fontWeight: 'bold', fontSize: 16 }}
+              >
+                Login with Google
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.googleButton}>
+              <Text
+                style={{ color: '#DB4437', fontWeight: 'bold', fontSize: 16 }}
+              >
+                Google login unavailable (check client ID and Expo setup)
+              </Text>
+            </View>
+          ))}
+        <TouchableOpacity
+          style={styles.buttonSecondary}
+          onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
+        >
+          <Text style={styles.buttonTextSecondary}>
+            {mode === 'login'
+              ? 'Need an account? Sign Up'
+              : 'Have an account? Login'}
+          </Text>
+        </TouchableOpacity>
+        {mode === 'login' && (
+          <TouchableOpacity
+            style={styles.forgotButton}
+            onPress={() => setShowReset(true)}
+          >
+            <Text style={styles.forgotText}>Forgot Password?</Text>
+          </TouchableOpacity>
+        )}
+        //reset password modal
+        <Modal visible={showReset} animationType='slide' transparent={true}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Reset Password</Text>
+              <TextInput
+                style={styles.input}
+                placeholder='Enter your email'
+                value={resetEmail}
+                onChangeText={setResetEmail}
+                autoCapitalize='none'
+                keyboardType='email-address'
+              />
+              <TouchableOpacity
+                style={styles.button}
+                onPress={handlePasswordReset}
+              >
+                <Text style={styles.buttonText}>Send Reset Link</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.buttonSecondary}
+                onPress={() => setShowReset(false)}
+              >
+                <Text style={styles.buttonTextSecondary}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
-  input: { borderWidth: 1, borderColor: '#ccc', marginVertical: 8, padding: 8 },
+  container: { flex: 1 },
+  scrollContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
   title: { fontSize: 24, textAlign: 'center', marginBottom: 16 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    marginVertical: 8,
+    padding: 8,
+  },
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 12,
+    borderRadius: 6,
+    marginVertical: 8,
+    alignItems: 'center',
+  },
+  buttonText: { color: 'white', fontSize: 16 },
+  buttonSecondary: {
+    padding: 12,
+    marginVertical: 8,
+    alignItems: 'center',
+  },
+  buttonTextSecondary: {
+    color: '#007AFF',
+    fontSize: 16,
+  },
   error: { color: 'red', textAlign: 'center', marginBottom: 8 },
+  forgotButton: {
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  forgotText: {
+    color: '#007AFF',
+    fontSize: 16,
+    textDecorationLine: 'underline',
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 10,
+    width: '80%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  googleButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#DB4437',
+    borderRadius: 6,
+    padding: 12,
+    marginVertical: 8,
+    alignItems: 'center',
+  },
 });

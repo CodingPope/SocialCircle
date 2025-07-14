@@ -1,5 +1,13 @@
+// src/screens/Auth/SignUpScreen.js
 import React, { useState } from 'react';
-import { View, TextInput, Button, Text, StyleSheet } from 'react-native';
+import {
+  View,
+  TextInput,
+  Button,
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+} from 'react-native';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -7,74 +15,62 @@ import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 export default function SignUpScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSignUp = async () => {
+    if (!email.trim() || !password) {
+      return Alert.alert('Please enter an email and password');
+    }
+    setLoading(true);
     try {
-      const userCred = await createUserWithEmailAndPassword(
-        auth,
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // also create your user doc if needed
+      await setDoc(doc(db, 'users', cred.user.uid), {
         email,
-        password
-      );
-      const uid = userCred.user.uid;
-      await setDoc(doc(db, 'users', uid), {
-        displayName,
         createdAt: serverTimestamp(),
-        friends: [],
+        // …any other defaults
       });
-      navigation.navigate('Map'); // Go to main screen after signup
+      navigation.replace('MainApp'); // or wherever you go next
     } catch (err) {
-      console.log('Sign up error', err);
+      Alert.alert('Signup failed', err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
+  if (loading) {
+    return <ActivityIndicator style={{ flex: 1, justifyContent: 'center' }} />;
+  }
+
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Sign Up</Text>
       <TextInput
+        style={styles.input}
         placeholder='Email'
         value={email}
         onChangeText={setEmail}
-        style={styles.input}
+        autoCapitalize='none'
+        keyboardType='email-address'
       />
       <TextInput
+        style={styles.input}
         placeholder='Password'
         value={password}
-        secureTextEntry
         onChangeText={setPassword}
-        style={styles.input}
-      />
-      <TextInput
-        placeholder='Display Name'
-        value={displayName}
-        onChangeText={setDisplayName}
-        style={styles.input}
+        secureTextEntry
       />
       <Button title='Create Account' onPress={handleSignUp} />
-      <Button
-        title='Go to Sign In'
-        onPress={() => navigation.navigate('SignIn')}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  header: {
-    fontSize: 24,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
+  container: { flex: 1, justifyContent: 'center', padding: 20 },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',
-    marginVertical: 8,
-    padding: 8,
+    padding: 10,
+    marginBottom: 16,
     borderRadius: 4,
   },
 });

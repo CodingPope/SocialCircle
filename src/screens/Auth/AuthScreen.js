@@ -1,82 +1,83 @@
-import React, { useState, useEffect } from 'react';
+// src/screens/Auth/AuthScreen.js
+import React, { useState } from 'react';
 import {
   View,
-  Text,
   TextInput,
   Button,
+  Alert,
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithCredential,
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../firebase/config';
-
-WebBrowser.maybeCompleteAuthSession();
+import * as Google from 'expo-auth-session/providers/google';
 
 export default function AuthScreen({ navigation }) {
-  const [mode, setMode] = useState('login');
+  const [mode, setMode] = useState('login'); // 'login' or 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: process.env.GOOGLE_EXPO_CLIENT_ID, // your “Web” client
-    iosClientId: process.env.GOOGLE_IOS_CLIENT_ID, // the one you just created
-  });
+  // Google Sign-Up handler
+  const [googleRequest, googleResponse, googlePromptAsync] =
+    Google.useIdTokenAuthRequest({
+      clientId: process.env.GOOGLE_CLIENT_ID,
+    });
 
-  useEffect(() => {
-    const completeGoogleSignIn = async () => {
-      if (response?.type === 'success') {
-        try {
-          setLoading(true);
-          const { id_token, access_token } = response.authentication;
-          const credential = GoogleAuthProvider.credential(
-            id_token,
-            access_token
-          );
-          const cred = await signInWithCredential(auth, credential);
-          await setDoc(
-            doc(db, 'users', cred.user.uid),
-            { rating: 0, createdAt: serverTimestamp() },
-            { merge: true }
-          );
-        } catch (e) {
-          setError(e.message);
-        } finally {
-          setLoading(false);
-        }
-      }
-    };
-    completeGoogleSignIn();
-  }, [response]);
+  React.useEffect(() => {
+    if (googleResponse?.type === 'success') {
+      const { id_token } = googleResponse.params;
+      const credential = GoogleAuthProvider.credential(id_token);
+      signInWithCredential(auth, credential)
+        .then((result) => {
+          // Optionally create Firestore doc for new users
+          if (result.additionalUserInfo?.isNewUser) {
+            setDoc(doc(db, 'users', result.user.uid), {
+              email: result.user.email,
+              createdAt: serverTimestamp(),
+              friends: [],
+              interests: [],
+            });
+          }
+        })
+        .catch((err) => {
+          Alert.alert('Google Sign Up Error', err.message);
+        });
+    }
+  }, [googleResponse]);
 
   const handleSubmit = async () => {
     setLoading(true);
-    setError('');
     try {
       if (mode === 'login') {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
-        const cred = await createUserWithEmailAndPassword(
+        const result = await createUserWithEmailAndPassword(
           auth,
           email,
           password
         );
-        await setDoc(doc(db, 'users', cred.user.uid), {
-          rating: 0,
+        const user = result.user;
+        // create initial Firestore doc (no firstName so onboarding kicks in)
+        await setDoc(doc(db, 'users', user.uid), {
           createdAt: serverTimestamp(),
+          friends: [],
+          interests: [],
         });
       }
-    } catch (e) {
-      setError(e.message);
+      // no manual navigation here—AppNavigator will react to auth/profile changes
+    } catch (err) {
+      Alert.alert(
+        mode === 'login' ? 'Login failed' : 'Signup failed',
+        err.message
+      );
     } finally {
       setLoading(false);
     }
@@ -84,26 +85,40 @@ export default function AuthScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{mode === 'login' ? 'Login' : 'Sign Up'}</Text>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       <TextInput
-        style={styles.input}
         placeholder='Email'
-        autoCapitalize='none'
         value={email}
         onChangeText={setEmail}
+        autoCapitalize='none'
+        keyboardType='email-address'
+        style={styles.input}
       />
       <TextInput
-        style={styles.input}
         placeholder='Password'
-        secureTextEntry
         value={password}
         onChangeText={setPassword}
+        secureTextEntry
+        style={styles.input}
       />
-      <Button
-        title={mode === 'login' ? 'Login' : 'Create Account'}
-        onPress={handleSubmit}
-      />
+
+      {loading ? (
+        <ActivityIndicator style={{ marginVertical: 12 }} />
+      ) : (
+        <Button
+          title={mode === 'login' ? 'Login' : 'Create Account'}
+          onPress={handleSubmit}
+        />
+      )}
+
+      {mode === 'signup' && (
+        <Button
+          title='Sign up with Google'
+          onPress={() => googlePromptAsync()}
+        />
+      )}
+
+      <View style={{ height: 12 }} />
+
       <Button
         title={
           mode === 'login'
@@ -112,21 +127,34 @@ export default function AuthScreen({ navigation }) {
         }
         onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
       />
-      <View style={{ marginTop: 20 }}>
-        <Button
-          title='Continue with Google'
-          onPress={() => promptAsync()}
-          disabled={!request}
-        />
-      </View>
-      {loading && <ActivityIndicator style={{ marginTop: 10 }} />}
+
+      <Button
+        title='Forgot Password?'
+        onPress={() => {
+          if (!email) {
+            Alert.alert(
+              'Reset Password',
+              'Please enter your email above first.'
+            );
+            return;
+          }
+          sendPasswordResetEmail(auth, email)
+            .then(() => {
+              Alert.alert(
+                'Reset Password',
+                'Password reset email sent! Check your inbox.'
+              );
+            })
+            .catch((err) => {
+              Alert.alert('Reset Password', err.message);
+            });
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
-  title: { fontSize: 24, textAlign: 'center', marginBottom: 16 },
-  input: { borderWidth: 1, borderColor: '#ccc', marginVertical: 8, padding: 8 },
-  error: { color: 'red', textAlign: 'center', marginBottom: 8 },
+  container: { flex: 1, padding: 20, justifyContent: 'center' },
+  input: { marginBottom: 16, borderBottomWidth: 1, padding: 8 },
 });

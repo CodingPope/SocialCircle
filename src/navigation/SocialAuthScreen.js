@@ -24,9 +24,9 @@ export default function SocialAuthScreen({ navigation }) {
     if (response?.type === 'success') {
       const { id_token, access_token } = response.authentication;
       const credential = GoogleAuthProvider.credential(id_token, access_token);
-      signInWithCredential(auth, credential)
-        .then(() => navigation.replace('ProfileSetup'))
-        .catch((error) => console.error('Google sign-in error', error));
+      signInWithCredential(auth, credential).catch((error) =>
+        console.error('Google sign-in error', error)
+      );
     }
   }, [response]);
 
@@ -51,7 +51,6 @@ export default function SocialAuthScreen({ navigation }) {
 
               // TODO: Convert to Firebase credential and sign in
               console.log('Apple credential:', appleCredential);
-              navigation.replace('ProfileSetup');
             } catch (e) {
               console.log('Apple sign-in error:', e);
             }

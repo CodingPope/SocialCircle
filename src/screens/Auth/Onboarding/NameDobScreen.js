@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { View, TextInput, Text, Button, ActivityIndicator, StyleSheet } from 'react-native';
+import {
+  View,
+  TextInput,
+  Text,
+  ActivityIndicator,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  TouchableOpacity,
+} from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Timestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
@@ -16,6 +26,20 @@ export default function NameDobScreen({ navigation }) {
 
   const onNext = async () => {
     if (!user) return;
+
+    const today = new Date();
+    const age = today.getFullYear() - dob.getFullYear();
+    const monthDiff = today.getMonth() - dob.getMonth();
+    const dayDiff = today.getDate() - dob.getDate();
+
+    if (
+      age < 18 ||
+      (age === 18 && (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)))
+    ) {
+      setError('You must be at least 18 years old.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -24,7 +48,7 @@ export default function NameDobScreen({ navigation }) {
         lastName,
         dob: Timestamp.fromDate(dob),
       });
-      navigation.navigate('Location');
+      navigation.replace('Sex');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -33,23 +57,104 @@ export default function NameDobScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Tell us about you</Text>
-      <TextInput style={styles.input} placeholder="First name" value={firstName} onChangeText={setFirstName} />
-      <TextInput style={styles.input} placeholder="Last name" value={lastName} onChangeText={setLastName} />
-      <Button title="Select date of birth" onPress={() => setShowPicker(true)} />
-      {showPicker && (
-        <DateTimePicker value={dob} onChange={(e, d) => { setShowPicker(false); if (d) setDob(d); }} />
-      )}
-      {loading ? <ActivityIndicator /> : <Button title="Next" onPress={onNext} />}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-    </View>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={100}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <Text style={styles.title}>Tell us about you</Text>
+        <TextInput
+          style={styles.input}
+          placeholder='First name'
+          value={firstName}
+          onChangeText={setFirstName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='Last name'
+          value={lastName}
+          onChangeText={setLastName}
+        />
+        <Text style={styles.label}>Date of Birth</Text>
+        <TouchableOpacity
+          style={styles.datePickerButton}
+          onPress={() => setShowPicker(true)}
+        >
+          <Text style={styles.datePickerText}>{dob.toDateString()}</Text>
+        </TouchableOpacity>
+        {showPicker && (
+          <DateTimePicker
+            value={dob}
+            onChange={(e, d) => {
+              if (d) {
+                setDob(d);
+                setShowPicker(false);
+              }
+            }}
+            mode='date'
+            maximumDate={new Date()}
+            minimumDate={
+              new Date(new Date().setFullYear(new Date().getFullYear() - 100))
+            }
+          />
+        )}
+        {loading ? (
+          <ActivityIndicator />
+        ) : (
+          <Text style={styles.nextButton} onPress={onNext}>
+            Next
+          </Text>
+        )}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
+  container: { flex: 1 },
+  scrollContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
   title: { fontSize: 24, textAlign: 'center', marginBottom: 16 },
-  input: { borderWidth: 1, borderColor: '#ccc', marginVertical: 8, padding: 8 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    marginVertical: 8,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#f9f9f9',
+  },
+  label: {
+    fontSize: 16,
+    marginVertical: 8,
+    color: '#333',
+  },
+  datePickerButton: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: '#f9f9f9',
+    marginBottom: 16,
+  },
+  datePickerText: {
+    fontSize: 16,
+    color: '#333',
+    textAlign: 'center',
+  },
+  nextButton: {
+    color: 'white',
+    fontSize: 18,
+    marginVertical: 12,
+    textAlign: 'center',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    overflow: 'hidden',
+  },
   error: { color: 'red', textAlign: 'center', marginTop: 10 },
 });

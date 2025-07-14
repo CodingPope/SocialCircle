@@ -1,273 +1,277 @@
+// src/screens/Main/CreateEventScreen.js
+
 import React, { useState } from 'react';
 import {
-  StyleSheet,
   View,
-  ScrollView,
-  TouchableOpacity,
   Text,
   TextInput,
+  TouchableOpacity,
   Image,
+  Alert,
+  StyleSheet,
+  ScrollView,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Picker } from '@react-native-picker/picker';
-import RangeSlider from 'rn-range-slider';
+import * as ImagePicker from 'expo-image-picker';
 import {
-  addDoc,
+  getFirestore,
   collection,
-  setDoc,
+  addDoc,
+  Timestamp,
+  updateDoc,
   doc,
-  serverTimestamp,
+  arrayUnion,
 } from 'firebase/firestore';
-import { auth, db } from '../../firebase/config';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { useAuth } from '../../context/AuthContext';
 
-// Example geocoding helper function (you must implement this)
-async function geocodeAddress(address) {
-  // For example, call Google Geocoding API:
-  // const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=YOUR_API_KEY`);
-  // const data = await response.json();
-  // if (data.status === "OK") {
-  //   const location = data.results[0].geometry.location;
-  //   return { latitude: location.lat, longitude: location.lng };
-  // } else {
-  //   throw new Error('Geocoding error');
-  // }
-  // For demo purposes, return a fixed coordinate:
-  return { latitude: 39.75, longitude: -105.0 };
-}
+const categoryOptions = [
+  'Hiking',
+  'Surf boarding',
+  'Volleyball',
+  'Bar hopping',
+  'Coffee',
+  'Dog walk',
+  'Run',
+  'Picnic',
+  'Game night',
+  'Board games',
+  'Book club',
+  'Workshop',
+  'Networking',
+  'Yoga',
+  'Cooking class',
+  'Movie night',
+  'Live music',
+  'Art exhibit',
+  'Photography walk',
+];
+import { GOOGLE_MAPS_API_KEY } from '@env';
 
-export default function CreateEventScreen({ navigation, onClose, onSuccess }) {
-  const [bannerUri, setBannerUri] = useState(null);
+export default function CreateEventScreen({ location, onCancel, onSuccess }) {
+  const { user } = useAuth();
+  const db = getFirestore();
+  const storage = getStorage();
+
+  const [imageUri, setImageUri] = useState(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('Hiking');
-  const [address, setAddress] = useState(''); // User-entered address
   const [date, setDate] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [attendanceCap, setAttendanceCap] = useState('');
-  const [ageRange, setAgeRange] = useState({ min: 18, max: 99 });
-  const [privacySetting, setPrivacySetting] = useState('Public');
+  const [privacy, setPrivacy] = useState('none');
+  const [ageMin, setAgeMin] = useState('18');
+  const [ageMax, setAgeMax] = useState('99');
+  const [category, setCategory] = useState('');
+  const [capacity, setCapacity] = useState(''); // New capacity state as string
+  const [uploading, setUploading] = useState(false);
+  const [manualAddress, setManualAddress] = useState('');
+  const [manualLocation, setManualLocation] = useState(null);
 
-  // Dropdown options (or use a custom dropdown component as before)
-  const categoryOptions = [
-    { label: 'Hiking', value: 'Hiking' },
-    { label: 'Brunch', value: 'Brunch' },
-    { label: 'Movies', value: 'Movies' },
-    { label: 'Volleyball', value: 'Volleyball' },
-  ];
-  const privacyOptions = [
-    { label: 'Public', value: 'Public' },
-    { label: 'Friends Only', value: 'Friends' },
-    { label: 'Private', value: 'Private' },
-  ];
-
-  const handleUploadBanner = () => {
-    // Integrate your image picker here.
-    setBannerUri('https://via.placeholder.com/400x200.png?text=Banner');
-  };
-
-  const onChangeDate = (event, selectedDate) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      const now = new Date();
-      const maxDate = new Date(now);
-      maxDate.setDate(now.getDate() + 3);
-      if (selectedDate > maxDate) {
-        alert('Event date cannot be more than 3 days in advance.');
-        setDate(maxDate);
-      } else {
-        setDate(selectedDate);
-      }
-    }
-  };
-
-  // Range slider handlers
-  const renderThumb = () => <View style={styles.sliderThumb} />;
-  const renderRail = () => <View style={styles.sliderRail} />;
-  const renderRailSelected = () => <View style={styles.sliderRailSelected} />;
-  const renderLabel = (value) => (
-    <Text style={styles.sliderLabel}>{value}</Text>
-  );
-  const renderNotch = () => <View style={styles.sliderNotch} />;
-  const handleValueChange = (low, high) => {
-    if (ageRange.min !== low || ageRange.max !== high) {
-      setAgeRange({ min: low, max: high });
-    }
-  };
-
-  // New create event handler that includes geocoding and group chat creation
-  const handleCreateEvent = async () => {
+  // Geocode address to lat/lng
+  const handleGeocode = async () => {
+    if (!manualAddress.trim()) return Alert.alert('Enter an address');
     try {
-      // Convert address to coordinates
-      const coordinates = await geocodeAddress(address);
-
-      // Gather event data
-      const eventData = {
-        bannerUri,
-        title,
-        description,
-        category,
-        address, // Store the address string
-        coordinates, // { latitude, longitude }
-        date,
-        attendanceCap,
-        ageRange,
-        privacySetting,
-        createdAt: serverTimestamp(),
-      };
-
-      // Create event document in Firestore
-      const eventDocRef = await addDoc(collection(db, 'events'), eventData);
-
-      // Create a group chat document for this event
-      await setDoc(doc(db, 'eventChats', eventDocRef.id), {
-        eventId: eventDocRef.id,
-        messages: [], // Initialize with empty messages array
-        createdAt: serverTimestamp(),
-      });
-
-      if (onSuccess) {
-        onSuccess();
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+          manualAddress
+        )}&key=${GOOGLE_MAPS_API_KEY}`
+      );
+      const json = await res.json();
+      if (json.status === 'OK') {
+        const loc = json.results[0].geometry.location;
+        setManualLocation({ latitude: loc.lat, longitude: loc.lng });
+        Alert.alert('Location found!', 'Pin will be placed on map.');
       } else {
-        navigation.navigate('Map');
+        Alert.alert('Address not found');
       }
-    } catch (error) {
-      console.error('Error creating event:', error);
-      alert('There was an error creating your event. Please try again.');
+    } catch (err) {
+      Alert.alert('Error finding address');
+    }
+  };
+
+  const pickImage = async () => {
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.Images,
+      quality: 0.7,
+    });
+    if (!res.cancelled) setImageUri(res.uri);
+  };
+
+  const handleCreate = async () => {
+    if (!title.trim()) return Alert.alert('Title is required');
+    if (!category) return Alert.alert('Please select a category');
+    if (date - new Date() > 7 * 24 * 60 * 60 * 1000)
+      return Alert.alert('Event must be within 7 days');
+    if (
+      (privacy === 'female-only' && user.gender !== 'female') ||
+      (privacy === 'male-only' && user.gender !== 'male')
+    ) {
+      return Alert.alert('You can only create an event for your own gender');
+    }
+    let eventLocation = location;
+    if (manualLocation) eventLocation = manualLocation;
+
+    setUploading(true);
+    let imageUrl = '';
+
+    if (imageUri) {
+      try {
+        const blob = await fetch(imageUri).then((r) => r.blob());
+        const storageRef = ref(storage, `events/${user.uid}/${Date.now()}`);
+        await uploadBytes(storageRef, blob);
+        imageUrl = await getDownloadURL(storageRef);
+      } catch (err) {
+        console.warn(err);
+        Alert.alert('Image upload failed');
+        setUploading(false);
+        return;
+      }
+    }
+
+    try {
+      const capacityNum = capacity.trim() === '' ? 0 : parseInt(capacity);
+      const docRef = await addDoc(collection(db, 'events'), {
+        ownerId: user.uid,
+        title: title.trim(),
+        description: description.trim(),
+        date: Timestamp.fromDate(date),
+        privacy,
+        ageRange: [parseInt(ageMin), parseInt(ageMax)],
+        category,
+        imageUrl,
+        location: eventLocation,
+        capacity: capacityNum, // Add capacity to event document
+        createdAt: Timestamp.now(),
+      });
+      await updateDoc(doc(db, 'users', user.uid), {
+        createdEvents: arrayUnion(docRef.id),
+      });
+      onSuccess(eventLocation);
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Failed to create event');
+    } finally {
+      setUploading(false);
     }
   };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {/* Banner Upload */}
-      <TouchableOpacity
-        style={styles.bannerContainer}
-        onPress={handleUploadBanner}
-      >
-        {bannerUri ? (
-          <Image source={{ uri: bannerUri }} style={styles.bannerImage} />
-        ) : (
-          <Text style={styles.bannerText}>Tap to upload banner</Text>
-        )}
+      {/* Preview at top */}
+      {imageUri && (
+        <Image source={{ uri: imageUri }} style={styles.previewLarge} />
+      )}
+      <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
+        <Text>{imageUri ? 'Change Photo' : 'Add Photo'}</Text>
       </TouchableOpacity>
 
-      {/* Title, Description, and Address */}
+      <Text style={styles.label}>Title</Text>
       <TextInput
         style={styles.input}
-        placeholder='Event Title'
+        placeholder='Event title'
         value={title}
         onChangeText={setTitle}
       />
+
+      <Text style={styles.label}>Description</Text>
       <TextInput
-        style={[styles.input, { height: 100 }]}
-        placeholder='Event Description'
+        style={[styles.input, styles.textArea]}
+        placeholder='What’s your event about?'
         value={description}
         onChangeText={setDescription}
         multiline
       />
+
+      <Text style={styles.label}>Or enter address manually</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <TextInput
+          style={[styles.input, { flex: 1 }]}
+          placeholder='Address'
+          value={manualAddress}
+          onChangeText={setManualAddress}
+        />
+        <TouchableOpacity style={styles.button} onPress={handleGeocode}>
+          <Text style={styles.buttonText}>Find</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.label}>Date & Time</Text>
+      <DateTimePicker
+        value={date}
+        mode='datetime'
+        display='default'
+        onChange={(_, d) => d && setDate(d)}
+      />
+
+      <Text style={styles.label}>Privacy</Text>
+      <View style={styles.row}>
+        {['none', 'female-only', 'male-only'].map((p) => (
+          <TouchableOpacity key={p} onPress={() => setPrivacy(p)}>
+            <Text style={privacy === p ? styles.selected : styles.option}>
+              {p === 'none'
+                ? 'Public'
+                : p === 'female-only'
+                ? 'Women Only'
+                : 'Men Only'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Text style={styles.label}>Age Range</Text>
+      <View style={styles.row}>
+        <TextInput
+          style={[styles.input, styles.ageInput]}
+          keyboardType='numeric'
+          value={ageMin}
+          onChangeText={setAgeMin}
+        />
+        <Text style={{ alignSelf: 'center' }}>to</Text>
+        <TextInput
+          style={[styles.input, styles.ageInput]}
+          keyboardType='numeric'
+          value={ageMax}
+          onChangeText={setAgeMax}
+        />
+      </View>
+
+      <Text style={styles.label}>Category</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.chipContainer}
+      >
+        {categoryOptions.map((cat) => (
+          <TouchableOpacity
+            key={cat}
+            onPress={() => setCategory(cat)}
+            style={category === cat ? styles.selectedChip : styles.chip}
+          >
+            <Text>{cat}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <Text style={styles.label}>Capacity (optional)</Text>
       <TextInput
         style={styles.input}
-        placeholder='Enter Address'
-        value={address}
-        onChangeText={setAddress}
+        placeholder='Leave empty for unlimited'
+        keyboardType='numeric'
+        value={capacity}
+        onChangeText={setCapacity}
       />
 
-      {/* Category Selector */}
-      <View style={styles.selectorContainer}>
-        <Text style={styles.selectorLabel}>Category:</Text>
-        <Picker
-          selectedValue={category}
-          style={[styles.picker, { color: '#000' }]}
-          itemStyle={{ color: '#000' }}
-          onValueChange={(itemValue) => setCategory(itemValue)}
-        >
-          {categoryOptions.map((option) => (
-            <Picker.Item
-              key={option.value}
-              label={option.label}
-              value={option.value}
-              color='#000'
-            />
-          ))}
-        </Picker>
-      </View>
-
-      {/* Date & Time Selector */}
       <TouchableOpacity
-        style={styles.dateButton}
-        onPress={() => setShowDatePicker(true)}
+        style={[styles.button, uploading && styles.buttonDisabled]}
+        onPress={handleCreate}
+        disabled={uploading}
       >
-        <Text style={styles.dateButtonText}>
-          Date & Time: {date.toLocaleString()}
+        <Text style={styles.buttonText}>
+          {uploading ? 'Creating...' : 'Create Event'}
         </Text>
       </TouchableOpacity>
-      {showDatePicker && (
-        <DateTimePicker
-          value={date}
-          mode='datetime'
-          display='default'
-          onChange={onChangeDate}
-          minimumDate={new Date()}
-          maximumDate={(() => {
-            const now = new Date();
-            const max = new Date(now);
-            max.setDate(now.getDate() + 3);
-            return max;
-          })()}
-        />
-      )}
 
-      {/* Attendance Cap */}
-      <TextInput
-        style={[styles.input, styles.halfWidthInput]}
-        placeholder='Attendance Cap'
-        value={attendanceCap}
-        onChangeText={setAttendanceCap}
-        keyboardType='numeric'
-      />
-
-      {/* Age Range Slider */}
-      <View style={styles.sliderContainer}>
-        <Text style={styles.sliderContainerLabel}>
-          Age Range: {ageRange.min} - {ageRange.max}
-        </Text>
-        <RangeSlider
-          min={18}
-          max={99}
-          low={ageRange.min}
-          high={ageRange.max}
-          step={1}
-          renderThumb={renderThumb}
-          renderRail={renderRail}
-          renderRailSelected={renderRailSelected}
-          renderLabel={renderLabel}
-          renderNotch={renderNotch}
-          onValueChanged={handleValueChange}
-        />
-      </View>
-
-      {/* Privacy Selector */}
-      <View style={styles.selectorContainer}>
-        <Text style={styles.selectorLabel}>Privacy:</Text>
-        <Picker
-          selectedValue={privacySetting}
-          style={[styles.picker, { color: '#000' }]}
-          itemStyle={{ color: '#000' }}
-          onValueChange={(itemValue) => setPrivacySetting(itemValue)}
-        >
-          {privacyOptions.map((option) => (
-            <Picker.Item
-              key={option.value}
-              label={option.label}
-              value={option.value}
-              color='#000'
-            />
-          ))}
-        </Picker>
-      </View>
-
-      {/* Create Event Button */}
-      <TouchableOpacity style={styles.createButton} onPress={handleCreateEvent}>
-        <Text style={styles.createButtonText}>Create Event</Text>
+      <TouchableOpacity onPress={onCancel} style={styles.cancel}>
+        <Text>Cancel</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -276,119 +280,67 @@ export default function CreateEventScreen({ navigation, onClose, onSuccess }) {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
-    backgroundColor: '#f9f9f9',
+    marginTop: 60,
+    backgroundColor: '#fff',
+    flexGrow: 1,
   },
-  // Banner styles
-  bannerContainer: {
+  previewLarge: {
+    width: '100%',
     height: 200,
-    backgroundColor: '#eee',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  bannerImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 12,
-  },
-  bannerText: {
-    fontSize: 18,
-    color: '#888',
-  },
-  // Input styles
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  halfWidthInput: {
-    width: '50%',
-  },
-  // Selector styles
-  selectorContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    marginBottom: 20,
-    overflow: 'hidden',
-  },
-  selectorLabel: {
-    fontSize: 16,
-    padding: 10,
-    backgroundColor: '#f0f0f0',
-  },
-  picker: {
-    height: 50,
-    width: '100%',
-  },
-  // Date button styles
-  dateButton: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    padding: 16,
-    marginBottom: 20,
-    alignItems: 'center',
-  },
-  dateButtonText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  // Slider styles (for age range)
-  sliderContainer: {
-    marginBottom: 20,
-  },
-  sliderContainerLabel: {
-    fontSize: 16,
+    borderRadius: 8,
     marginBottom: 10,
   },
-  sliderThumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#007BFF',
-  },
-  sliderRail: {
-    flex: 1,
-    height: 4,
-    backgroundColor: '#ddd',
-    borderRadius: 2,
-  },
-  sliderRailSelected: {
-    height: 4,
-    backgroundColor: '#007BFF',
-    borderRadius: 2,
-  },
-  sliderLabel: {
-    fontSize: 12,
-    color: '#333',
-    textAlign: 'center',
-  },
-  sliderNotch: {
-    width: 8,
-    height: 8,
-    backgroundColor: '#007BFF',
-    borderRadius: 4,
-  },
-  // Create button styles
-  createButton: {
-    backgroundColor: '#007BFF',
-    borderRadius: 16,
-    padding: 16,
+  imagePicker: {
+    marginBottom: 15,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
     alignItems: 'center',
-    marginBottom: 40,
   },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  label: { fontWeight: 'bold', marginTop: 15 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    padding: 10,
+    marginTop: 5,
   },
+  textArea: { height: 80, textAlignVertical: 'top' },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  option: { padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 6 },
+  selected: {
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderRadius: 6,
+    backgroundColor: '#e6f0ff',
+  },
+  ageInput: { width: 60, textAlign: 'center' },
+  chipContainer: { marginVertical: 10 },
+  chip: {
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 16,
+    marginRight: 10,
+  },
+  selectedChip: {
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    borderRadius: 16,
+    backgroundColor: '#e6f0ff',
+    marginRight: 10,
+  },
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 6,
+    marginTop: 25,
+    alignItems: 'center',
+  },
+  buttonDisabled: { backgroundColor: '#99cfff' },
+  buttonText: { color: '#fff', fontWeight: 'bold' },
+  cancel: { marginTop: 15, alignItems: 'center' },
 });

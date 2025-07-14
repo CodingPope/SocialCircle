@@ -1,272 +1,401 @@
-import React from 'react';
+// src/screens/Main/ProfileScreen.js
+import React, { useState, useContext, useEffect } from 'react';
 import {
+  SafeAreaView,
   View,
   Text,
   Image,
-  StyleSheet,
   TouchableOpacity,
   FlatList,
-  SafeAreaView,
+  StyleSheet,
+  Share,
+  Modal,
+  Alert,
+  TextInput,
 } from 'react-native';
-import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
-import Icon from 'react-native-vector-icons/Ionicons';
-import EventCard from '../../components/EventCard';
+import { useAuth } from '../../context/AuthContext';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { AuthContext } from '../../context/AuthContext';
+import { signOut } from 'firebase/auth';
+import {
+  auth,
+  getUserData,
+  updateUserData,
+  uploadProfileImage,
+} from '../../firebase/config';
+import { useMyEvents } from '../../hooks/useMyEvents';
 
-const Tab = createMaterialTopTabNavigator();
+export default function ProfileScreen({ navigation }) {
+  const { user } = useAuth();
+  const myEvents = useMyEvents(user?.uid || '');
+  const now = new Date();
 
-// Mock user data
-const user = {
-  name: 'Joe Pope',
-  verified: true,
-  verifiedBadge:
-    'https://assets.streamlinehq.com/image/private/w_300,h_300,ar_1/f_auto/v1/icons/money/verified-check-ca7rmvb03mgm9cka4j1lc.png/verified-check-tuxwv4rjfpcddhyth8hamp.png?_a=DAJFJtWIZAAC',
-  friendsCount: 135,
-  eventsAttended: 200, // Example: how many total events this user has attended
-  userSince: 'Aug 2024',
-  bio: 'Simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry’s standard dummy...',
-  avatar:
-    'https://wallpapers.com/images/hd/cool-profile-pictures-panda-man-gsl2ntkjj3hrk84s.jpg',
-  rating: 5, // out of 5
-};
+  // Partition events
+  const currentMeets = myEvents.filter((ev) => ev.startAt.toDate() >= now);
+  const pastMeets = myEvents.filter((ev) => ev.startAt.toDate() < now);
+  const archiveMeets = [];
 
-// Mock events data (defined globally)
-const mockEvents = [
-  {
-    id: '1',
-    title: 'Title of event 1',
-    details: 'Details about event 1',
-  },
-  {
-    id: '2',
-    title: 'Title of event 2',
-    details: 'Details about event 2',
-  },
-  {
-    id: '3',
-    title: 'Title of event 3',
-    details: 'Details about event 3',
-  },
-];
+  const tabs = ['Current', 'Past', 'Archive'];
+  const [activeTab, setActiveTab] = useState('Current');
 
-// Screens for each tab
-function CurrentMeetsScreen() {
+  const [showFullBio, setShowFullBio] = useState(false);
+  const MAX_BIO_LENGTH = 100;
+
+  const [bio, setBio] = useState('');
+  const [friendCount, setFriendCount] = useState(0);
+  const [eventCount, setEventCount] = useState(0);
+  const [profileImage, setProfileImage] = useState(null);
+  const [isEditing, setIsEditing] = useState(false); // Track edit mode
+
+  const fullName = `${user.firstName} ${user.lastName}`;
+  const avatarURL = user.avatarURL || 'https://example.com/default-avatar.png';
+  const rating = user.rating || 4.5;
+  const userSince =
+    user.createdAt && typeof user.createdAt.toDate === 'function'
+      ? user.createdAt
+          .toDate()
+          .toLocaleString('default', { month: 'short', year: 'numeric' })
+      : '';
+
+  const eventsCount = myEvents.length;
+  const friendsCount = Array.isArray(user.friends) ? user.friends.length : 0;
+
+  // sidebar menu visibility
+  const [menuVisible, setMenuVisible] = useState(false);
+
+  useEffect(() => {
+    // Fetch user data on mount
+    const fetchUserData = async () => {
+      const data = await getUserData(user.uid);
+      setBio(data.bio || '');
+      setFriendCount(data.friendCount || 0);
+      setEventCount(data.eventCount || 0);
+      setProfileImage(data.profileImage || null);
+    };
+
+    fetchUserData();
+  }, [user.uid]);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigation.replace('Auth');
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Logout failed', err.message);
+    }
+  };
+
+  const data =
+    activeTab === 'Current'
+      ? currentMeets
+      : activeTab === 'Past'
+      ? pastMeets
+      : archiveMeets;
+
+  const truncatedBio =
+    bio.length > MAX_BIO_LENGTH ? bio.slice(0, MAX_BIO_LENGTH) + '...' : bio;
+
+  const onShare = async (item) => {
+    try {
+      await Share.share({
+        message: `Join my event: ${item.title}\n\n${item.description}`,
+      });
+    } catch (err) {
+      console.warn('Share error', err);
+    }
+  };
+
+  const handleBioUpdate = async () => {
+    await updateUserData(user.uid, { bio });
+    alert('Bio updated successfully!');
+  };
+
+  const handleImageUpload = async () => {
+    const newImage = await uploadProfileImage(user.uid);
+    setProfileImage(newImage);
+    alert('Profile image updated successfully!');
+  };
+
+  const handleSaveChanges = async () => {
+    await updateUserData(user.uid, { bio });
+    setIsEditing(false);
+    alert('Changes saved successfully!');
+  };
+
   return (
-    <FlatList
-      data={mockEvents}
-      keyExtractor={(item) => item.id}
-      renderItem={({ item }) => (
-        <EventCard title={item.title} details={item.details} />
-      )}
-      contentContainerStyle={{ padding: 16 }}
-    />
-  );
-}
+    <SafeAreaView style={styles.safe}>
+      {/* Sidebar Modal from right */}
+      <Modal
+        visible={menuVisible}
+        animationType='slide'
+        transparent
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPressOut={() => setMenuVisible(false)}
+        >
+          <View style={styles.sidebar}>
+            <TouchableOpacity style={styles.sidebarItem} onPress={handleLogout}>
+              <Text style={styles.sidebarText}>Log Out</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.sidebarItem}
+              onPress={() => setIsEditing(true)}
+            >
+              <Text style={styles.sidebarText}>Edit Profile</Text>
+            </TouchableOpacity>
+            {/* more items here */}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
-function PastScreen() {
-  return (
-    <FlatList
-      data={mockEvents}
-      keyExtractor={(item) => item.id}
-      renderItem={({ item }) => (
-        <EventCard title={item.title} details={item.details} />
-      )}
-      contentContainerStyle={{ padding: 16 }}
-    />
-  );
-}
-
-function ArchiveScreen() {
-  return (
-    <FlatList
-      data={mockEvents}
-      keyExtractor={(item) => item.id}
-      renderItem={({ item }) => (
-        <EventCard title={item.title} details={item.details} />
-      )}
-      contentContainerStyle={{ padding: 16 }}
-    />
-  );
-}
-
-export default function ProfileScreen() {
-  const stars = '★'.repeat(user.rating);
-
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Profile</Text>
-        <TouchableOpacity style={styles.hamburgerButton}>
-          <Icon name='menu' size={30} color='#000' />
+      {/* Top nav */}
+      <View style={styles.navBar}>
+        <Text style={styles.navTitle}>Profile</Text>
+        <TouchableOpacity onPress={() => setMenuVisible(true)}>
+          <Ionicons name='menu' size={28} />
         </TouchableOpacity>
       </View>
 
-      {/* Profile Info */}
-      <View style={styles.profileInfo}>
-        <View style={styles.headerContent}>
-          <View style={styles.headerLeft}>
-            <Image source={{ uri: user.avatar }} style={styles.avatar} />
-            <View style={styles.userInfo}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={styles.userName}>{user.name}</Text>
-                {user.verified && (
-                  <Image
-                    source={{ uri: user.verifiedBadge }}
-                    style={styles.verifiedBadge}
-                  />
-                )}
-              </View>
-              <Text style={styles.stars}>{stars}</Text>
-              <Text style={styles.userSince}>User since {user.userSince}</Text>
-            </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={isEditing ? handleImageUpload : null}
+          style={styles.imageContainer}
+        >
+          <Image
+            source={profileImage ? { uri: profileImage } : { uri: avatarURL }}
+            style={styles.profileImage}
+          />
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <View style={styles.nameRow}>
+            <Text style={styles.name}>{fullName}</Text>
+            {user.isVerified && (
+              <Image
+                source={{ uri: user.verifiedBadgeURL }}
+                style={styles.badge}
+              />
+            )}
           </View>
-
-          {/* Example metrics: Events Attended and Friends */}
-          <View style={styles.profileMetrics}>
-            <Text style={styles.metricText}>
-              Events{'\n'}
-              {user.eventsAttended}
-            </Text>
-            <Text style={styles.metricText}>
-              Friends{'\n'}
-              {user.friendsCount.toLocaleString()}
-            </Text>
+          <Text style={styles.stars}>
+            {'★'.repeat(rating) + '☆'.repeat(5 - rating)}
+          </Text>
+          <Text style={styles.since}>User since {userSince}</Text>
+        </View>
+        <View style={styles.statsRow}>
+          <View style={styles.stat}>
+            <Text style={styles.statValue}>{eventsCount}</Text>
+            <Text style={styles.statLabel}>Events</Text>
+          </View>
+          <View style={styles.stat}>
+            <Text style={styles.statValue}>{friendsCount}</Text>
+            <Text style={styles.statLabel}>Friends</Text>
           </View>
         </View>
       </View>
 
       {/* Bio */}
-      <View style={styles.bioSection}>
-        <Text style={styles.bioText}>
-          {user.bio}
-          <Text style={styles.viewAllLink}> View all</Text>
-        </Text>
+      <View style={styles.bioContainer}>
+        <TextInput
+          style={[styles.bioInput, isEditing && styles.bioInputEditing]}
+          value={bio}
+          onChangeText={setBio}
+          editable={isEditing}
+          placeholder='Write your bio here...'
+          multiline
+        />
+        {!showFullBio && bio.length > MAX_BIO_LENGTH && (
+          <TouchableOpacity onPress={() => setShowFullBio(true)}>
+            <Text style={styles.viewAll}>View all</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Edit and Save Buttons */}
+      <View style={styles.buttonRow}>
+        {isEditing && (
+          <TouchableOpacity
+            onPress={handleSaveChanges}
+            style={styles.saveButton}
+          >
+            <Text style={styles.saveButtonText}>Save Changes</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Tabs */}
-      <View style={styles.tabsContainer}>
-        <Tab.Navigator
-          screenOptions={{
-            tabBarLabelStyle: { fontSize: 14, fontWeight: '600' },
-            tabBarIndicatorStyle: { backgroundColor: 'black' },
-            tabBarStyle: { backgroundColor: '#f0f0f0' },
-          }}
-        >
-          <Tab.Screen name='Current meets' component={CurrentMeetsScreen} />
-          <Tab.Screen name='Past' component={PastScreen} />
-          <Tab.Screen name='Archive' component={ArchiveScreen} />
-        </Tab.Navigator>
+      <View style={styles.tabRow}>
+        {tabs.map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            onPress={() => setActiveTab(tab)}
+            style={[
+              styles.tabButton,
+              activeTab === tab && styles.tabButtonActive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                activeTab === tab && styles.tabTextActive,
+              ]}
+            >
+              {tab}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
-    </View>
+
+      {/* Events List */}
+      <FlatList
+        data={data}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.list}
+        renderItem={({ item }) => (
+          <View style={styles.eventCard}>
+            <View style={styles.eventImagePlaceholder} />
+            <View style={styles.eventInfo}>
+              <Text style={styles.eventTitle}>{item.title}</Text>
+              <Text style={styles.eventDetails}>{item.description}</Text>
+            </View>
+            <TouchableOpacity onPress={() => onShare(item)}>
+              <Text style={styles.share}>Share</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  /** Container for the entire screen */
-  container: {
+  safe: { flex: 1, backgroundColor: '#fff' },
+  modalOverlay: {
     flex: 1,
-    backgroundColor: 'white',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.3)',
   },
-
-  /** Header bar with title and menu icon */
+  sidebar: {
+    width: 240,
+    backgroundColor: '#fff',
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    elevation: 5,
+  },
+  sidebarItem: { paddingVertical: 15 },
+  sidebarText: { fontSize: 16, fontWeight: 'bold' },
+  navBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    paddingVertical: 12,
+  },
+  navTitle: { fontSize: 20, fontWeight: 'bold' },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    backgroundColor: 'white',
-    elevation: 2, // Shadow effect on Android
-    marginTop: 25, // Optional: push it down a bit on iOS
+    marginHorizontal: 16,
+    marginTop: 8,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  imageContainer: {
+    marginBottom: 20,
   },
-  hamburgerButton: {
-    padding: 10,
+  profileImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
   },
-
-  /** Profile info block (avatar, name, metrics) */
-  profileInfo: {
-    backgroundColor: 'white',
-    elevation: 2, // Shadow effect
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 1,
-  },
-  avatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 15,
-    marginRight: 10,
-  },
-  userInfo: {
-    flexShrink: 1,
-  },
-  userName: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginRight: 5,
-  },
-  verifiedBadge: {
-    width: 20,
-    height: 20,
-  },
-  stars: {
-    fontSize: 16,
-    color: '#000',
-    marginVertical: 4,
-  },
-  userSince: {
-    fontSize: 12,
-    color: '#555',
-  },
-
-  /** Metrics (Events Attended, Friends) */
-  profileMetrics: {
-    flexDirection: 'row',
-  },
-  metricText: {
-    textAlign: 'center',
-    fontWeight: '600',
-    fontSize: 14,
-    marginLeft: 20,
-  },
-
-  /** Bio card */
-  bioSection: {
-    backgroundColor: '#ccc',
-    margin: 10,
+  headerCenter: { flex: 1, marginLeft: 12 },
+  nameRow: { flexDirection: 'row', alignItems: 'center' },
+  name: { fontSize: 22, fontWeight: 'bold' },
+  badge: { width: 20, height: 20, marginLeft: 4 },
+  stars: { marginTop: 4 },
+  since: { marginTop: 4, color: '#666' },
+  statsRow: { flexDirection: 'row', alignItems: 'center' },
+  stat: { alignItems: 'center', marginLeft: 16 },
+  statValue: { fontSize: 18, fontWeight: 'bold' },
+  statLabel: { color: '#666' },
+  bioContainer: {
+    backgroundColor: '#f0f0f0',
+    margin: 16,
     padding: 12,
-    borderRadius: 10,
+    borderRadius: 8,
+  },
+  bioInput: {
+    width: '100%',
+    padding: 10,
+    textAlignVertical: 'top',
+  },
+  bioInputEditing: {
+    borderWidth: 1,
+    borderColor: 'gray',
+    borderRadius: 5,
+    backgroundColor: '#f9f9f9',
+  },
+  disabledInput: {
+    backgroundColor: '#e0e0e0',
+  },
+  viewAll: { color: '#0066cc', marginTop: 4 },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginTop: 8,
+  },
+  editButton: {
+    backgroundColor: '#0066cc',
+    borderRadius: 5,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  editButtonText: { color: '#fff', fontWeight: 'bold' },
+  saveButton: {
+    backgroundColor: '#28a745',
+    borderRadius: 5,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  saveButtonText: { color: '#fff', fontWeight: 'bold' },
+  tabRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginHorizontal: 16,
+    borderBottomWidth: 1,
+    borderColor: '#ddd',
+  },
+  tabButton: { paddingVertical: 12 },
+  tabButtonActive: { borderBottomWidth: 2, borderColor: '#000' },
+  tabText: { color: '#666' },
+  tabTextActive: { color: '#000', fontWeight: 'bold' },
+  list: { paddingBottom: 16 },
+  eventCard: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginVertical: 8,
+    padding: 12,
+    borderRadius: 8,
     shadowColor: '#000',
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 5,
     elevation: 2,
   },
-  bioText: {
-    fontSize: 14,
-    color: '#333',
+  eventImagePlaceholder: {
+    width: 50,
+    height: 50,
+    backgroundColor: '#ddd',
+    borderRadius: 4,
+    marginRight: 12,
   },
-  viewAllLink: {
-    color: 'blue',
-    textDecorationLine: 'underline',
-  },
-
-  /** Tab area */
-  tabsContainer: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
+  eventInfo: { flex: 1 },
+  eventTitle: { fontSize: 16, fontWeight: '600' },
+  eventDetails: { color: '#666', marginTop: 4 },
+  share: { color: '#0066cc' },
 });

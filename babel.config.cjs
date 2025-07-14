@@ -9,6 +9,7 @@ module.exports = {
         path: '.env',
         allowUndefined: true,
       },
+      'react-native-reanimated/plugin', // ← must be last
     ],
   ],
 };
