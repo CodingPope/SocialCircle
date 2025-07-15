@@ -61,11 +61,12 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const [ageMin, setAgeMin] = useState('18');
   const [ageMax, setAgeMax] = useState('99');
   const [category, setCategory] = useState('');
-  const [capacity, setCapacity] = useState(''); // New capacity state as string
+  const [capacity, setCapacity] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
+
   const [manualAddress, setManualAddress] = useState('');
   const [manualLocation, setManualLocation] = useState(null);
-
   // Geocode address to lat/lng
   const handleGeocode = async () => {
     if (!manualAddress.trim()) return Alert.alert('Enter an address');
@@ -88,12 +89,55 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     }
   };
 
-  const pickImage = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.Images,
-      quality: 0.7,
-    });
-    if (!res.cancelled) setImageUri(res.uri);
+  //--------------------
+  const pickImageAndUpload = async () => {
+    try {
+      // Request permission to access the media library
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        return Alert.alert(
+          'Permission required',
+          'You need to grant permission to access the media library.'
+        );
+      }
+
+      // Launch the image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Correct usage of MediaTypeOptions
+        quality: 0.7,
+        allowsEditing: true,
+      });
+
+      if (!result.canceled) {
+        const { uri } = result.assets[0]; // Access the first asset from the result
+        setImageUri(uri);
+
+        try {
+          // Upload to Firebase Storage
+          const response = await fetch(uri);
+          if (!response.ok) {
+            throw new Error('Failed to fetch the image file');
+          }
+          const blob = await response.blob();
+          const storageRef = ref(storage, `event-images/${Date.now()}`);
+          const uploadTask = await uploadBytes(storageRef, blob);
+
+          // Get download URL and save to Firestore
+          const downloadURL = await getDownloadURL(uploadTask.ref);
+          setImageUrl(downloadURL);
+        } catch (networkError) {
+          console.error('Network error during image upload:', networkError);
+          Alert.alert(
+            'Network Error',
+            'Failed to upload image. Please check your internet connection and try again.'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Image upload error:', error);
+      Alert.alert('Error uploading image', error.message);
+    }
   };
 
   const handleCreate = async () => {
@@ -107,25 +151,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     ) {
       return Alert.alert('You can only create an event for your own gender');
     }
+
     let eventLocation = location;
     if (manualLocation) eventLocation = manualLocation;
 
     setUploading(true);
-    let imageUrl = '';
-
-    if (imageUri) {
-      try {
-        const blob = await fetch(imageUri).then((r) => r.blob());
-        const storageRef = ref(storage, `events/${user.uid}/${Date.now()}`);
-        await uploadBytes(storageRef, blob);
-        imageUrl = await getDownloadURL(storageRef);
-      } catch (err) {
-        console.warn(err);
-        Alert.alert('Image upload failed');
-        setUploading(false);
-        return;
-      }
-    }
 
     try {
       const capacityNum = capacity.trim() === '' ? 0 : parseInt(capacity);
@@ -137,9 +167,9 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         privacy,
         ageRange: [parseInt(ageMin), parseInt(ageMax)],
         category,
-        imageUrl,
+        imageUrl: imageUrl || null,
         location: eventLocation,
-        capacity: capacityNum, // Add capacity to event document
+        capacity: capacityNum,
         createdAt: Timestamp.now(),
       });
       await updateDoc(doc(db, 'users', user.uid), {
@@ -156,12 +186,20 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {/* Preview at top */}
-      {imageUri && (
+      {imageUri ? (
         <Image source={{ uri: imageUri }} style={styles.previewLarge} />
+      ) : (
+        <View style={styles.previewPlaceholder}>
+          <Text style={styles.placeholderText}>No Image Selected</Text>
+        </View>
       )}
-      <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
-        <Text>{imageUri ? 'Change Photo' : 'Add Photo'}</Text>
+      <TouchableOpacity
+        style={styles.addPhotoButton}
+        onPress={pickImageAndUpload}
+      >
+        <Text style={styles.addPhotoButtonText}>
+          {imageUri ? 'Change Photo' : 'Add Photo'}
+        </Text>
       </TouchableOpacity>
 
       <Text style={styles.label}>Title</Text>
@@ -233,7 +271,6 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
           onChangeText={setAgeMax}
         />
       </View>
-
       <Text style={styles.label}>Category</Text>
       <ScrollView
         horizontal
@@ -290,13 +327,30 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 10,
   },
-  imagePicker: {
+  previewPlaceholder: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  placeholderText: { color: '#aaa' },
+  addPhotoButton: {
     marginBottom: 15,
     padding: 10,
     borderWidth: 1,
     borderColor: '#ccc',
     borderRadius: 6,
     alignItems: 'center',
+    backgroundColor: '#007AFF',
+  },
+  addPhotoButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
   label: { fontWeight: 'bold', marginTop: 15 },
   input: {
@@ -307,6 +361,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   textArea: { height: 80, textAlignVertical: 'top' },
+  chipContainer: { marginVertical: 10 },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
   option: { padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 6 },
   selected: {
@@ -317,7 +372,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#e6f0ff',
   },
   ageInput: { width: 60, textAlign: 'center' },
-  chipContainer: { marginVertical: 10 },
   chip: {
     padding: 8,
     borderWidth: 1,

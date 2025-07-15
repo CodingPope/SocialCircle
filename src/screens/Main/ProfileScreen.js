@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { AuthContext } from '../../context/AuthContext';
 import { signOut } from 'firebase/auth';
 import {
@@ -24,6 +25,7 @@ import {
   uploadProfileImage,
 } from '../../firebase/config';
 import { useMyEvents } from '../../hooks/useMyEvents';
+import * as ImagePicker from 'expo-image-picker';
 
 export default function ProfileScreen({ navigation }) {
   const { user } = useAuth();
@@ -49,7 +51,9 @@ export default function ProfileScreen({ navigation }) {
 
   const fullName = `${user.firstName} ${user.lastName}`;
   const avatarURL = user.avatarURL || 'https://example.com/default-avatar.png';
-  const rating = user.rating || 4.5;
+  const rating = user.rating || 0;
+  const [ratingCount, setRatingCount] = useState(0);
+  const [verified, setVerified] = useState(false);
   const userSince =
     user.createdAt && typeof user.createdAt.toDate === 'function'
       ? user.createdAt
@@ -71,8 +75,11 @@ export default function ProfileScreen({ navigation }) {
       setFriendCount(data.friendCount || 0);
       setEventCount(data.eventCount || 0);
       setProfileImage(data.profileImage || null);
+      setRating(data.rating || 0);
+      setRatingCount(data.ratingCount || 0);
+      setVerified(data.verified || false);
+      console.log('Verified state:', data.verified); // Debugging line
     };
-
     fetchUserData();
   }, [user.uid]);
 
@@ -112,9 +119,48 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleImageUpload = async () => {
-    const newImage = await uploadProfileImage(user.uid);
-    setProfileImage(newImage);
-    alert('Profile image updated successfully!');
+    try {
+      // Request permission to access the photo library
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permissionResult.granted) {
+        alert('Permission to access the photo library is required!');
+        return;
+      }
+
+      // Open the image picker
+      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+
+      if (pickerResult.canceled) {
+        alert('No image selected.');
+        return;
+      }
+
+      // Upload the selected image
+      const imageUri = pickerResult.assets[0].uri;
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+
+      const newImage = await uploadProfileImage(user.uid, blob);
+
+      if (newImage) {
+        // Save the new image URL to Firestore
+        await updateUserData(user.uid, { profileImage: newImage });
+        setProfileImage(newImage);
+        alert('Profile image updated successfully!');
+      } else {
+        alert('Failed to upload image.');
+      }
+    } catch (error) {
+      console.error('Image upload failed:', error);
+      alert('Failed to update profile image. Please try again.');
+    }
   };
 
   const handleSaveChanges = async () => {
@@ -162,38 +208,43 @@ export default function ProfileScreen({ navigation }) {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={isEditing ? handleImageUpload : null}
-          style={styles.imageContainer}
-        >
-          <Image
-            source={profileImage ? { uri: profileImage } : { uri: avatarURL }}
-            style={styles.profileImage}
-          />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <View style={styles.nameRow}>
-            <Text style={styles.name}>{fullName}</Text>
-            {user.isVerified && (
+        <View style={styles.headerTop}>
+          <View style={styles.imageContainer}>
+            <TouchableOpacity onPress={isEditing ? handleImageUpload : null}>
               <Image
-                source={{ uri: user.verifiedBadgeURL }}
-                style={styles.badge}
+                source={{ uri: profileImage || avatarURL }}
+                style={styles.profileImage}
               />
-            )}
+            </TouchableOpacity>
           </View>
-          <Text style={styles.stars}>
-            {'★'.repeat(rating) + '☆'.repeat(5 - rating)}
-          </Text>
-          <Text style={styles.since}>User since {userSince}</Text>
-        </View>
-        <View style={styles.statsRow}>
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>{eventsCount}</Text>
-            <Text style={styles.statLabel}>Events</Text>
+          <View style={styles.infoContainer}>
+            <Text style={styles.name}>
+              {fullName}
+              {verified && (
+                <MaterialIcons name='verified' size={24} color='black' />
+              )}
+            </Text>
+            <Text style={styles.stat}>
+              {ratingCount === 0
+                ? '☆☆☆☆☆ (unrated)'
+                : `${
+                    '★'.repeat(Math.floor(rating)) +
+                    '☆'.repeat(5 - Math.floor(rating))
+                  } (${ratingCount})`}
+            </Text>
+            <Text style={styles.since}>User since {userSince}</Text>
           </View>
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>{friendsCount}</Text>
-            <Text style={styles.statLabel}>Friends</Text>
+          <View style={[styles.statContainer, styles.statSpacing]}>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>
+                {friendCount.toLocaleString()}
+              </Text>
+              <Text style={styles.statLabel}>Friends</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>{eventCount}</Text>
+              <Text style={styles.statLabel}>Events</Text>
+            </View>
           </View>
         </View>
       </View>
@@ -298,29 +349,56 @@ const styles = StyleSheet.create({
   },
   navTitle: { fontSize: 20, fontWeight: 'bold' },
   header: {
-    flexDirection: 'row',
+    padding: 16,
+    borderRadius: 8,
+  },
+  headerTop: {
+    flexDirection: 'row', // Align items horizontally
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 8,
   },
   imageContainer: {
-    marginBottom: 20,
+    marginRight: 16, // Space between image and text
   },
   profileImage: {
     width: 100,
     height: 100,
-    borderRadius: 50,
+    borderRadius: 15,
   },
   headerCenter: { flex: 1, marginLeft: 12 },
   nameRow: { flexDirection: 'row', alignItems: 'center' },
-  name: { fontSize: 22, fontWeight: 'bold' },
+  name: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#000',
+  },
   badge: { width: 20, height: 20, marginLeft: 4 },
   stars: { marginTop: 4 },
-  since: { marginTop: 4, color: '#666' },
-  statsRow: { flexDirection: 'row', alignItems: 'center' },
-  stat: { alignItems: 'center', marginLeft: 16 },
-  statValue: { fontSize: 18, fontWeight: 'bold' },
-  statLabel: { color: '#666' },
+  since: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  stat: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#000',
+    marginTop: 4,
+  },
+  statValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    textAlign: 'right', // Align the value to the right
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
   bioContainer: {
     backgroundColor: '#f0f0f0',
     margin: 16,
@@ -374,6 +452,16 @@ const styles = StyleSheet.create({
   tabText: { color: '#666' },
   tabTextActive: { color: '#000', fontWeight: 'bold' },
   list: { paddingBottom: 16 },
+  headerBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  statContainer: {
+    alignItems: 'flex-end',
+    marginLeft: 'auto',
+  },
+
   eventCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -398,4 +486,7 @@ const styles = StyleSheet.create({
   eventTitle: { fontSize: 16, fontWeight: '600' },
   eventDetails: { color: '#666', marginTop: 4 },
   share: { color: '#0066cc' },
+  verifiedIcon: {
+    marginLeft: 8,
+  },
 });

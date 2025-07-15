@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  TouchableWithoutFeedback,
+  Animated,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -57,55 +59,95 @@ const InterestSelector = ({ selectedInterests, setSelectedInterests }) => {
   );
 };
 
-const EventFilterWindow = ({ onApplyFilters }) => {
+const EventFilterWindow = ({ isVisible, onClose, onApplyFilters }) => {
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedInterests, setSelectedInterests] = useState([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const slideAnim = useRef(new Animated.Value(500)).current; // Start off-screen
+
+  useEffect(() => {
+    if (isVisible) {
+      Animated.timing(slideAnim, {
+        toValue: 0, // Slide to visible position
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(slideAnim, {
+        toValue: 500, // Slide off-screen
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [isVisible]);
+
+  if (!isVisible) return null;
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Filter Events</Text>
-
-      <Text style={styles.sectionTitle}>Date</Text>
-      <TouchableOpacity
-        style={styles.datePickerButton}
-        onPress={() => setShowDatePicker(true)}
-      >
-        <Text>{selectedDate || 'Select Date'}</Text>
-      </TouchableOpacity>
-      {showDatePicker && (
-        <DateTimePicker
-          value={selectedDate ? new Date(selectedDate) : new Date()}
-          mode='date'
-          display='default'
-          onChange={(event, date) => {
-            setShowDatePicker(false);
-            if (date) {
-              setSelectedDate(date.toISOString().split('T')[0]);
-            }
+    <TouchableWithoutFeedback onPress={onClose}>
+      <View style={styles.overlay}>
+        <Animated.View
+          style={{
+            transform: [{ translateY: slideAnim }],
+            ...styles.container,
           }}
-        />
-      )}
+        >
+          <Text style={styles.title}>Filter Events</Text>
 
-      <Text style={styles.sectionTitle}>Interests</Text>
-      <InterestSelector
-        selectedInterests={selectedInterests}
-        setSelectedInterests={setSelectedInterests}
-      />
+          <Text style={styles.sectionTitle}>Date</Text>
+          <TouchableOpacity
+            style={styles.datePickerButton}
+            onPress={() => setShowDatePicker(true)}
+          >
+            <Text>{selectedDate || 'Select Date'}</Text>
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker
+              value={selectedDate ? new Date(selectedDate) : new Date()}
+              mode='date'
+              display='default'
+              onChange={(event, date) => {
+                setShowDatePicker(false);
+                if (date) {
+                  setSelectedDate(date.toISOString().split('T')[0]);
+                }
+              }}
+            />
+          )}
 
-      <TouchableOpacity
-        style={styles.applyButton}
-        onPress={() =>
-          onApplyFilters({ date: selectedDate, interests: selectedInterests })
-        }
-      >
-        <Text style={styles.applyButtonText}>Apply Filters</Text>
-      </TouchableOpacity>
-    </View>
+          <Text style={styles.sectionTitle}>Interests</Text>
+          <InterestSelector
+            selectedInterests={selectedInterests}
+            setSelectedInterests={setSelectedInterests}
+          />
+
+          <TouchableOpacity
+            style={styles.applyButton}
+            onPress={() =>
+              onApplyFilters({
+                date: selectedDate,
+                interests: selectedInterests,
+              })
+            }
+          >
+            <Text style={styles.applyButtonText}>Apply Filters</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
+    </TouchableWithoutFeedback>
   );
 };
 
 const styles = StyleSheet.create({
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
   container: {
     padding: 20,
     backgroundColor: '#fff',
@@ -115,6 +157,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    width: '100%',
+    elevation: 5,
   },
   title: {
     fontSize: 18,

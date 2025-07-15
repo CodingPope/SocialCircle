@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import MapView, { Marker, Circle } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import {
   getFirestore,
@@ -20,17 +20,17 @@ import {
   query,
   onSnapshot,
   where,
-  orderBy,
   doc,
   getDoc,
+  getDocs,
 } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import CreateEventScreen from './CreateEventScreen';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import EventListView from '../../components/EventListView';
 import EventFilterWindow from '../../components/EventFilterWindow';
-import EventPopUp from '../../components/EventPopUp';
 import EventPopUpCard from '../../components/EventPopUpCard';
+import { Ionicons } from '@expo/vector-icons';
 
 const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
 const allCategories = [
@@ -54,6 +54,14 @@ const allCategories = [
   'Art exhibit',
   'Photography walk',
 ];
+
+const CustomDotMarker = ({ color, label, scale }) => (
+  <View
+    style={[styles.dot, { backgroundColor: color, transform: [{ scale }] }]}
+  >
+    {label ? <Text style={styles.dotLabel}>{label}</Text> : null}
+  </View>
+);
 
 export default function MapScreen() {
   const { user } = useAuth();
@@ -88,6 +96,7 @@ export default function MapScreen() {
 
   // Event pop-up state
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [activePopUp, setActivePopUp] = useState(null); // Track active pop-up
 
   // Fetch events with optional category filter, respecting Firestore indexes
   useEffect(() => {
@@ -276,6 +285,61 @@ export default function MapScreen() {
     }
   };
 
+  // Compute marker scale based on zoom: baseDelta is the initial latitudeDelta
+  const baseDelta = 0.0922;
+  const markerScale = region
+    ? Math.min(Math.max(baseDelta / region.latitudeDelta, 0.8), 2)
+    : 1;
+
+  // Function to fetch events within the visible map region
+  const fetchEventsInRegion = async (region) => {
+    const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
+
+    // Calculate bounds
+    const latMin = latitude - latitudeDelta / 2;
+    const latMax = latitude + latitudeDelta / 2;
+    const lngMin = longitude - longitudeDelta / 2;
+    const lngMax = longitude + longitudeDelta / 2;
+
+    try {
+      const q = query(
+        collection(db, 'events'),
+        where('location.latitude', '>=', latMin),
+        where('location.latitude', '<=', latMax),
+        where('location.longitude', '>=', lngMin),
+        where('location.longitude', '<=', lngMax)
+      );
+
+      const snapshot = await getDocs(q);
+      const events = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setEvents(events);
+    } catch (error) {
+      console.error('Error fetching events in region:', error);
+    }
+  };
+
+  // Call this function whenever the map region changes
+  const handleRegionChangeComplete = (newRegion) => {
+    setRegion(newRegion);
+    fetchEventsInRegion(newRegion);
+  };
+
+  const getMarkerColor = (event) => {
+    if (event.isSponsored) return '#9B59B6';
+    if (event.isPopular) return '#F1C40F';
+    if (event.isFriendHosting) return '#3498DB';
+    if (event.isVisited) return '#FF7F50';
+    return '#E74C3C';
+  };
+
+  // Close any active pop-ups when clicking on the map background
+  const handleMapPress = () => {
+    setSelectedEvent(null); // Close any active pop-ups
+  };
+
   return (
     <View style={styles.container}>
       {showSearchBar && (
@@ -333,33 +397,29 @@ export default function MapScreen() {
         <MapView
           style={styles.map}
           region={region}
-          onRegionChangeComplete={setRegion}
+          onRegionChangeComplete={(r) => setRegion(r)}
           onLongPress={handleMapLongPress}
-          onPress={() => {
-            setShowListView(false);
-            setSelectedEvent(null); // Hide pop-up when clicking off
-          }}
+          onPress={handleMapPress} // Close pop-up on map press
         >
-          {filteredEvents.map((ev) => {
-            // Defensive check for valid location
-            if (
-              !ev.location ||
-              !ev.location.latitude ||
-              !ev.location.longitude
-            ) {
-              console.log('Event missing location:', ev);
-              return null;
-            }
-            return (
-              <Marker
-                key={ev.id}
-                coordinate={ev.location}
-                onPress={() => handleMarkerPress(ev)}
+          {filteredEvents.map((event) => (
+            <Marker
+              key={event.id}
+              coordinate={event.location}
+              onPress={() => handleMarkerPress(event)}
+              tracksViewChanges={false}
+            >
+              <CustomDotMarker
+                color={getMarkerColor(event)}
+                label={event.attendeeCount?.toString()}
+                scale={markerScale}
               />
-            );
-          })}
+            </Marker>
+          ))}
+
           {newEventLocation && (
-            <Marker coordinate={newEventLocation} pinColor='blue' />
+            <Marker coordinate={newEventLocation} tracksViewChanges={false}>
+              <CustomDotMarker color='#007AFF' scale={markerScale} />
+            </Marker>
           )}
         </MapView>
       )}
@@ -387,7 +447,12 @@ export default function MapScreen() {
       )}
 
       {/* Event Pop-Up */}
-      {selectedEvent && <EventPopUpCard event={selectedEvent} />}
+      {selectedEvent && (
+        <EventPopUpCard
+          event={selectedEvent}
+          onClose={() => setSelectedEvent(null)} // Close the pop-up
+        />
+      )}
 
       {/* CTA FAB */}
       <TouchableOpacity style={styles.fab} onPress={handleFabPress}>
@@ -421,8 +486,11 @@ export default function MapScreen() {
       </Modal>
 
       {/* List View Button */}
-      <TouchableOpacity style={styles.listViewButton} onPress={toggleListView}>
-        <Text>Toggle List View</Text>
+      <TouchableOpacity
+        style={[styles.listViewButton, { zIndex: 10 }]}
+        onPress={toggleListView}
+      >
+        <Ionicons name='list' size={24} color='#fff' />
       </TouchableOpacity>
 
       {/* List View */}
@@ -436,7 +504,10 @@ export default function MapScreen() {
       {/* Filter Window */}
       {showFilterWindow && (
         <EventFilterWindow
+          isVisible={showFilterWindow}
+          onClose={() => setShowFilterWindow(false)}
           onApplyFilters={(filters) => {
+            console.log('Filters applied:', filters);
             applyFilters(filters);
             setShowFilterWindow(false);
           }}
@@ -449,6 +520,25 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+  dot: {
+    height: 20,
+    width: 20,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  dotLabel: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   fab: {
     position: 'absolute',
     bottom: 20,
@@ -545,5 +635,14 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: '#007BFF',
     borderRadius: 8,
+  },
+  clusterContainer: {
+    backgroundColor: 'rgba(0, 122, 255, 0.9)',
+    padding: 5,
+    borderRadius: 15,
+  },
+  clusterText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 });

@@ -1,10 +1,23 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 
-const EventCard = ({ title, details }) => {
+const EventCard = ({ title, details, imageUrl }) => {
   return (
     <View style={styles.eventCard}>
-      <View style={styles.eventImagePlaceholder} />
+      {imageUrl ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={styles.eventImage}
+          resizeMode='cover'
+        />
+      ) : (
+        <View style={styles.eventImagePlaceholder}>
+          <Image
+            source={{ uri: 'https://placehold.co/60x40/orange/white' }}
+            style={styles.eventImage}
+          />
+        </View>
+      )}
       <View style={{ flex: 1 }}>
         <Text style={styles.eventTitle}>{title}</Text>
         <Text style={styles.eventDetails}>{details}</Text>
@@ -33,23 +46,31 @@ const styles = StyleSheet.create({
     // Android elevation
     elevation: 2,
   },
-  eventImagePlaceholder: {
-    width: 50,
-    height: 50,
-    backgroundColor: '#ddd',
+  eventImage: {
+    width: 60,
+    height: 60,
     borderRadius: 8,
-    marginRight: 12,
+    marginRight: 10,
+  },
+  eventImagePlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#ccc',
+    marginRight: 10,
   },
   eventTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   eventDetails: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#555',
   },
   hamburgerButton: {
-    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 10,
   },
 });
 
