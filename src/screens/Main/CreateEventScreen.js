@@ -13,6 +13,10 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
+import MultiSlider from '@ptomasroos/react-native-multi-slider';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import { Ionicons } from '@expo/vector-icons';
+import { SelectList } from 'react-native-dropdown-select-list';
 import {
   getFirestore,
   collection,
@@ -24,6 +28,8 @@ import {
 } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../../context/AuthContext';
+import { updateEventCount } from '../../firebase/config';
+import { GOOGLE_MAPS_API_KEY } from '@env';
 
 const categoryOptions = [
   'Hiking',
@@ -46,28 +52,46 @@ const categoryOptions = [
   'Art exhibit',
   'Photography walk',
 ];
-import { GOOGLE_MAPS_API_KEY } from '@env';
+
+// Convert categoryOptions to SelectList format
+const categoryData = categoryOptions.map((c, idx) => ({
+  key: idx.toString(),
+  value: c,
+}));
 
 export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const { user } = useAuth();
   const db = getFirestore();
   const storage = getStorage();
 
+  // Image upload state
   const [imageUri, setImageUri] = useState(null);
+  const [imageUrl, setImageUrl] = useState('');
+
+  // Basic fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date());
-  const [privacy, setPrivacy] = useState('none');
-  const [ageMin, setAgeMin] = useState('18');
-  const [ageMax, setAgeMax] = useState('99');
-  const [category, setCategory] = useState('');
-  const [capacity, setCapacity] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [imageUrl, setImageUrl] = useState('');
 
+  // Manual address
   const [manualAddress, setManualAddress] = useState('');
   const [manualLocation, setManualLocation] = useState(null);
-  // Geocode address to lat/lng
+
+  // Category search + selection
+  const [category, setCategory] = useState('');
+
+  // Age range slider
+  const [ageRange, setAgeRange] = useState([18, 99]);
+
+  // Privacy segmented control
+  const segments = ['Public', 'Women Only', 'Men Only'];
+  const [privacyIndex, setPrivacyIndex] = useState(0);
+  const privacyValues = ['none', 'female-only', 'male-only'];
+
+  const [capacity, setCapacity] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  // Geocode address
   const handleGeocode = async () => {
     if (!manualAddress.trim()) return Alert.alert('Enter an address');
     try {
@@ -80,158 +104,125 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       if (json.status === 'OK') {
         const loc = json.results[0].geometry.location;
         setManualLocation({ latitude: loc.lat, longitude: loc.lng });
-        Alert.alert('Location found!', 'Pin will be placed on map.');
+        Alert.alert('Location set', 'Pin will be placed on map.');
       } else {
         Alert.alert('Address not found');
       }
-    } catch (err) {
-      Alert.alert('Error finding address');
+    } catch {
+      Alert.alert('Error geocoding address');
     }
   };
 
-  //--------------------
+  // Image picker + upload
   const pickImageAndUpload = async () => {
     try {
-      // Request permission to access the media library
-      const permissionResult =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permissionResult.granted) {
-        return Alert.alert(
-          'Permission required',
-          'You need to grant permission to access the media library.'
-        );
-      }
-
-      // Launch the image picker
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Correct usage of MediaTypeOptions
-        quality: 0.7,
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return Alert.alert('Permission required');
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
+        quality: 0.8,
       });
-
-      if (!result.canceled) {
-        const { uri } = result.assets[0]; // Access the first asset from the result
+      if (!res.canceled) {
+        const uri = res.assets[0].uri;
         setImageUri(uri);
-
-        try {
-          // Upload to Firebase Storage
-          const response = await fetch(uri);
-          if (!response.ok) {
-            throw new Error('Failed to fetch the image file');
-          }
-          const blob = await response.blob();
-          const storageRef = ref(storage, `event-images/${Date.now()}`);
-          const uploadTask = await uploadBytes(storageRef, blob);
-
-          // Get download URL and save to Firestore
-          const downloadURL = await getDownloadURL(uploadTask.ref);
-          setImageUrl(downloadURL);
-        } catch (networkError) {
-          console.error('Network error during image upload:', networkError);
-          Alert.alert(
-            'Network Error',
-            'Failed to upload image. Please check your internet connection and try again.'
-          );
-        }
+        const blob = await (await fetch(uri)).blob();
+        const storageRef = ref(storage, `event-images/${Date.now()}`);
+        const snap = await uploadBytes(storageRef, blob);
+        setImageUrl(await getDownloadURL(snap.ref));
       }
-    } catch (error) {
-      console.error('Image upload error:', error);
-      Alert.alert('Error uploading image', error.message);
+    } catch (e) {
+      Alert.alert('Upload error', e.message);
     }
   };
 
+  // Create event
   const handleCreate = async () => {
     if (!title.trim()) return Alert.alert('Title is required');
-    if (!category) return Alert.alert('Please select a category');
-    if (date - new Date() > 7 * 24 * 60 * 60 * 1000)
-      return Alert.alert('Event must be within 7 days');
+    if (description.trim().length < 30)
+      return Alert.alert('Description must be at least 30 characters');
+    if (date - new Date() < 60 * 60 * 1000)
+      return Alert.alert('Event must be at least 1 hour ahead');
+    if (!manualLocation && !location) return Alert.alert('Address is required');
+    if (!category) return Alert.alert('Select a category');
+    const privacyValue = privacyValues[privacyIndex];
     if (
-      (privacy === 'female-only' && user.gender !== 'female') ||
-      (privacy === 'male-only' && user.gender !== 'male')
+      (privacyValue === 'female-only' && user.gender !== 'female') ||
+      (privacyValue === 'male-only' && user.gender !== 'male')
     ) {
-      return Alert.alert('You can only create an event for your own gender');
+      return Alert.alert('Gender privacy mismatch');
     }
-
-    let eventLocation = location;
-    if (manualLocation) eventLocation = manualLocation;
-
+    const eventLocation = manualLocation || location;
     setUploading(true);
-
     try {
-      const capacityNum = capacity.trim() === '' ? 0 : parseInt(capacity);
       const docRef = await addDoc(collection(db, 'events'), {
         ownerId: user.uid,
         title: title.trim(),
         description: description.trim(),
         date: Timestamp.fromDate(date),
-        privacy,
-        ageRange: [parseInt(ageMin), parseInt(ageMax)],
+        privacy: privacyValue,
+        ageRange,
         category,
         imageUrl: imageUrl || null,
         location: eventLocation,
-        capacity: capacityNum,
+        capacity: capacity ? parseInt(capacity, 10) : 0,
         createdAt: Timestamp.now(),
+        attendees: [],
       });
       await updateDoc(doc(db, 'users', user.uid), {
         createdEvents: arrayUnion(docRef.id),
       });
       onSuccess(eventLocation);
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Failed to create event');
+      await updateEventCount(user.uid);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Creation failed');
     } finally {
       setUploading(false);
     }
   };
 
+  // Prefill manual address if location has an address
+  React.useEffect(() => {
+    if (location?.address) {
+      setManualAddress(location.address);
+    }
+  }, [location]);
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      {/* Photo */}
       {imageUri ? (
-        <Image source={{ uri: imageUri }} style={styles.previewLarge} />
+        <Image source={{ uri: imageUri }} style={styles.preview} />
       ) : (
         <View style={styles.previewPlaceholder}>
-          <Text style={styles.placeholderText}>No Image Selected</Text>
+          <Text>No Image</Text>
         </View>
       )}
-      <TouchableOpacity
-        style={styles.addPhotoButton}
-        onPress={pickImageAndUpload}
-      >
-        <Text style={styles.addPhotoButtonText}>
+      <TouchableOpacity style={styles.photoBtn} onPress={pickImageAndUpload}>
+        <Text style={styles.photoBtnText}>
           {imageUri ? 'Change Photo' : 'Add Photo'}
         </Text>
       </TouchableOpacity>
 
+      {/* Title & Description */}
       <Text style={styles.label}>Title</Text>
       <TextInput
         style={styles.input}
-        placeholder='Event title'
         value={title}
         onChangeText={setTitle}
+        placeholder='Event title'
       />
-
       <Text style={styles.label}>Description</Text>
       <TextInput
         style={[styles.input, styles.textArea]}
-        placeholder='What’s your event about?'
         value={description}
         onChangeText={setDescription}
+        placeholder='What’s your event about?'
         multiline
       />
 
-      <Text style={styles.label}>Or enter address manually</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        <TextInput
-          style={[styles.input, { flex: 1 }]}
-          placeholder='Address'
-          value={manualAddress}
-          onChangeText={setManualAddress}
-        />
-        <TouchableOpacity style={styles.button} onPress={handleGeocode}>
-          <Text style={styles.buttonText}>Find</Text>
-        </TouchableOpacity>
-      </View>
-
+      {/* Date & Time */}
       <Text style={styles.label}>Date & Time</Text>
       <DateTimePicker
         value={date}
@@ -240,73 +231,91 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         onChange={(_, d) => d && setDate(d)}
       />
 
+      {/* Manual Address with icon */}
+      <Text style={styles.label}>Location</Text>
+      <View style={styles.row}>
+        <Ionicons
+          name='location-outline'
+          size={20}
+          color='#666'
+          style={{ marginRight: 8 }}
+        />
+        <TextInput
+          style={[styles.input, styles.flex]}
+          value={manualAddress}
+          onChangeText={setManualAddress}
+          placeholder='Enter address'
+        />
+        <TouchableOpacity style={styles.geocodeBtn} onPress={handleGeocode}>
+          <Text style={styles.geocodeTxt}>Find</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Category Picker + Search */}
+      <View style={{ marginTop: 15 }}>
+        <Text style={styles.label}>Category</Text>
+        <SelectList
+          data={categoryData}
+          setSelected={(val) => setCategory(val)}
+          save='value'
+          placeholder='Search categories'
+          boxStyles={styles.dropdownBox}
+          dropdownStyles={styles.dropdownList}
+          dropdownItemStyles={styles.dropdownItem}
+          dropdownTextStyles={styles.dropdownText}
+          inputStyles={styles.dropdownInput}
+          searchPlaceholder='Type to filter…'
+        />
+      </View>
+
+      {/* Age Range */}
+      <Text style={styles.label}>
+        Age Range: {ageRange[0]} - {ageRange[1]}
+      </Text>
+      <View style={styles.sliderContainer}>
+        <MultiSlider
+          values={ageRange}
+          sliderLength={280}
+          onValuesChange={setAgeRange}
+          min={18}
+          max={99}
+          step={1}
+          allowOverlap={false}
+          snapped
+        />
+      </View>
+
+      {/* Privacy moved below age and category */}
       <Text style={styles.label}>Privacy</Text>
-      <View style={styles.row}>
-        {['none', 'female-only', 'male-only'].map((p) => (
-          <TouchableOpacity key={p} onPress={() => setPrivacy(p)}>
-            <Text style={privacy === p ? styles.selected : styles.option}>
-              {p === 'none'
-                ? 'Public'
-                : p === 'female-only'
-                ? 'Women Only'
-                : 'Men Only'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <SegmentedControl
+        values={segments}
+        selectedIndex={privacyIndex}
+        onChange={(event) =>
+          setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
+        }
+        style={styles.segment}
+      />
 
-      <Text style={styles.label}>Age Range</Text>
-      <View style={styles.row}>
-        <TextInput
-          style={[styles.input, styles.ageInput]}
-          keyboardType='numeric'
-          value={ageMin}
-          onChangeText={setAgeMin}
-        />
-        <Text style={{ alignSelf: 'center' }}>to</Text>
-        <TextInput
-          style={[styles.input, styles.ageInput]}
-          keyboardType='numeric'
-          value={ageMax}
-          onChangeText={setAgeMax}
-        />
-      </View>
-      <Text style={styles.label}>Category</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.chipContainer}
-      >
-        {categoryOptions.map((cat) => (
-          <TouchableOpacity
-            key={cat}
-            onPress={() => setCategory(cat)}
-            style={category === cat ? styles.selectedChip : styles.chip}
-          >
-            <Text>{cat}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
+      {/* Capacity */}
       <Text style={styles.label}>Capacity (optional)</Text>
       <TextInput
         style={styles.input}
-        placeholder='Leave empty for unlimited'
-        keyboardType='numeric'
         value={capacity}
         onChangeText={setCapacity}
+        placeholder='Leave empty for unlimited'
+        keyboardType='numeric'
       />
 
+      {/* Submit & Cancel */}
       <TouchableOpacity
-        style={[styles.button, uploading && styles.buttonDisabled]}
+        style={[styles.btn, uploading && styles.btnDis]}
         onPress={handleCreate}
         disabled={uploading}
       >
-        <Text style={styles.buttonText}>
+        <Text style={styles.btnTxt}>
           {uploading ? 'Creating...' : 'Create Event'}
         </Text>
       </TouchableOpacity>
-
       <TouchableOpacity onPress={onCancel} style={styles.cancel}>
         <Text>Cancel</Text>
       </TouchableOpacity>
@@ -317,41 +326,30 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
-    marginTop: 60,
+    paddingTop: 60,
     backgroundColor: '#fff',
     flexGrow: 1,
   },
-  previewLarge: {
-    width: '100%',
-    height: 200,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
+  preview: { width: '100%', height: 200, borderRadius: 8, marginBottom: 10 },
   previewPlaceholder: {
     width: '100%',
     height: 200,
-    borderRadius: 8,
-    marginBottom: 10,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f0f0f0',
     borderWidth: 1,
     borderColor: '#ddd',
+    borderRadius: 8,
+    marginBottom: 10,
   },
-  placeholderText: { color: '#aaa' },
-  addPhotoButton: {
-    marginBottom: 15,
+  photoBtn: {
     padding: 10,
-    borderWidth: 1,
-    borderColor: '#ccc',
+    backgroundColor: '#007AFF',
     borderRadius: 6,
     alignItems: 'center',
-    backgroundColor: '#007AFF',
+    marginBottom: 15,
   },
-  addPhotoButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+  photoBtnText: { color: '#fff', fontWeight: 'bold' },
   label: { fontWeight: 'bold', marginTop: 15 },
   input: {
     borderWidth: 1,
@@ -361,40 +359,62 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   textArea: { height: 80, textAlignVertical: 'top' },
-  chipContainer: { marginVertical: 10 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  option: { padding: 8, borderWidth: 1, borderColor: '#ccc', borderRadius: 6 },
-  selected: {
-    padding: 8,
-    borderWidth: 1,
-    borderColor: '#007AFF',
+  row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  flex: { flex: 1 },
+  geocodeBtn: {
+    marginLeft: 10,
+    padding: 10,
+    backgroundColor: '#007AFF',
     borderRadius: 6,
-    backgroundColor: '#e6f0ff',
   },
-  ageInput: { width: 60, textAlign: 'center' },
+  geocodeTxt: { color: '#fff' },
+  catList: { maxHeight: 150, marginTop: 5 },
   chip: {
     padding: 8,
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 16,
-    marginRight: 10,
+    marginVertical: 4,
   },
-  selectedChip: {
-    padding: 8,
-    borderWidth: 1,
-    borderColor: '#007AFF',
-    borderRadius: 16,
-    backgroundColor: '#e6f0ff',
-    marginRight: 10,
-  },
-  button: {
+  chipSel: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  chipSelTxt: { color: '#fff' },
+  segment: { marginTop: 10, marginBottom: 20 },
+  btn: {
     backgroundColor: '#007AFF',
     padding: 15,
     borderRadius: 6,
-    marginTop: 25,
     alignItems: 'center',
+    marginTop: 15,
   },
-  buttonDisabled: { backgroundColor: '#99cfff' },
-  buttonText: { color: '#fff', fontWeight: 'bold' },
+  btnDis: { backgroundColor: '#99cfff' },
+  btnTxt: { color: '#fff', fontWeight: 'bold' },
   cancel: { marginTop: 15, alignItems: 'center' },
+  dropdownBox: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    height: 44,
+  },
+  dropdownInput: {
+    color: '#444',
+  },
+  dropdownList: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    maxHeight: 150,
+  },
+  dropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  dropdownText: {
+    fontSize: 14,
+  },
+  sliderContainer: {
+    alignItems: 'center', // Center horizontally
+    marginTop: 10,
+  },
 });

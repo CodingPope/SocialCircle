@@ -54,3 +54,26 @@ export const uploadProfileImage = async (uid, imageFile) => {
   await uploadBytes(imageRef, imageFile);
   return await getDownloadURL(imageRef);
 };
+
+// Update event count for the user
+export const updateEventCount = async (uid) => {
+  const userDoc = doc(db, 'users', uid);
+  const userSnapshot = await getDoc(userDoc);
+
+  if (userSnapshot.exists()) {
+    const userData = userSnapshot.data();
+
+    // Ensure createdEvents and attendedEvents are treated as counts
+    const createdEvents = Array.isArray(userData.createdEvents)
+      ? userData.createdEvents.length
+      : userData.createdEvents || 0;
+    const attendedEvents = Array.isArray(userData.attendedEvents)
+      ? userData.attendedEvents.length
+      : userData.attendedEvents || 0;
+
+    // Update the eventCount field
+    await updateDoc(userDoc, {
+      eventCount: createdEvents + attendedEvents,
+    });
+  }
+};

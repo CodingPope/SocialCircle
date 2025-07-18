@@ -1,8 +1,8 @@
 import React from 'react';
-
-export default function FriendsScreen({ navigation }) {
+import { View, Text } from 'react-native';
+export default function MyCircle({ navigation }) {
   return (
-    <View style={styles.container}>
+    <View style={{ flex: 1, padding: 20 }}>
       <Text>
         This screen should have events that the users friend are attending,
         recommeded events to attend.

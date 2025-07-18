@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { getFirestore, doc, getDoc } from 'firebase/firestore';
+import AttendeeList from '../../components/AttendeeList';
 
-export default function EventDetailScreen({ route }) {
+export default function EventDetailScreen({ route, navigation }) {
   const { eventId } = route.params;
   const [event, setEvent] = useState(null);
   const db = getFirestore();
@@ -39,6 +40,12 @@ export default function EventDetailScreen({ route }) {
       )}
       <Text>{event.description}</Text>
       {/* Add other event details here */}
+      {/* AttendeeList: Shows avatars/names of all attendees */}
+      <Text style={{ marginTop: 16, fontWeight: 'bold' }}>Attendees</Text>
+      <AttendeeList attendees={event.attendees || []} />
+      {/* If you add a link to a user profile here, use:
+        navigation.navigate('OtherUserProfile', { userId: someUserId })
+      */}
     </View>
   );
 }

@@ -1,3 +1,6 @@
+// ✅ Fixed: Ensures filtering always applies to the original events list, not previously filtered ones.
+// Pass in the full unfiltered events list from the parent and always filter from it.
+
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -10,7 +13,7 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
-const InterestSelector = ({ selectedInterests, setSelectedInterests }) => {
+const InterestSelector = ({ selectedInterests, toggleInterest }) => {
   const interests = [
     'Hiking',
     'Surf boarding',
@@ -33,14 +36,6 @@ const InterestSelector = ({ selectedInterests, setSelectedInterests }) => {
     'Photography walk',
   ];
 
-  const toggleInterest = (interest) => {
-    setSelectedInterests((prev) =>
-      prev.includes(interest)
-        ? prev.filter((i) => i !== interest)
-        : [...prev, interest]
-    );
-  };
-
   return (
     <ScrollView style={styles.interestSelector}>
       {interests.map((interest) => (
@@ -52,39 +47,88 @@ const InterestSelector = ({ selectedInterests, setSelectedInterests }) => {
           ]}
           onPress={() => toggleInterest(interest)}
         >
-          <Text>{interest}</Text>
+          <Text
+            style={{
+              color: selectedInterests.includes(interest) ? '#fff' : '#000',
+            }}
+          >
+            {interest}
+          </Text>
         </TouchableOpacity>
       ))}
     </ScrollView>
   );
 };
 
-const EventFilterWindow = ({ isVisible, onClose, onApplyFilters }) => {
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [selectedInterests, setSelectedInterests] = useState([]);
+const EventFilterWindow = ({
+  isVisible,
+  onClose,
+  onApplyFilters,
+  selectedFilters,
+}) => {
+  const [selectedDate, setSelectedDate] = useState(
+    selectedFilters?.date || null
+  );
+  const [selectedInterests, setSelectedInterests] = useState(
+    selectedFilters?.interests || []
+  );
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const slideAnim = useRef(new Animated.Value(500)).current; // Start off-screen
+  const slideAnim = useRef(new Animated.Value(500)).current;
 
   useEffect(() => {
     if (isVisible) {
       Animated.timing(slideAnim, {
-        toValue: 0, // Slide to visible position
+        toValue: 0,
         duration: 300,
         useNativeDriver: true,
       }).start();
     } else {
       Animated.timing(slideAnim, {
-        toValue: 500, // Slide off-screen
+        toValue: 500,
         duration: 300,
         useNativeDriver: true,
       }).start();
     }
   }, [isVisible]);
 
+  useEffect(() => {
+    if (selectedFilters) {
+      setSelectedDate(selectedFilters.date || null);
+      setSelectedInterests(selectedFilters.interests || []);
+    }
+  }, [selectedFilters]);
+
   if (!isVisible) return null;
 
+  const handleApplyFilters = () => {
+    onApplyFilters({
+      date: selectedDate,
+      interests: selectedInterests,
+    });
+  };
+
+  const handleDateChange = (date) => {
+    if (date) {
+      const formattedDate = date.toISOString().split('T')[0];
+      setSelectedDate(formattedDate);
+    }
+  };
+
+  const toggleInterest = (interest) => {
+    setSelectedInterests((prev) => {
+      const updated = prev.includes(interest)
+        ? prev.filter((i) => i !== interest)
+        : [...prev, interest];
+      return updated;
+    });
+  };
+
   return (
-    <TouchableWithoutFeedback onPress={onClose}>
+    <TouchableWithoutFeedback
+      onPress={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <View style={styles.overlay}>
         <Animated.View
           style={{
@@ -108,9 +152,7 @@ const EventFilterWindow = ({ isVisible, onClose, onApplyFilters }) => {
               display='default'
               onChange={(event, date) => {
                 setShowDatePicker(false);
-                if (date) {
-                  setSelectedDate(date.toISOString().split('T')[0]);
-                }
+                handleDateChange(date);
               }}
             />
           )}
@@ -118,17 +160,12 @@ const EventFilterWindow = ({ isVisible, onClose, onApplyFilters }) => {
           <Text style={styles.sectionTitle}>Interests</Text>
           <InterestSelector
             selectedInterests={selectedInterests}
-            setSelectedInterests={setSelectedInterests}
+            toggleInterest={toggleInterest}
           />
 
           <TouchableOpacity
             style={styles.applyButton}
-            onPress={() =>
-              onApplyFilters({
-                date: selectedDate,
-                interests: selectedInterests,
-              })
-            }
+            onPress={handleApplyFilters}
           >
             <Text style={styles.applyButtonText}>Apply Filters</Text>
           </TouchableOpacity>
@@ -147,6 +184,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
+    zIndex: 90, // Ensure this is above EventListView
   },
   container: {
     padding: 20,
@@ -159,17 +197,10 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     width: '100%',
     elevation: 5,
+    zIndex: 11,
   },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginVertical: 10,
-  },
+  title: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', marginVertical: 10 },
   datePickerButton: {
     padding: 10,
     backgroundColor: '#f0f0f0',
@@ -177,19 +208,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  interestSelector: {
-    maxHeight: 200,
-    marginBottom: 20,
-  },
+  interestSelector: { maxHeight: 200, marginBottom: 20 },
   interestItem: {
     padding: 10,
     borderRadius: 8,
     marginBottom: 10,
     backgroundColor: '#f0f0f0',
   },
-  selectedInterest: {
-    backgroundColor: '#007BFF',
-  },
+  selectedInterest: { backgroundColor: '#007BFF' },
   applyButton: {
     marginTop: 20,
     padding: 15,
@@ -197,10 +223,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  applyButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+  applyButtonText: { color: '#fff', fontWeight: 'bold' },
 });
 
 export default EventFilterWindow;

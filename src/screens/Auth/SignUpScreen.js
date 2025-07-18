@@ -30,7 +30,7 @@ export default function SignUpScreen({ navigation }) {
         createdAt: serverTimestamp(),
         // …any other defaults
       });
-      navigation.replace('MainApp'); // or wherever you go next
+      navigation.replace('MainTabs'); // or wherever you go next
     } catch (err) {
       Alert.alert('Signup failed', err.message);
     } finally {

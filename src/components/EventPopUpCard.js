@@ -1,44 +1,36 @@
-// src/screens/Main/EventPopUpCard.js
-
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
   Image,
   StyleSheet,
   TouchableOpacity,
-  Linking,
-  ScrollView,
-  Animated,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useNavigation } from '@react-navigation/native';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '../firebase/config';
-
+import BottomSheet, {
+  BottomSheetBackdrop,
+  BottomSheetScrollView,
+} from '@gorhom/bottom-sheet';
+import { MaterialIcons } from '@expo/vector-icons';
+import { useAuth } from '../context/AuthContext';
 const screenHeight = Dimensions.get('window').height;
 
 export default function EventPopUpCard({ event, onClose, onJoin }) {
+  const bottomSheetRef = useRef(null);
+  const { user } = useAuth();
   const navigation = useNavigation();
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
-  const slideAnim = useRef(new Animated.Value(screenHeight)).current;
-  const bottomNavHeight = 240;
+  const snapPoints = useMemo(() => ['80%'], []);
 
-  // Slide-in animation
   useEffect(() => {
-    Animated.timing(slideAnim, {
-      toValue: screenHeight * 0.3 - bottomNavHeight,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  }, [slideAnim]);
-
-  // Fetch formatted address
-  useEffect(() => {
-    if (!event.location) {
+    if (!event?.location) {
       setAddress('Location not specified');
       return;
     }
@@ -55,74 +47,104 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
           setAddress('Address not available');
         }
       } catch (err) {
-        console.error('Address fetch error:', err);
         setAddress('Error fetching address');
       }
     };
     fetchAddress();
-  }, [event.location]);
 
-  // Fetch event creator details
-  useEffect(() => {
     const ownerId = event.ownerID || event.ownerId;
-    if (!ownerId) {
-      console.warn('Missing ownerID for event', event.id);
-      return;
-    }
+    if (!ownerId) return;
     const fetchUser = async () => {
       try {
         const ref = doc(db, 'users', ownerId);
         const snap = await getDoc(ref);
-        if (snap.exists()) {
-          setUserDetails({ id: snap.id, ...snap.data() });
-        } else {
-          console.warn('No user document for ID', ownerId);
-        }
+        if (snap.exists()) setUserDetails({ id: snap.id, ...snap.data() });
       } catch (err) {
         console.error('Error fetching user details:', err);
       }
     };
     fetchUser();
-  }, [event.ownerID, event.ownerId, event.id]);
+  }, [event]);
 
-  const handleClose = () => {
-    Animated.timing(slideAnim, {
-      toValue: screenHeight,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(onClose || (() => {}));
-  };
-
-  const handleUserPress = () => {
-    if (userDetails?.id) {
-      navigation.navigate('UserProfile', { userId: userDetails.id });
-    }
-  };
-
-  const truncatedDescription =
-    event.description && event.description.length > 300
-      ? `${event.description.slice(0, 300)}...`
-      : event.description;
-
-  // Determine display name and profile image key
   const displayName = userDetails
     ? `${userDetails.firstName || ''} ${userDetails.lastName || ''}`.trim() ||
       userDetails.name ||
       'Anonymous'
     : 'Anonymous';
-  const profileImageUri =
-    userDetails?.profileImage || userDetails?.avatarURL || null;
+
+  // Use fallback image for event image
+  const profileImageSource =
+    userDetails?.profileImage || userDetails?.avatarURL
+      ? { uri: userDetails.profileImage || userDetails.avatarURL }
+      : require('../../assets/smileDefault.png');
+
+  const openInMaps = () => {
+    if (event.location) {
+      const { latitude, longitude } = event.location;
+      Linking.openURL(`https://www.google.com/maps?q=${latitude},${longitude}`);
+    }
+  };
+
+  // --- Join Event Logic ---
+  const handleJoin = async () => {
+    // Description: Handles joining event, checks capacity, updates Firestore, navigates to chat
+    if (!user || !event?.id) return;
+    const isOwner = event.ownerId === user.uid || event.ownerID === user.uid;
+    const attendees = Array.isArray(event.attendees) ? event.attendees : [];
+    const isAttendee = attendees.includes(user.uid);
+
+    // If already an attendee, just go to chat
+    if (isAttendee) {
+      navigation.navigate('EventChat', { eventId: event.id }); // Ensure 'EventChat' is accessible
+      return;
+    }
+
+    // If event is full, show alert
+    if (
+      typeof event.capacity === 'number' &&
+      event.capacity > 0 &&
+      attendees.length >= event.capacity
+    ) {
+      alert('Event is full. You can join the waitlist if available.');
+      return;
+    }
+
+    // Add user to attendees in Firestore
+    try {
+      const eventRef = doc(db, 'events', event.id);
+      await updateDoc(eventRef, {
+        attendees: arrayUnion(user.uid),
+      });
+      navigation.navigate('EventChat', { eventId: event.id }); // Ensure 'EventChat' is accessible
+    } catch (err) {
+      alert('Failed to join event. Please try again.');
+      console.error('Join event error:', err);
+    }
+  };
+
+  if (!event) return null;
 
   return (
-    <Animated.View
-      style={{
-        transform: [{ translateY: slideAnim }],
-        ...styles.card,
-        maxHeight: screenHeight * 0.7,
-      }}
+    <BottomSheet
+      ref={bottomSheetRef}
+      snapPoints={snapPoints}
+      enablePanDownToClose
+      onClose={onClose}
+      backdropComponent={(props) => (
+        <BottomSheetBackdrop
+          {...props}
+          disappearsOnIndex={-1}
+          appearsOnIndex={0}
+          pressBehavior='close'
+        />
+      )}
+      style={[styles.bottomSheet, { maxHeight: screenHeight }]} // limit the sheet, not the scroll
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Event Image */}
+      <BottomSheetScrollView
+        showsVerticalScrollIndicator
+        contentContainerStyle={{ padding: 10, flexGrow: 1 }}
+      >
+        {/* Event Image with fallback */}
         {event.imageUri || event.imageUrl ? (
           <Image
             source={{ uri: event.imageUri || event.imageUrl }}
@@ -130,116 +152,137 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
             resizeMode='cover'
           />
         ) : (
-          <View style={styles.imagePlaceholder}>
-            <Text style={styles.placeholderText}>No Image</Text>
-          </View>
+          <Image
+            source={require('../../assets/smileDefault.png')}
+            style={styles.image}
+            resizeMode='cover'
+          />
         )}
 
-        {/* Event Details */}
-        <View style={styles.infoContainer}>
-          <Text style={styles.title}>{event.title || 'Untitled Event'}</Text>
-          {event.category && (
-            <Text style={styles.categoryTag}>{event.category}</Text>
-          )}
+        <Text style={styles.title}>{event.title || 'Untitled Event'}</Text>
+        {event.category && (
+          <Text style={styles.categoryTag}>{event.category}</Text>
+        )}
 
-          <Text style={styles.label}>Description:</Text>
-          <Text style={styles.description}>
-            {showFullDescription ? event.description : truncatedDescription}
-          </Text>
-          {event.description && event.description.length > 300 && (
-            <TouchableOpacity
-              onPress={() => setShowFullDescription((prev) => !prev)}
-            >
-              <Text style={styles.readMoreText}>
-                {showFullDescription ? 'Read Less' : 'Read More'}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <Text style={styles.label}>Address:</Text>
-          <Text
-            style={[styles.subText, { color: 'blue' }]}
-            onPress={() => {
-              if (event.location) {
-                const url = `https://www.google.com/maps?q=${event.location.latitude},${event.location.longitude}`;
-                Linking.openURL(url);
-              }
-            }}
+        <Text style={styles.label}>Description:</Text>
+        <Text style={styles.description}>
+          {showFullDescription
+            ? event.description
+            : event.description?.length > 300
+            ? `${event.description.slice(0, 300)}...`
+            : event.description}
+        </Text>
+        {event.description && event.description.length > 300 && (
+          <TouchableOpacity
+            onPress={() => setShowFullDescription(!showFullDescription)}
           >
-            {address}
-          </Text>
+            <Text style={styles.showMore}>
+              {showFullDescription ? 'Read Less' : 'Read More'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
-          {/* Creator Info */}
-          {userDetails && (
-            <TouchableOpacity
-              style={styles.userContainer}
-              onPress={handleUserPress}
-            >
-              <Image
-                source={
-                  profileImageUri
-                    ? { uri: profileImageUri }
-                    : require('../../assets/smileDefault.png')
-                }
-                style={styles.userImage}
-              />
-              <View>
-                <Text style={styles.userName}>{displayName}</Text>
-                <Text style={styles.userRating}>
-                  {'★'.repeat(Math.round(userDetails.rating || 0))}{' '}
-                  {userDetails.ratingCount || 0} reviews
-                </Text>
-              </View>
+        <Text style={styles.label}>Date:</Text>
+        <Text style={styles.subText}>
+          {event.date
+            ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : 'Date not specified'}
+        </Text>
+        <Text style={styles.label}>Address:</Text>
+        <TouchableOpacity style={styles.addressContainer} onPress={openInMaps}>
+          <MaterialIcons name='location-pin' size={16} color='blue' />
+          <Text style={[styles.subText, { color: 'blue' }]}>{address}</Text>
+        </TouchableOpacity>
+
+        {userDetails && (
+          <TouchableOpacity
+            style={styles.userContainer}
+            onPress={() =>
+              navigation.navigate('OtherUserProfile', {
+                userId: userDetails.id,
+              })
+            }
+          >
+            <Image source={profileImageSource} style={styles.userImage} />
+            <View>
+              <Text style={styles.userName}>{displayName}</Text>
+              <Text style={styles.userRating}>
+                {'★'.repeat(Math.round(userDetails.rating || 0))}{' '}
+                {userDetails.ratingCount || 0} reviews
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        <View style={styles.actionsContainer}>
+          {/* Capacity display */}
+          {typeof event.capacity === 'number' && event.capacity > 0 ? (
+            <Text style={styles.capacityText}>
+              {Array.isArray(event.attendees) ? event.attendees.length : 0} /{' '}
+              {event.capacity} Joined
+            </Text>
+          ) : (
+            <Text style={styles.capacityText}>
+              {Array.isArray(event.attendees) ? event.attendees.length : 0}{' '}
+              joined
+            </Text>
+          )}
+          {/* Only show Join if not owner */}
+          {!(event.ownerId === user?.uid || event.ownerID === user?.uid) && (
+            <TouchableOpacity style={styles.joinButton} onPress={handleJoin}>
+              <Text style={styles.joinButtonText}>Join Event</Text>
             </TouchableOpacity>
           )}
+          {/* <View style={styles.secondaryActionsContainer}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.shareIconButton}>
+              <MaterialIcons name='share' size={20} color='#007BFF' />
+            </TouchableOpacity>
+          </View> */}
         </View>
-
-        {/* Actions */}
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity style={styles.joinButton} onPress={onJoin}>
-            <Text style={styles.joinButtonText}>Join Event</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.shareButton}>
-            <Text style={styles.shareButtonText}>Share</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-          <Text style={styles.closeButtonText}>Close</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </Animated.View>
+      </BottomSheetScrollView>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: -2 },
-    shadowRadius: 6,
-    elevation: 10,
-    zIndex: 100,
+  bottomSheet: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    zIndex: 100, // Ensure BottomSheet overlays FABs
+    elevation: 100, // For Android overlay
   },
-  scrollContent: { paddingBottom: 20 },
-  image: { width: '100%', height: 200 },
+
+  image: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
   imagePlaceholder: {
     width: '100%',
     height: 200,
     backgroundColor: '#f0f0f0',
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 12,
+    marginBottom: 10,
   },
   placeholderText: { fontSize: 16, color: '#888' },
-  infoContainer: { padding: 16 },
-  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
   categoryTag: {
     fontSize: 14,
     color: '#007BFF',
@@ -248,37 +291,61 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 14, color: '#333', fontWeight: 'bold', marginBottom: 4 },
   description: { fontSize: 14, color: '#555', marginBottom: 12 },
-  readMoreText: {
-    fontSize: 14,
-    color: '#007BFF',
+  showMore: {
+    color: 'blue',
+    marginBottom: 10,
     fontWeight: 'bold',
-    marginTop: 4,
   },
   subText: { fontSize: 14, color: '#666', marginBottom: 8 },
-  userContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  addressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  userContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+  },
   userImage: { width: 40, height: 40, borderRadius: 10, marginRight: 8 },
   userName: { fontSize: 16, fontWeight: 'bold' },
-  userRating: { fontSize: 14, color: '#FFD700' },
+  userRating: { fontSize: 14 },
   actionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: 'column', // Stack buttons vertically
     marginTop: 16,
   },
   joinButton: {
     backgroundColor: '#007BFF',
     padding: 10,
     borderRadius: 5,
-    flex: 1,
-    marginRight: 8,
+    alignItems: 'center',
+    marginBottom: 8, // Add spacing between buttons
+  },
+  joinButtonText: { color: '#fff', fontWeight: 'bold' },
+  secondaryActionsContainer: {
+    flexDirection: 'row', // Place cancel and share buttons side by side
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
-  shareButton: {
-    backgroundColor: '#555',
-    padding: 10,
+  cancelButton: {
+    backgroundColor: '#FF3B30',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderRadius: 5,
-    flex: 1,
     alignItems: 'center',
   },
-  closeButton: { alignItems: 'center', marginTop: 10 },
-  closeButtonText: { color: '#007BFF', fontWeight: 'bold' },
+  cancelButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  shareIconButton: {
+    padding: 6,
+    borderRadius: 5,
+    backgroundColor: '#E0E0E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  capacityText: {
+    fontSize: 14,
+    color: '#007BFF',
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
 });

@@ -73,7 +73,7 @@ export default function ProfileScreen({ navigation }) {
       const data = await getUserData(user.uid);
       setBio(data.bio || '');
       setFriendCount(data.friendCount || 0);
-      setEventCount(data.eventCount || 0);
+      setEventCount(data.eventCount || 0); // Ensure eventCount is fetched
       setProfileImage(data.profileImage || null);
       setRating(data.rating || 0);
       setRatingCount(data.ratingCount || 0);
@@ -82,6 +82,24 @@ export default function ProfileScreen({ navigation }) {
     };
     fetchUserData();
   }, [user.uid]);
+
+  // Fetch and calculate event count
+  useEffect(() => {
+    const fetchEventCount = async () => {
+      if (user?.uid) {
+        const userData = await getUserData(user.uid);
+        const createdEvents = Array.isArray(userData.createdEvents)
+          ? userData.createdEvents.length
+          : userData.createdEvents || 0;
+        const attendedEvents = Array.isArray(userData.attendedEvents)
+          ? userData.attendedEvents.length
+          : userData.attendedEvents || 0;
+        setEventCount(createdEvents + attendedEvents);
+      }
+    };
+
+    fetchEventCount();
+  }, [user]);
 
   const handleLogout = async () => {
     try {
@@ -206,64 +224,77 @@ export default function ProfileScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Header */}
+      {/* Profile Header Layout */}
       <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <View style={styles.imageContainer}>
-            <TouchableOpacity onPress={isEditing ? handleImageUpload : null}>
-              <Image
-                source={{ uri: profileImage || avatarURL }}
-                style={styles.profileImage}
-              />
-            </TouchableOpacity>
+        <View style={styles.avatarRow}>
+          <TouchableOpacity onPress={isEditing ? handleImageUpload : null}>
+            <Image
+              source={{ uri: profileImage || avatarURL }}
+              style={styles.profileImage}
+            />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.name}>
+          {fullName}
+          {verified && (
+            <MaterialIcons
+              name='verified'
+              size={20}
+              color='black'
+              style={styles.verifiedIcon}
+            />
+          )}
+        </Text>
+        <Text style={styles.stat}>
+          {ratingCount === 0
+            ? '☆☆☆☆☆ (Not yet rated)'
+            : `${
+                '★'.repeat(Math.floor(rating)) +
+                '☆'.repeat(5 - Math.floor(rating))
+              } (${ratingCount})`}
+        </Text>
+        <Text style={styles.since}>User since {userSince}</Text>
+
+        {/* Card Row for Friends, Events, Badges */}
+        <View style={styles.cardRow}>
+          <View style={styles.cardItem}>
+            <Text style={styles.cardValue}>{friendCount}</Text>
+            <Text style={styles.cardLabel}>Friends</Text>
           </View>
-          <View style={styles.infoContainer}>
-            <Text style={styles.name}>
-              {fullName}
-              {verified && (
-                <MaterialIcons name='verified' size={24} color='black' />
-              )}
-            </Text>
-            <Text style={styles.stat}>
-              {ratingCount === 0
-                ? '☆☆☆☆☆ (unrated)'
-                : `${
-                    '★'.repeat(Math.floor(rating)) +
-                    '☆'.repeat(5 - Math.floor(rating))
-                  } (${ratingCount})`}
-            </Text>
-            <Text style={styles.since}>User since {userSince}</Text>
+          <View style={styles.cardItem}>
+            <Text style={styles.cardValue}>{eventCount}</Text>
+            <Text style={styles.cardLabel}>Events</Text>
           </View>
-          <View style={[styles.statContainer, styles.statSpacing]}>
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>
-                {friendCount.toLocaleString()}
-              </Text>
-              <Text style={styles.statLabel}>Friends</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statValue}>{eventCount}</Text>
-              <Text style={styles.statLabel}>Events</Text>
-            </View>
+          <View style={[styles.cardItem, { borderRightWidth: 0 }]}>
+            <MaterialIcons
+              name='star'
+              size={32}
+              color='#FFD700'
+              style={styles.badgeIcon}
+            />
+            <Text style={styles.cardLabel}>Badges</Text>
           </View>
         </View>
-      </View>
 
-      {/* Bio */}
-      <View style={styles.bioContainer}>
-        <TextInput
-          style={[styles.bioInput, isEditing && styles.bioInputEditing]}
-          value={bio}
-          onChangeText={setBio}
-          editable={isEditing}
-          placeholder='Write your bio here...'
-          multiline
-        />
-        {!showFullBio && bio.length > MAX_BIO_LENGTH && (
-          <TouchableOpacity onPress={() => setShowFullBio(true)}>
-            <Text style={styles.viewAll}>View all</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.bioContainer}>
+          <TextInput
+            style={[
+              styles.bioInput,
+              isEditing && styles.bioInputEditing,
+              styles.bioText,
+            ]}
+            value={bio}
+            onChangeText={setBio}
+            editable={isEditing}
+            placeholder='Write your bio here...'
+            multiline
+          />
+          {!showFullBio && bio.length > MAX_BIO_LENGTH && (
+            <TouchableOpacity onPress={() => setShowFullBio(true)}>
+              <Text style={styles.viewAll}>View all</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Edit and Save Buttons */}
@@ -323,6 +354,7 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
+// --- Styles ---
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
   modalOverlay: {
@@ -349,61 +381,84 @@ const styles = StyleSheet.create({
   },
   navTitle: { fontSize: 20, fontWeight: 'bold' },
   header: {
-    padding: 16,
-    borderRadius: 8,
-  },
-  headerTop: {
-    flexDirection: 'row', // Align items horizontally
     alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
   },
-  imageContainer: {
-    marginRight: 16, // Space between image and text
+  avatarRow: {
+    alignItems: 'center',
+    marginBottom: 10,
   },
   profileImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 15,
+    width: 125,
+    height: 125,
+    borderRadius: 10,
+    marginBottom: 8,
   },
-  headerCenter: { flex: 1, marginLeft: 12 },
-  nameRow: { flexDirection: 'row', alignItems: 'center' },
   name: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
     color: '#000',
-  },
-  badge: { width: 20, height: 20, marginLeft: 4 },
-  stars: { marginTop: 4 },
-  since: {
-    fontSize: 14,
-    color: '#666',
     marginTop: 4,
+    textAlign: 'center',
   },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
+  verifiedIcon: {
+    marginLeft: 6,
   },
   stat: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#000',
-    marginTop: 4,
+    color: '#222',
+    marginTop: 2,
+    textAlign: 'center',
   },
-  statValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
-    textAlign: 'right', // Align the value to the right
-  },
-  statLabel: {
+  since: {
     fontSize: 14,
     color: '#666',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  cardRow: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    marginHorizontal: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    overflow: 'hidden',
+  },
+  cardItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 18,
+    borderRightWidth: 1,
+    borderColor: '#eee',
+    justifyContent: 'center',
+  },
+  cardValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 2,
+  },
+  cardLabel: {
+    fontSize: 15,
+    color: '#444',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  badgeIcon: {
+    marginBottom: 2,
   },
   bioContainer: {
     backgroundColor: '#f0f0f0',
-    margin: 16,
+    marginTop: 12,
     padding: 12,
     borderRadius: 8,
+    width: '100%',
   },
   bioInput: {
     width: '100%',
@@ -415,6 +470,11 @@ const styles = StyleSheet.create({
     borderColor: 'gray',
     borderRadius: 5,
     backgroundColor: '#f9f9f9',
+  },
+  bioText: {
+    fontSize: 15,
+    color: '#333',
+    textAlign: 'center',
   },
   disabledInput: {
     backgroundColor: '#e0e0e0',
@@ -452,16 +512,6 @@ const styles = StyleSheet.create({
   tabText: { color: '#666' },
   tabTextActive: { color: '#000', fontWeight: 'bold' },
   list: { paddingBottom: 16 },
-  headerBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
-  },
-  statContainer: {
-    alignItems: 'flex-end',
-    marginLeft: 'auto',
-  },
-
   eventCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -486,7 +536,4 @@ const styles = StyleSheet.create({
   eventTitle: { fontSize: 16, fontWeight: '600' },
   eventDetails: { color: '#666', marginTop: 4 },
   share: { color: '#0066cc' },
-  verifiedIcon: {
-    marginLeft: 8,
-  },
 });

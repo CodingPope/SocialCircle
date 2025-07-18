@@ -1,17 +1,29 @@
+// src/navigation/AppNavigator.js
+
 import React from 'react';
 import { ActivityIndicator } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
-import { navigationRef } from './RootNavigation';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useAuth, AuthProvider } from '../context/AuthContext';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import Icon from 'react-native-vector-icons/Ionicons';
+import { Radar } from 'lucide-react-native';
+import { useAuth } from '../context/AuthContext';
 
+// Auth Screens
 import AuthScreen from '../screens/Auth/AuthScreen';
 import NameDobScreen from '../screens/Auth/Onboarding/NameDobScreen';
 import SexScreen from '../screens/Auth/Onboarding/SexScreen';
 import InterestsScreen from '../screens/Auth/Onboarding/InterestsScreen';
 import LocationScreen from '../screens/Auth/Onboarding/LocationScreen';
-import MapScreen from '../screens/Main/MapScreen';
 
+// Main Screens
+import MapScreen from '../screens/Main/MapScreen';
+import DiscoveryScreen from '../screens/Main/DiscoveryScreen';
+import MyCircle from '../screens/Main/MyCircle';
+import ProfileScreen from '../screens/Main/ProfileScreen';
+import OtherUserProfileScreen from '../screens/Main/OtherUserProfileScreen';
+import EventChatScreen from '../screens/Chat/EventChatScreen';
+
+// --- Auth Stack ---
 const AuthStack = createNativeStackNavigator();
 function AuthStackScreen() {
   return (
@@ -21,6 +33,7 @@ function AuthStackScreen() {
   );
 }
 
+// --- Onboarding Stack ---
 const OnboardingStack = createNativeStackNavigator();
 function OnboardingStackScreen() {
   return (
@@ -33,72 +46,106 @@ function OnboardingStackScreen() {
   );
 }
 
-const MainStack = createNativeStackNavigator();
-function MainStackScreen() {
+// --- Profile Stack (inside Tabs) ---
+const ProfileStack = createNativeStackNavigator();
+function ProfileStackScreen() {
   return (
-    <MainStack.Navigator screenOptions={{ headerShown: false }}>
-      <MainStack.Screen name='Map' component={MapScreen} />
-      <Stack.Screen name='EventDetailScreen' component={EventDetailScreen} />
-      <Stack.Screen name='CreateEvent' component={CreateEventScreen} />
-    </MainStack.Navigator>
+    <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
+      <ProfileStack.Screen name='Profile' component={ProfileScreen} />
+      <ProfileStack.Screen
+        name='OtherUserProfile'
+        component={OtherUserProfileScreen}
+      />
+    </ProfileStack.Navigator>
   );
 }
 
-import { CommonActions } from '@react-navigation/native';
-
-function isUserOnboarded(user) {
+// --- Main Tabs ---
+const Tab = createBottomTabNavigator();
+function MainTabs() {
   return (
-    user != null &&
-    user.firstName &&
-    user.lastName &&
-    user.dob && // Timestamp from Firestore is truthy
-    user.sex &&
-    Array.isArray(user.interests) &&
-    user.interests.length > 0 &&
-    user.location?.latitude != null &&
-    user.location?.longitude != null
+    <Tab.Navigator screenOptions={{ headerShown: false }}>
+      <Tab.Screen
+        name='Map'
+        component={MapScreen}
+        options={{
+          tabBarIcon: ({ focused, color, size }) => (
+            <Icon
+              name={focused ? 'map' : 'map-outline'}
+              color={color}
+              size={size}
+            />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name='Discovery'
+        component={DiscoveryScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Icon name='list-outline' color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name='MyCircle'
+        component={MyCircle}
+        options={{
+          title: 'My Circle',
+          tabBarIcon: ({ color, size }) => <Radar color={color} size={size} />,
+        }}
+      />
+      <Tab.Screen
+        name='ProfileStack'
+        component={ProfileStackScreen}
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ focused, color, size }) => (
+            <Icon
+              name={focused ? 'person' : 'person-outline'}
+              color={color}
+              size={size}
+            />
+          ),
+        }}
+      />
+    </Tab.Navigator>
   );
 }
 
-export default function AppNavigator() {
-  const { user, loading } = useAuth();
+// --- Root Stack (Wraps Tabs & Non-tab Screens) ---
+const RootStack = createNativeStackNavigator();
+function RootStackScreen() {
+  return (
+    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      <RootStack.Screen name='MainTabs' component={MainTabs} />
+      <RootStack.Screen
+        name='EventChat'
+        component={EventChatScreen}
+        options={{ headerShown: true, title: 'Event Chat' }}
+      />
+      <RootStack.Screen
+        name='OtherUserProfile'
+        component={OtherUserProfileScreen}
+        options={{ headerShown: false, title: 'Profile' }}
+      />
+    </RootStack.Navigator>
+  );
+}
+
+// --- App Navigator ---
+export default function AppNavigator({ user, profileComplete }) {
+  const { loading } = useAuth();
 
   if (loading) {
     return <ActivityIndicator style={{ flex: 1 }} />;
   }
 
-  const isOnboarded = isUserOnboarded(user);
-
-  // Guard: Only allow navigation reset to 'Map' if user is onboarded
-  // This is a placeholder for where navigation reset might be dispatched
-  // If you have a navigation ref or dispatch, add a guard like this:
-  // if (isOnboarded) {
-  //   navigation.dispatch(
-  //     CommonActions.reset({
-  //       index: 0,
-  //       routes: [{ name: 'Map' }],
-  //     })
-  //   );
-  // }
-
-  return (
-    <NavigationContainer ref={navigationRef}>
-      {!user ? (
-        <AuthStackScreen />
-      ) : !isOnboarded ? (
-        <OnboardingStackScreen />
-      ) : (
-        <MainStackScreen />
-      )}
-    </NavigationContainer>
-  );
-}
-
-// wrap your entire App in the AuthProvider:
-export function App() {
-  return (
-    <AuthProvider>
-      <AppNavigator />
-    </AuthProvider>
+  return !user ? (
+    <AuthStackScreen />
+  ) : !profileComplete ? (
+    <OnboardingStackScreen />
+  ) : (
+    <RootStackScreen />
   );
 }
