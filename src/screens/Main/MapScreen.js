@@ -29,32 +29,10 @@ import { GOOGLE_MAPS_API_KEY } from '@env';
 import EventListView from '../../components/EventListView';
 import EventFilterWindow from '../../components/EventFilterWindow';
 import EventPopUpCard from '../../components/EventPopUpCard';
-import { Ionicons } from '@expo/vector-icons';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import { MaterialIcons } from '@expo/vector-icons'; // Add this import
+import { Ionicons } from '@expo/vector-icons'; // Add this import
 
 const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
-const allCategories = [
-  'Hiking',
-  'Surf boarding',
-  'Volleyball',
-  'Bar hopping',
-  'Coffee',
-  'Dog walk',
-  'Run',
-  'Picnic',
-  'Game night',
-  'Board games',
-  'Book club',
-  'Workshop',
-  'Networking',
-  'Yoga',
-  'Cooking class',
-  'Movie night',
-  'Live music',
-  'Art exhibit',
-  'Photography walk',
-];
 
 const CustomDotMarker = ({ color, label, scale }) => (
   <View
@@ -86,6 +64,8 @@ export default function MapScreen() {
     date: null,
     interests: [],
   });
+
+  const [isLocating, setIsLocating] = useState(false);
 
   const unsubscribeRef = useRef(null);
   const searchInputRef = useRef(null);
@@ -203,6 +183,25 @@ export default function MapScreen() {
   // --- Add handler for list view toggle ---
   const handleToggleListView = () => setShowListView((prev) => !prev);
 
+  // Handler to center map on user's current location
+  const handleCenterOnUser = async () => {
+    setIsLocating(true);
+    try {
+      const location = await Location.getCurrentPositionAsync({});
+      const userRegion = {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      };
+      setRegion(userRegion);
+      fetchEventsInRegion(userRegion);
+    } catch (err) {
+      Alert.alert('Error', 'Unable to get your location.');
+    }
+    setIsLocating(false);
+  };
+
   return (
     <View style={styles.container}>
       {/* Always show search bar at the top */}
@@ -262,20 +261,33 @@ export default function MapScreen() {
       )}
 
       {/* Floating List Button (bottom left) */}
-      <TouchableOpacity
-        style={styles.listFab}
-        onPress={handleToggleListView}
-        activeOpacity={0.8}
-      >
-        <MaterialIcons name='list' size={28} color='#fff' />
-      </TouchableOpacity>
+      <View style={styles.leftFabContainer}>
+        <TouchableOpacity
+          style={styles.listFab}
+          onPress={handleToggleListView}
+          activeOpacity={0.8}
+        >
+          <Ionicons name='list' size={28} color='#fff' />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.compassFab}
+          onPress={handleCenterOnUser}
+          activeOpacity={0.8}
+        >
+          {isLocating ? (
+            <ActivityIndicator color='#fff' />
+          ) : (
+            <Ionicons name='navigate' size={22} color='#fff' />
+          )}
+        </TouchableOpacity>
+      </View>
 
       {/* Floating Action Button (bottom right) */}
       <TouchableOpacity
         style={styles.fab}
         onPress={() => setShowCreateModal(true)}
       >
-        <Text style={styles.fabIcon}>+</Text>
+        <Ionicons name='add' size={32} color='#fff' style={styles.fabIcon} />
       </TouchableOpacity>
 
       {/* Event List View as overlay modal */}
@@ -358,18 +370,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 22, // Ensure above map
   },
-  fabIcon: { color: '#fff', fontSize: 32 },
-  listFab: {
+  fabIcon: {
+    // Description: Center icon in FAB
+    textAlign: 'center',
+    textAlignVertical: 'center',
+  },
+  leftFabContainer: {
     position: 'absolute',
     bottom: 20,
     left: 20,
+    flexDirection: 'row',
+    zIndex: 60,
+  },
+  listFab: {
     width: 56,
     height: 56,
     borderRadius: 28,
     backgroundColor: '#007AFF',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 60, // Above map, below EventListView
+    marginRight: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  compassFab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,

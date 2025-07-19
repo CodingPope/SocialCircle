@@ -16,7 +16,7 @@ import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
-import { MaterialIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 const screenHeight = Dimensions.get('window').height;
 
@@ -86,6 +86,43 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   };
 
   // --- Join Event Logic ---
+  const attendees = Array.isArray(event.attendees) ? event.attendees : [];
+  const isOwner = event.ownerId === user?.uid || event.ownerID === user?.uid;
+  const isAttendee = attendees.includes(user?.uid);
+
+  // --- Join/Request/Chat Button Logic ---
+  let actionButtonLabel = 'Join Event';
+  if (isAttendee || isOwner) {
+    actionButtonLabel = 'Check Chat';
+  } else if (event.privacy === 'private') {
+    actionButtonLabel = 'Request To Join';
+  }
+
+  // --- Button Action Handler ---
+  const handleActionButton = async () => {
+    if (isAttendee || isOwner) {
+      navigation.navigate('EventChat', {
+        eventId: event.id,
+        locationName: address,
+      });
+      return;
+    }
+    if (event.privacy === 'private') {
+      // Description: Handle request to join for private events (stub for now)
+      alert('Request sent to host. Await approval.');
+      // TODO: Implement request logic (e.g., add to requests array in Firestore)
+      return;
+    }
+    await handleJoin();
+  };
+
+  // --- Report Button Handler ---
+  const handleReport = () => {
+    // Description: Stub for reporting event (open modal or navigate)
+    alert('Report functionality coming soon.');
+    // TODO: Implement report modal or navigation
+  };
+
   const handleJoin = async () => {
     // Description: Handles joining event, checks capacity, updates Firestore, navigates to chat
     if (!user || !event?.id) return;
@@ -95,7 +132,10 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
 
     // If already an attendee, just go to chat
     if (isAttendee) {
-      navigation.navigate('EventChat', { eventId: event.id }); // Ensure 'EventChat' is accessible
+      navigation.navigate('EventChat', {
+        eventId: event.id,
+        locationName: address, // Pass address as param
+      });
       return;
     }
 
@@ -115,7 +155,10 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       await updateDoc(eventRef, {
         attendees: arrayUnion(user.uid),
       });
-      navigation.navigate('EventChat', { eventId: event.id }); // Ensure 'EventChat' is accessible
+      navigation.navigate('EventChat', {
+        eventId: event.id,
+        locationName: address, // Pass address as param
+      });
     } catch (err) {
       alert('Failed to join event. Please try again.');
       console.error('Join event error:', err);
@@ -197,18 +240,23 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
         </Text>
         <Text style={styles.label}>Address:</Text>
         <TouchableOpacity style={styles.addressContainer} onPress={openInMaps}>
-          <MaterialIcons name='location-pin' size={16} color='blue' />
+          <Ionicons name='pin' size={20} color='blue' />
           <Text style={[styles.subText, { color: 'blue' }]}>{address}</Text>
         </TouchableOpacity>
 
         {userDetails && (
           <TouchableOpacity
             style={styles.userContainer}
-            onPress={() =>
-              navigation.navigate('OtherUserProfile', {
-                userId: userDetails.id,
-              })
-            }
+            onPress={() => {
+              // Description: Consistent profile navigation logic for Social Circle
+              if (userDetails.id === user?.uid) {
+                navigation.navigate('MainTabs', { screen: 'ProfileStack' });
+              } else {
+                navigation.navigate('OtherUserProfile', {
+                  userId: userDetails.id,
+                });
+              }
+            }}
           >
             <Image source={profileImageSource} style={styles.userImage} />
             <View>
@@ -225,21 +273,22 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
           {/* Capacity display */}
           {typeof event.capacity === 'number' && event.capacity > 0 ? (
             <Text style={styles.capacityText}>
-              {Array.isArray(event.attendees) ? event.attendees.length : 0} /{' '}
-              {event.capacity} Joined
+              {attendees.length} / {event.capacity} Joined
             </Text>
           ) : (
-            <Text style={styles.capacityText}>
-              {Array.isArray(event.attendees) ? event.attendees.length : 0}{' '}
-              joined
-            </Text>
+            <Text style={styles.capacityText}>{attendees.length} joined</Text>
           )}
-          {/* Only show Join if not owner */}
-          {!(event.ownerId === user?.uid || event.ownerID === user?.uid) && (
-            <TouchableOpacity style={styles.joinButton} onPress={handleJoin}>
-              <Text style={styles.joinButtonText}>Join Event</Text>
-            </TouchableOpacity>
-          )}
+          {/* Main Action Button */}
+          <TouchableOpacity
+            style={styles.joinButton}
+            onPress={handleActionButton}
+          >
+            <Text style={styles.joinButtonText}>{actionButtonLabel}</Text>
+          </TouchableOpacity>
+          {/* Report Button */}
+          <TouchableOpacity style={styles.reportButton} onPress={handleReport}>
+            <Text style={styles.reportButtonText}>Report</Text>
+          </TouchableOpacity>
           {/* <View style={styles.secondaryActionsContainer}>
             <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -322,6 +371,17 @@ const styles = StyleSheet.create({
     marginBottom: 8, // Add spacing between buttons
   },
   joinButtonText: { color: '#fff', fontWeight: 'bold' },
+  reportButton: {
+    backgroundColor: '#FFB300',
+    padding: 8,
+    borderRadius: 5,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  reportButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
   secondaryActionsContainer: {
     flexDirection: 'row', // Place cancel and share buttons side by side
     justifyContent: 'space-between',

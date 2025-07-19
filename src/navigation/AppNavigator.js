@@ -122,7 +122,7 @@ function RootStackScreen() {
       <RootStack.Screen
         name='EventChat'
         component={EventChatScreen}
-        options={{ headerShown: true, title: 'Event Chat' }}
+        options={{ headerShown: false, title: 'Event Chat' }}
       />
       <RootStack.Screen
         name='OtherUserProfile'
