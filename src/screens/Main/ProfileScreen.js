@@ -28,7 +28,14 @@ import {
 } from '../../firebase/config';
 import { useMyEvents } from '../../hooks/useMyEvents';
 import * as ImagePicker from 'expo-image-picker';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  doc,
+  getDoc,
+} from 'firebase/firestore';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 
 // Helper: Merge unique events and sort by startAt descending
@@ -504,6 +511,7 @@ export default function ProfileScreen({ navigation }) {
                 GOOGLE_MAPS_API_KEY={GOOGLE_MAPS_API_KEY}
                 onShare={onShare}
                 onEllipsisClick={handleEllipsisClick}
+                navigation={navigation} // Pass navigation prop
               />
             ))}
             {visibleCount < allEvents.length && (
@@ -528,6 +536,7 @@ const MemoProfileEventCard = memo(function ProfileEventCard({
   GOOGLE_MAPS_API_KEY,
   onShare,
   onEllipsisClick,
+  navigation, // Add navigation prop
 }) {
   // Description: Determine event role for user based on event arrays
   let role = '';
@@ -705,8 +714,28 @@ const MemoProfileEventCard = memo(function ProfileEventCard({
     : 0;
 
   // Description: Render event card
+  const handleEventClick = async () => {
+    try {
+      const eventRef = doc(db, 'events', item.id);
+      const eventSnapshot = await getDoc(eventRef);
+      if (!eventSnapshot.exists()) {
+        Alert.alert(
+          'Event Not Found',
+          'This event no longer exists or has been deleted.'
+        );
+        return;
+      }
+      navigation.navigate('EventChat', {
+        eventId: item.id,
+        locationName: item.location?.address || 'Location not specified',
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to check event status. Please try again.');
+    }
+  };
+
   return (
-    <View style={styles.eventCard}>
+    <TouchableOpacity style={styles.eventCard} onPress={handleEventClick}>
       {imageUrl && (
         <Image source={{ uri: imageUrl }} style={styles.eventImage} />
       )}
@@ -742,7 +771,7 @@ const MemoProfileEventCard = memo(function ProfileEventCard({
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 });
 

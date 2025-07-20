@@ -360,8 +360,6 @@ const EventChatScreen = () => {
           swipeDirection='down'
           style={styles.modal}
           backdropOpacity={0.4}
-          scrollHorizontal={false} // Enable vertical scrolling
-          scrollVertical={true} // Allow scrolling if content exceeds screen height
         >
           <ScrollView
             style={styles.modalContent}
