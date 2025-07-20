@@ -507,8 +507,8 @@ const MemoProfileEventCard = memo(function ProfileEventCard({
     role = 'Attended';
   }
 
-  // Description: Use event image or fallback
-  const imageUrl = item.imageURL || 'https://example.com/default-event.png';
+  // Description: Use event image or exclude image section if none exists
+  const imageUrl = item.imageURL || item.imageUri || item.imageUrl || null;
 
   // --- Date/time logic ---
   let eventDateTime = '';
@@ -640,7 +640,9 @@ const MemoProfileEventCard = memo(function ProfileEventCard({
   // Description: Render event card
   return (
     <View style={styles.eventCard}>
-      <Image source={{ uri: imageUrl }} style={styles.eventImage} />
+      {imageUrl && (
+        <Image source={{ uri: imageUrl }} style={styles.eventImage} />
+      )}
       <TouchableOpacity
         style={styles.ellipsisButtonAbsolute}
         accessibilityLabel='More options'

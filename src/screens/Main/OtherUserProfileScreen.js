@@ -421,12 +421,8 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       role = isUpcoming ? 'Attending' : 'Attended';
     }
 
-    // Description: Use event image or fallback
-    const imageUrl =
-      item.imageURL ||
-      item.imageUri ||
-      item.imageUrl ||
-      'https://example.com/default-event.png';
+    // Description: Use event image or exclude image section if none exists
+    const imageUrl = item.imageURL || item.imageUri || item.imageUrl || null;
 
     // --- Date/time logic ---
     let eventDateTime = '';
@@ -542,13 +538,12 @@ export default function OtherUserProfileScreen({ route, navigation }) {
 
     return (
       <View key={item.id} style={styles.eventCard}>
-        {/* Event Image */}
-        <Image source={{ uri: imageUrl }} style={styles.eventImage} />
-        {/* Ellipsis in top right */}
+        {imageUrl && (
+          <Image source={{ uri: imageUrl }} style={styles.eventImage} />
+        )}
         <TouchableOpacity style={styles.ellipsisButtonAbsolute}>
           <Text style={styles.ellipsisText}>•••</Text>
         </TouchableOpacity>
-        {/* Event Info */}
         <View style={styles.eventInfo}>
           <View style={styles.eventInfoHeader}>
             <Text style={styles.eventRole}>{role}</Text>
