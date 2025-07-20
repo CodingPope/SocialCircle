@@ -22,6 +22,7 @@ import MyCircle from '../screens/Main/MyCircle';
 import ProfileScreen from '../screens/Main/ProfileScreen';
 import OtherUserProfileScreen from '../screens/Main/OtherUserProfileScreen';
 import EventChatScreen from '../screens/Chat/EventChatScreen';
+import NotificationScreen from '../screens/Notification/NotificationScreen';
 
 // --- Auth Stack ---
 const AuthStack = createNativeStackNavigator();
@@ -128,6 +129,11 @@ function RootStackScreen() {
         name='OtherUserProfile'
         component={OtherUserProfileScreen}
         options={{ headerShown: false, title: 'Profile' }}
+      />
+      <RootStack.Screen
+        name='Notifications'
+        component={NotificationScreen}
+        options={{ headerShown: false, title: 'Notifications' }}
       />
     </RootStack.Navigator>
   );

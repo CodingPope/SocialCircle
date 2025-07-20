@@ -11,7 +11,15 @@ import {
 import { initializeApp } from 'firebase/app';
 import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
-import { getFirestore, doc, getDoc, updateDoc } from 'firebase/firestore';
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+  increment, // <-- add increment import
+} from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -76,4 +84,103 @@ export const updateEventCount = async (uid) => {
       eventCount: createdEvents + attendedEvents,
     });
   }
+};
+
+// Add a friend (mutual)
+export const addFriend = async (currentUid, targetUid) => {
+  // Add each user to the other's friends array
+  await updateDoc(doc(db, 'users', currentUid), {
+    friends: arrayUnion(targetUid),
+  });
+  await updateDoc(doc(db, 'users', targetUid), {
+    friends: arrayUnion(currentUid),
+  });
+};
+
+// Remove a friend (mutual)
+export const removeFriend = async (currentUid, targetUid) => {
+  await updateDoc(doc(db, 'users', currentUid), {
+    friends: arrayRemove(targetUid),
+  });
+  await updateDoc(doc(db, 'users', targetUid), {
+    friends: arrayRemove(currentUid),
+  });
+};
+
+// Request to follow (private profile)
+export const requestFollow = async (currentUid, targetUid) => {
+  // Description: Add currentUid to target user's followRequests array
+  await updateDoc(doc(db, 'users', targetUid), {
+    followRequests: arrayUnion(currentUid),
+  });
+};
+
+// Approve follow request
+export const approveFollowRequest = async (currentUid, requesterUid) => {
+  // Description: Remove requesterUid from followRequests, add to followers/following
+  await updateDoc(doc(db, 'users', currentUid), {
+    followRequests: arrayRemove(requesterUid),
+    followers: arrayUnion(requesterUid),
+  });
+  await updateDoc(doc(db, 'users', requesterUid), {
+    following: arrayUnion(currentUid),
+  });
+};
+
+// Deny follow request
+export const denyFollowRequest = async (currentUid, requesterUid) => {
+  // Description: Remove requesterUid from followRequests
+  await updateDoc(doc(db, 'users', currentUid), {
+    followRequests: arrayRemove(requesterUid),
+  });
+};
+
+// Follow a user (one-way, for public profiles)
+export const followUser = async (currentUid, targetUid) => {
+  // Description: Prevent following yourself
+  if (currentUid === targetUid) return;
+
+  // Description: Add targetUid to current user's following array if not already present
+  const currentUserDoc = doc(db, 'users', currentUid);
+  const currentUserSnap = await getDoc(currentUserDoc);
+  const currentUserData = currentUserSnap.exists()
+    ? currentUserSnap.data()
+    : {};
+  const alreadyFollowing =
+    Array.isArray(currentUserData.following) &&
+    currentUserData.following.includes(targetUid);
+  if (alreadyFollowing) return;
+
+  // Description: Add to following array and increment target user's followerCount atomically
+  await updateDoc(currentUserDoc, {
+    following: arrayUnion(targetUid),
+  });
+  await updateDoc(doc(db, 'users', targetUid), {
+    followerCount: increment(1),
+  });
+};
+
+// Unfollow a user
+export const unfollowUser = async (currentUid, targetUid) => {
+  // Description: Prevent unfollowing yourself
+  if (currentUid === targetUid) return;
+
+  // Description: Remove targetUid from current user's following array if present
+  const currentUserDoc = doc(db, 'users', currentUid);
+  const currentUserSnap = await getDoc(currentUserDoc);
+  const currentUserData = currentUserSnap.exists()
+    ? currentUserSnap.data()
+    : {};
+  const isFollowing =
+    Array.isArray(currentUserData.following) &&
+    currentUserData.following.includes(targetUid);
+  if (!isFollowing) return;
+
+  // Description: Remove from following array and decrement target user's followerCount atomically
+  await updateDoc(currentUserDoc, {
+    following: arrayRemove(targetUid),
+  });
+  await updateDoc(doc(db, 'users', targetUid), {
+    followerCount: increment(-1),
+  });
 };

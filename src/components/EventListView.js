@@ -21,7 +21,7 @@ import BottomSheet, {
 const EventListView = ({ events, onCloseListView }) => {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const bottomSheetRef = useRef(null);
-  const snapPoints = useMemo(() => ['25%', '60%', '90%'], []);
+  const snapPoints = useMemo(() => ['80%', '90%'], []);
 
   const handleEventPress = (event) => {
     setSelectedEvent(event);
@@ -32,10 +32,18 @@ const EventListView = ({ events, onCloseListView }) => {
   };
 
   const formatTimestamp = (timestamp) => {
-    if (timestamp && timestamp.seconds) {
+    if (!timestamp) return 'Date not set';
+    if (timestamp.toDate) {
+      // Firestore Timestamp
+      return format(timestamp.toDate(), 'MMM d, yyyy h:mm a');
+    }
+    if (timestamp instanceof Date) {
+      return format(timestamp, 'MMM d, yyyy h:mm a');
+    }
+    if (timestamp.seconds) {
       return format(new Date(timestamp.seconds * 1000), 'MMM d, yyyy h:mm a');
     }
-    return 'Invalid date';
+    return 'Date not set';
   };
 
   const fetchUserProfilePicture = async (ownerId) => {
@@ -53,28 +61,50 @@ const EventListView = ({ events, onCloseListView }) => {
   };
 
   const fetchCityAndState = async (location) => {
-    try {
-      const { latitude, longitude } = location;
-      const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
-      );
-      const data = await res.json();
-      if (data.status === 'OK' && data.results.length) {
-        const addressComponents = data.results[0].address_components;
-        const city = addressComponents.find((c) =>
-          c.types.includes('locality')
-        )?.short_name;
-        const state = addressComponents.find((c) =>
-          c.types.includes('administrative_area_level_1')
-        )?.short_name;
-        return city && state ? `${city}, ${state}` : 'Address not available';
+    // Try lat/lng geocode, else fallback to city/state/address string
+    if (location && location.latitude && location.longitude) {
+      try {
+        const res = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.latitude},${location.longitude}&key=${GOOGLE_MAPS_API_KEY}`
+        );
+        const data = await res.json();
+        if (data.status === 'OK' && data.results.length) {
+          const addressComponents = data.results[0].address_components;
+          const city = addressComponents.find((c) =>
+            c.types.includes('locality')
+          )?.short_name;
+          const state = addressComponents.find((c) =>
+            c.types.includes('administrative_area_level_1')
+          )?.short_name;
+          return city && state ? `${city}, ${state}` : 'Address not available';
+        }
+      } catch (err) {
+        console.error('Error fetching address:', err);
       }
-      console.warn('Geocoding API returned no results:', data);
-      return 'Address not available';
-    } catch (err) {
-      console.error('Error fetching address:', err);
-      return 'Error fetching address';
     }
+    // Fallback: city/state/address string
+    if (location && location.city && location.state) {
+      return `${location.city}, ${location.state}`;
+    }
+    if (typeof location === 'string') {
+      const parts = location.split(',');
+      if (parts.length >= 2) {
+        return `${parts[parts.length - 2].trim()}, ${parts[
+          parts.length - 1
+        ].trim()}`;
+      }
+      return location.trim();
+    }
+    if (location && location.address) {
+      const addrParts = location.address.split(',');
+      if (addrParts.length >= 2) {
+        return `${addrParts[addrParts.length - 2].trim()}, ${addrParts[
+          addrParts.length - 1
+        ].trim()}`;
+      }
+      return location.address.trim();
+    }
+    return 'Location not specified';
   };
 
   const EventItem = ({ item }) => {

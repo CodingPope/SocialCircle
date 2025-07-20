@@ -11,7 +11,7 @@ import {
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useNavigation } from '@react-navigation/native';
 import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { db, updateUserData } from '../firebase/config';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
@@ -27,7 +27,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
-  const snapPoints = useMemo(() => ['80%'], []);
+  const snapPoints = useMemo(() => ['90%'], []);
 
   useEffect(() => {
     if (!event?.location) {
@@ -155,6 +155,10 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       await updateDoc(eventRef, {
         attendees: arrayUnion(user.uid),
       });
+      // Add event ID to user's attendedEvents array
+      await updateUserData(user.uid, {
+        attendedEvents: arrayUnion(event.id),
+      });
       navigation.navigate('EventChat', {
         eventId: event.id,
         locationName: address, // Pass address as param
@@ -187,21 +191,15 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
         showsVerticalScrollIndicator
         contentContainerStyle={{ padding: 10, flexGrow: 1 }}
       >
-        {/* Event Image with fallback */}
-        {event.imageUri || event.imageUrl ? (
+        {/* Event Image: Only show if imageUri or imageUrl exists */}
+        {(event.imageUri || event.imageUrl) && (
           <Image
             source={{ uri: event.imageUri || event.imageUrl }}
             style={styles.image}
             resizeMode='cover'
           />
-        ) : (
-          <Image
-            source={require('../../assets/smileDefault.png')}
-            style={styles.image}
-            resizeMode='cover'
-          />
         )}
-
+        {/* No fallback image shown if no imageUri/imageUrl */}
         <Text style={styles.title}>{event.title || 'Untitled Event'}</Text>
         {event.category && (
           <Text style={styles.categoryTag}>{event.category}</Text>

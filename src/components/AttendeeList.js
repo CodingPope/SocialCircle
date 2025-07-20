@@ -48,7 +48,11 @@ export default function AttendeeList({ attendees = [] }) {
     <View style={styles.attendee}>
       <Image
         source={
-          item.profileImageUrl ? { uri: item.profileImageUrl } : smileDefault
+          item.profileImage
+            ? { uri: item.profileImage }
+            : item.avatarURL
+            ? { uri: item.avatarURL }
+            : smileDefault
         }
         style={styles.avatar}
         accessibilityLabel={`${item.displayName || 'User'} avatar`}

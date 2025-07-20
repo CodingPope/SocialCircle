@@ -25,8 +25,27 @@ export function useEvents(interests = [], rollingDays = 7) {
     const unsub = onSnapshot(
       q,
       (snapshot) => {
-        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setEvents(docs); // Always set the full list of events
+        const now = Date.now();
+        const docs = snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          // --- Remove expired events (date + 1 hour) ---
+          .filter((event) => {
+            let eventTime = null;
+            if (event.endAt) {
+              if (event.endAt.toDate)
+                eventTime = event.endAt.toDate().getTime();
+              else if (event.endAt.seconds)
+                eventTime = event.endAt.seconds * 1000;
+            } else if (event.date) {
+              if (event.date.toDate) eventTime = event.date.toDate().getTime();
+              else if (event.date.seconds)
+                eventTime = event.date.seconds * 1000;
+              else if (event.date instanceof Date)
+                eventTime = event.date.getTime();
+            }
+            return eventTime && eventTime + 60 * 60 * 1000 > now;
+          });
+        setEvents(docs); // Always set the filtered list of events
       },
       (error) => {
         console.error('Firestore onSnapshot error:', error);

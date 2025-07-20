@@ -1,6 +1,3 @@
-// ✅ Fixed: Ensures filtering always applies to the original events list, not previously filtered ones.
-// Pass in the full unfiltered events list from the parent and always filter from it.
-
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -65,12 +62,16 @@ const EventFilterWindow = ({
   onClose,
   onApplyFilters,
   selectedFilters,
+  currentUserGender, // ✅ Added prop
 }) => {
   const [selectedDate, setSelectedDate] = useState(
     selectedFilters?.date || null
   );
   const [selectedInterests, setSelectedInterests] = useState(
     selectedFilters?.interests || []
+  );
+  const [genderOnly, setGenderOnly] = useState(
+    selectedFilters?.genderOnly || false
   );
   const [showDatePicker, setShowDatePicker] = useState(false);
   const slideAnim = useRef(new Animated.Value(500)).current;
@@ -95,6 +96,7 @@ const EventFilterWindow = ({
     if (selectedFilters) {
       setSelectedDate(selectedFilters.date || null);
       setSelectedInterests(selectedFilters.interests || []);
+      setGenderOnly(selectedFilters.genderOnly || false); // ✅ restore state
     }
   }, [selectedFilters]);
 
@@ -104,6 +106,7 @@ const EventFilterWindow = ({
     onApplyFilters({
       date: selectedDate,
       interests: selectedInterests,
+      genderOnly: genderOnly ? currentUserGender : null, // ✅ Include gender filter
     });
   };
 
@@ -163,6 +166,25 @@ const EventFilterWindow = ({
             toggleInterest={toggleInterest}
           />
 
+          {/* ✅ Gender Filter Button */}
+          <Text style={styles.sectionTitle}>Privacy</Text>
+          <TouchableOpacity
+            style={[
+              styles.genderFilterButton,
+              genderOnly && styles.genderFilterButtonActive,
+            ]}
+            onPress={() => setGenderOnly((prev) => !prev)}
+          >
+            <Text
+              style={{
+                color: genderOnly ? '#fff' : '#000',
+                fontWeight: 'bold',
+              }}
+            >
+              {currentUserGender === 'male' ? 'Male Only' : 'Women Only'}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.applyButton}
             onPress={handleApplyFilters}
@@ -184,7 +206,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
-    zIndex: 90, // Ensure this is above EventListView
+    zIndex: 90,
   },
   container: {
     padding: 20,
@@ -216,6 +238,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
   },
   selectedInterest: { backgroundColor: '#007BFF' },
+  genderFilterButton: {
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 20,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  genderFilterButtonActive: {
+    backgroundColor: '#007BFF',
+  },
   applyButton: {
     marginTop: 20,
     padding: 15,

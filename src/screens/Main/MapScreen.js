@@ -94,11 +94,34 @@ export default function MapScreen() {
 
   const applyFilters = (filters) => {
     setSelectedFilters(filters);
-    const { date, interests } = filters;
+    const { date, interests, genderOnly } = filters;
     let filtered = [...events];
+
+    // --- Remove expired events (date + 1 hour) ---
+    const now = Date.now();
+    filtered = filtered.filter((event) => {
+      let eventTime = null;
+      if (event.endAt) {
+        if (event.endAt.toDate) eventTime = event.endAt.toDate().getTime();
+        else if (event.endAt.seconds) eventTime = event.endAt.seconds * 1000;
+      } else if (event.date) {
+        if (event.date.toDate) eventTime = event.date.toDate().getTime();
+        else if (event.date.seconds) eventTime = event.date.seconds * 1000;
+        else if (event.date instanceof Date) eventTime = event.date.getTime();
+      }
+      // Remove if eventTime is not set or is more than 1 hour ago
+      return eventTime && eventTime + 60 * 60 * 1000 > now;
+    });
+
     if (date) filtered = filtered.filter((event) => event.date === date);
-    if (interests.length > 0)
+    if (interests && interests.length > 0)
       filtered = filtered.filter((event) => interests.includes(event.category));
+    // Description: Filter events by privacy if genderOnly is set
+    if (genderOnly) {
+      filtered = filtered.filter(
+        (event) => event.privacy === genderOnly // Only show events with privacy set to user's gender
+      );
+    }
     setFilteredEvents(filtered);
   };
 
@@ -123,7 +146,8 @@ export default function MapScreen() {
         ...doc.data(),
       }));
       setEvents(regionEvents);
-      setFilteredEvents(regionEvents);
+      // Description: Always re-apply filters after fetching events
+      applyFilters(selectedFilters);
     });
   };
 
@@ -329,6 +353,7 @@ export default function MapScreen() {
             setShowFilterWindow(false);
           }}
           selectedFilters={selectedFilters}
+          currentUserGender={user.sex} // e.g., "male" or "female"
         />
       )}
 

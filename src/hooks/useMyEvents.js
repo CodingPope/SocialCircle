@@ -34,7 +34,29 @@ export function useMyEvents(creatorId) {
       q,
       (snapshot) => {
         // Map Firestore documents to an array of event objects
-        setEvents(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+        const now = Date.now();
+        setEvents(
+          snapshot.docs
+            .map((doc) => ({ id: doc.id, ...doc.data() }))
+            // --- Remove expired events (date + 1 hour) ---
+            .filter((event) => {
+              let eventTime = null;
+              if (event.endAt) {
+                if (event.endAt.toDate)
+                  eventTime = event.endAt.toDate().getTime();
+                else if (event.endAt.seconds)
+                  eventTime = event.endAt.seconds * 1000;
+              } else if (event.date) {
+                if (event.date.toDate)
+                  eventTime = event.date.toDate().getTime();
+                else if (event.date.seconds)
+                  eventTime = event.date.seconds * 1000;
+                else if (event.date instanceof Date)
+                  eventTime = event.date.getTime();
+              }
+              return eventTime && eventTime + 60 * 60 * 1000 > now;
+            })
+        );
       },
       (error) => {
         // Enhanced error handling

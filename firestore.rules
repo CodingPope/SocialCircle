@@ -15,6 +15,11 @@ service cloud.firestore {
       // allow them to update and write their own profiles
       allow update, write: if request.auth != null
         && request.auth.uid == userId;
+
+      // Allow user to update only their 'friends' array
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['friends']);
     }
 
     match /events/{eventId} {
@@ -27,6 +32,15 @@ service cloud.firestore {
         && resource.data.ownerId == request.auth.uid;
       allow update: if request.auth != null
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendees']);
+    }
+
+    match /notifications/{notificationId} {
+      // Allow users to read and update their own notifications
+      allow read, update: if request.auth != null && request.auth.uid == resource.data.userId;
+      // Optionally, allow creation if the notification is for the user
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+      // Optionally, allow delete if the notification belongs to the user
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
     }
 
     match /{document=**} {
