@@ -7,7 +7,7 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
       allow read, write: if request.auth != null && request.auth.uid in resource.data.attendees;
       allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
-      allow update: if request.auth != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendees']);
+      allow update: if request.auth != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendees', 'requests']);
     }
 
     // USER DOCUMENTS
@@ -33,11 +33,13 @@ service cloud.firestore {
 
     match /notifications/{notificationId} {
       // Allow users to read and update their own notifications
-      allow read, update: if request.auth != null && request.auth.uid == resource.data.userId;
-      // Optionally, allow creation if the notification is for the user
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+      allow read, update: if request.auth != null && request.auth.uid == resource.data.recipientId;
+
+      // Allow creation if the notification is for the user
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.recipientId;
+
       // Optionally, allow delete if the notification belongs to the user
-      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+      allow delete: if request.auth != null && request.auth.uid == resource.data.recipientId;
     }
 
     // (optional) shut down everything else

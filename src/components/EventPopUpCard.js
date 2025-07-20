@@ -10,7 +10,14 @@ import {
 } from 'react-native';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useNavigation } from '@react-navigation/native';
-import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  arrayUnion,
+  collection,
+  addDoc,
+} from 'firebase/firestore';
 import { db, updateUserData } from '../firebase/config';
 import BottomSheet, {
   BottomSheetBackdrop,
@@ -87,15 +94,17 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
 
   // --- Join Event Logic ---
   const attendees = Array.isArray(event.attendees) ? event.attendees : [];
+  const requests = Array.isArray(event.requests) ? event.requests : [];
   const isOwner = event.ownerId === user?.uid || event.ownerID === user?.uid;
   const isAttendee = attendees.includes(user?.uid);
+  const hasRequested = requests.includes(user?.uid);
 
   // --- Join/Request/Chat Button Logic ---
   let actionButtonLabel = 'Join Event';
   if (isAttendee || isOwner) {
     actionButtonLabel = 'Check Chat';
-  } else if (event.privacy === 'private') {
-    actionButtonLabel = 'Request To Join';
+  } else if (event.privacy === 'rsvp') {
+    actionButtonLabel = hasRequested ? 'Request Pending' : 'Request To Join';
   }
 
   // --- Button Action Handler ---
@@ -107,20 +116,41 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       });
       return;
     }
-    if (event.privacy === 'private') {
-      // Description: Handle request to join for private events (stub for now)
-      alert('Request sent to host. Await approval.');
-      // TODO: Implement request logic (e.g., add to requests array in Firestore)
+    if (event.privacy === 'rsvp') {
+      if (hasRequested) {
+        alert('Your request is pending approval.');
+        return;
+      }
+      await handleRequestToJoin();
       return;
     }
     await handleJoin();
   };
 
-  // --- Report Button Handler ---
-  const handleReport = () => {
-    // Description: Stub for reporting event (open modal or navigate)
-    alert('Report functionality coming soon.');
-    // TODO: Implement report modal or navigation
+  const handleRequestToJoin = async () => {
+    if (!user || !event?.id) return;
+    try {
+      const eventRef = doc(db, 'events', event.id);
+      await updateDoc(eventRef, {
+        requests: arrayUnion(user.uid), // Add user ID to event's requests array
+      });
+
+      // Create a notification for the event owner
+      const notificationRef = collection(db, 'notifications');
+      await addDoc(notificationRef, {
+        type: 'join_request', // Notification type
+        eventId: event.id, // Event ID
+        requesterId: user.uid, // User requesting to join
+        recipientId: event.ownerId, // Event owner
+        message: `${user.displayName || 'User'} requested to join your event.`,
+        createdAt: new Date(), // Timestamp
+      });
+
+      alert('Request sent to the host. Await approval.');
+    } catch (err) {
+      console.error('Request to join error:', err);
+      alert('Failed to send request. Please try again.');
+    }
   };
 
   const handleJoin = async () => {
@@ -169,6 +199,23 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
     }
   };
 
+  const handleReport = async () => {
+    if (!user || !event?.id) return;
+    try {
+      const reportRef = collection(db, 'reports');
+      await addDoc(reportRef, {
+        reporterId: user.uid,
+        eventId: event.id,
+        reportedAt: new Date(),
+        status: 'pending',
+      });
+      alert('Event reported successfully. Our team will review it shortly.');
+    } catch (err) {
+      console.error('Report error:', err);
+      alert('Failed to report the event. Please try again.');
+    }
+  };
+
   if (!event) return null;
 
   return (
@@ -176,13 +223,13 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       ref={bottomSheetRef}
       snapPoints={snapPoints}
       enablePanDownToClose
-      onClose={onClose}
+      onClose={onClose} // Close modal when clicking outside
       backdropComponent={(props) => (
         <BottomSheetBackdrop
           {...props}
           disappearsOnIndex={-1}
           appearsOnIndex={0}
-          pressBehavior='close'
+          pressBehavior='close' // Close modal when clicking backdrop
         />
       )}
       style={[styles.bottomSheet, { maxHeight: screenHeight }]} // limit the sheet, not the scroll

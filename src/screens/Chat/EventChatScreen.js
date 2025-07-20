@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Linking,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
@@ -24,9 +25,13 @@ import {
   query,
   orderBy,
   getDoc,
+  deleteDoc,
+  updateDoc,
+  arrayUnion,
 } from 'firebase/firestore';
 import { db, auth } from '../../firebase/config';
 import smileDefault from '../../../assets/smileDefault.png';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 const EventChatScreen = () => {
   const route = useRoute();
@@ -40,6 +45,7 @@ const EventChatScreen = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [hostUser, setHostUser] = useState(null);
+  const [requesters, setRequesters] = useState([]); // Add state for requesters
   const flatListRef = useRef(null);
 
   // Fetch event info + attendees
@@ -103,7 +109,7 @@ const EventChatScreen = () => {
               `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
               'User',
             photoURL:
-              userData.photoURL ||
+              userData.profileImage ||
               userData.profileImage ||
               userData.avatarURL ||
               null,
@@ -140,6 +146,110 @@ const EventChatScreen = () => {
     event?.ownerId === auth.currentUser?.uid ||
     event?.hostId === auth.currentUser?.uid;
 
+  // Accept request handler
+  const handleAcceptRequest = async (userId) => {
+    try {
+      const eventRef = doc(db, 'events', eventId);
+      await updateDoc(eventRef, {
+        attendees: arrayUnion(userId),
+        requests: event.requests.filter((req) => req !== userId),
+      });
+
+      // Notify the requester
+      const notificationRef = collection(db, 'notifications');
+      await addDoc(notificationRef, {
+        type: 'request_accepted',
+        eventId: eventId,
+        recipientId: userId,
+        createdAt: new Date(),
+      });
+
+      setEvent((prev) => ({
+        ...prev,
+        requests: prev.requests.filter((req) => req !== userId),
+      }));
+    } catch (err) {
+      console.error('Error accepting request:', err.message);
+      alert('Failed to accept request. Please check your permissions.');
+    }
+  };
+
+  // Decline request handler
+  const handleDeclineRequest = async (userId) => {
+    try {
+      const eventRef = doc(db, 'events', eventId);
+      await updateDoc(eventRef, {
+        requests: event.requests.filter((req) => req !== userId),
+      });
+
+      // Notify the requester
+      const notificationRef = collection(db, 'notifications');
+      await addDoc(notificationRef, {
+        type: 'request_declined',
+        eventId: eventId,
+        recipientId: userId,
+        createdAt: new Date(),
+      });
+
+      setEvent((prev) => ({
+        ...prev,
+        requests: prev.requests.filter((req) => req !== userId),
+      }));
+    } catch (err) {
+      console.error('Error declining request:', err.message);
+      alert('Failed to decline request. Please check your permissions.');
+    }
+  };
+
+  // Ensure requester icon pulls correct user data
+  const fetchRequesterDetails = async (userId) => {
+    try {
+      const userDoc = await getDoc(doc(db, 'users', userId));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        return {
+          id: userDoc.id,
+          displayName:
+            userData.displayName ||
+            `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
+            'User',
+          photoURL: userData.profileImage || smileDefault,
+          ranking:
+            typeof userData.ranking === 'number'
+              ? userData.ranking.toFixed(1)
+              : 'Unrated',
+        };
+      }
+      return {
+        id: userId,
+        displayName: 'User',
+        photoURL: smileDefault,
+        ranking: 'Unrated',
+      };
+    } catch (err) {
+      console.error('Error fetching requester details:', err.message);
+      return {
+        id: userId,
+        displayName: 'User',
+        photoURL: smileDefault,
+        ranking: 'Unrated',
+      };
+    }
+  };
+
+  // Fetch requester details when event requests change
+  useEffect(() => {
+    const fetchRequesters = async () => {
+      const requesterPromises = event?.requests?.map(async (userId) => {
+        const userDetails = await fetchRequesterDetails(userId);
+        return { userId, ...userDetails };
+      });
+      const resolvedRequesters = await Promise.all(requesterPromises || []);
+      setRequesters(resolvedRequesters);
+    };
+    fetchRequesters();
+  }, [event?.requests]);
+
   if (loading || !event) {
     return <ActivityIndicator style={{ flex: 1 }} />;
   }
@@ -153,7 +263,7 @@ const EventChatScreen = () => {
       <View style={styles.headerContainer}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backText}>Back</Text>
+            <Ionicons name='arrow-back' size={24} color='#007AFF' />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setIsModalVisible(true)}>
             <Text style={styles.headerTitle}>
@@ -250,6 +360,8 @@ const EventChatScreen = () => {
           swipeDirection='down'
           style={styles.modal}
           backdropOpacity={0.4}
+          scrollHorizontal={false} // Enable vertical scrolling
+          scrollVertical={true} // Allow scrolling if content exceeds screen height
         >
           <ScrollView
             style={styles.modalContent}
@@ -411,12 +523,101 @@ const EventChatScreen = () => {
               )}
             </View>
 
+            {/* Requests Section */}
+            {event.ownerId === auth.currentUser?.uid && (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Requests</Text>
+                {requesters.length > 0 ? (
+                  requesters.map((requester) => (
+                    <TouchableOpacity
+                      key={requester.userId}
+                      style={styles.requestItem}
+                      onPress={() => {
+                        setIsModalVisible(false);
+                        navigation.navigate('OtherUserProfile', {
+                          userId: requester.userId,
+                        });
+                      }}
+                    >
+                      <Image
+                        source={{ uri: requester.photoURL }}
+                        style={styles.requestAvatar}
+                      />
+                      <View style={styles.requestDetails}>
+                        <Text style={styles.requestName}>
+                          {requester.displayName}
+                        </Text>
+                        <Text style={styles.requestRanking}>
+                          Ranking: {requester.ranking}
+                        </Text>
+                      </View>
+                      <View style={styles.requestActions}>
+                        <TouchableOpacity
+                          style={styles.acceptButton}
+                          onPress={() => handleAcceptRequest(requester.userId)}
+                        >
+                          <Text style={styles.acceptButtonText}>Accept</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.declineButton}
+                          onPress={() => handleDeclineRequest(requester.userId)}
+                        >
+                          <Text style={styles.declineButtonText}>Decline</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <Text style={styles.emptyText}>
+                    No requests at the moment.
+                  </Text>
+                )}
+              </View>
+            )}
+
             {/* Actions */}
             <TouchableOpacity
               style={styles.leaveButton}
-              onPress={() => console.log('Leave Event')}
+              onPress={() => {
+                if (isCreator) {
+                  Alert.alert(
+                    'Delete Event',
+                    'Are you sure you want to delete this event? This action cannot be undone.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => {
+                          // Description: Delete event from Firestore
+                          const eventRef = doc(db, 'events', eventId);
+                          deleteDoc(eventRef)
+                            .then(() => {
+                              navigation.goBack();
+                              Alert.alert(
+                                'Event Deleted',
+                                'The event has been deleted.'
+                              );
+                            })
+                            .catch((error) => {
+                              console.error('Error deleting event:', error);
+                              Alert.alert(
+                                'Error',
+                                'Failed to delete the event.'
+                              );
+                            });
+                        },
+                      },
+                    ]
+                  );
+                } else {
+                  console.log('Leave Event');
+                }
+              }}
             >
-              <Text style={styles.leaveButtonText}>Leave Event</Text>
+              <Text style={styles.leaveButtonText}>
+                {isCreator ? 'Delete Event' : 'Leave Event'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.reportButton}
@@ -465,13 +666,13 @@ const styles = StyleSheet.create({
   sendText: { color: '#007AFF', fontWeight: 'bold', fontSize: 16 },
 
   // Modal
-  modal: { justifyContent: 'flex-end', margin: 0 },
+  modal: { justifyContent: 'flex-end', margin: 0, flex: 1 },
   modalContent: {
     backgroundColor: '#f9f9f9',
     padding: 16,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: '85%',
+    maxHeight: '90%',
   },
   card: {
     backgroundColor: '#fff',
@@ -537,9 +738,9 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   hostAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 10,
     backgroundColor: '#eee',
   },
   hostName: {
@@ -573,6 +774,74 @@ const styles = StyleSheet.create({
   backText: { fontSize: 16, color: '#007AFF' },
   headerTitle: { fontWeight: 'bold', fontSize: 16 },
   ellipsis: { fontSize: 24, color: '#888' },
+
+  // Requests Section Styles
+  requestItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    marginVertical: 8,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  requestAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 10,
+    marginRight: 3,
+    backgroundColor: '#eee',
+  },
+  requestDetails: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  requestName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  requestRanking: {
+    fontSize: 13,
+    color: '#888',
+    marginTop: 2,
+  },
+  requestActions: {
+    flexDirection: 'column', // Change to column for stacking
+    alignItems: 'center',
+    gap: 8,
+  },
+  acceptButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  acceptButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  declineButton: {
+    backgroundColor: '#F44336',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  declineButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#888',
+    fontSize: 14,
+    marginTop: 8,
+  },
 });
 
 export default EventChatScreen;

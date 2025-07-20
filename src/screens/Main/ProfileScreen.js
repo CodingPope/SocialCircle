@@ -74,6 +74,8 @@ export default function ProfileScreen({ navigation }) {
   // --- Add: Track logout state ---
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isPrivate, setIsPrivate] = useState(user.isPrivate || false);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState(null);
 
   // --- Derived ---
   const fullName = `${user.firstName} ${user.lastName}`;
@@ -85,6 +87,12 @@ export default function ProfileScreen({ navigation }) {
           .toLocaleString('default', { month: 'short', year: 'numeric' })
       : '';
   const friendCount = Array.isArray(user.friends) ? user.friends.length : 0;
+  const followerCount =
+    typeof user.followerCount === 'number'
+      ? user.followerCount
+      : Array.isArray(user.followers)
+      ? user.followers.length
+      : 0;
   const eventCount =
     (Array.isArray(user.createdEvents) ? user.createdEvents.length : 0) +
     (Array.isArray(user.attendedEvents) ? user.attendedEvents.length : 0);
@@ -288,30 +296,87 @@ export default function ProfileScreen({ navigation }) {
     } catch {}
   };
 
+  const handleEllipsisClick = (event) => {
+    setSelectedEvent(event);
+    setModalVisible(true);
+  };
+
+  const handleDeleteEvent = () => {
+    // Description: Stub for deleting event logic
+    alert('Delete Event functionality coming soon.');
+    setModalVisible(false);
+  };
+
+  const handleRemoveEvent = () => {
+    // Description: Stub for removing event from timeline logic
+    alert('Remove Event functionality coming soon.');
+    setModalVisible(false);
+  };
+
   // --- Render ---
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Modal for ellipsis options */}
+      <Modal
+        visible={modalVisible}
+        animationType='slide'
+        transparent
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPressOut={() => setModalVisible(false)} // Close modal when clicking overlay
+        >
+          <View style={styles.modalContent}>
+            {selectedEvent &&
+            (selectedEvent.ownerId === user?.uid ||
+              selectedEvent.ownerID === user?.uid) ? (
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={handleDeleteEvent}
+              >
+                <Text style={styles.modalOptionText}>Delete Event</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.modalOption}
+                onPress={handleRemoveEvent}
+              >
+                <Text style={styles.modalOptionText}>Remove Event</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={() => setModalVisible(false)}
+            >
+              <Text style={styles.modalOptionText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Sidebar Modal */}
       <Modal
         visible={menuVisible}
-        animationType='slide'
+        animationType='slide' // Slide up animation for modal
         transparent
         onRequestClose={() => setMenuVisible(false)}
       >
         <TouchableOpacity
           style={styles.modalOverlay}
           activeOpacity={1}
-          onPressOut={() => setMenuVisible(false)}
+          onPressOut={() => setMenuVisible(false)} // Close modal when clicking overlay
         >
-          <View style={styles.sidebar}>
-            <TouchableOpacity style={styles.sidebarItem} onPress={handleLogout}>
-              <Text style={styles.sidebarText}>Log Out</Text>
-            </TouchableOpacity>
+          <View style={styles.modalContent}>
             <TouchableOpacity
-              style={styles.sidebarItem}
+              style={styles.modalOption}
               onPress={() => setIsEditing(true)}
             >
-              <Text style={styles.sidebarText}>Edit Profile</Text>
+              <Text style={styles.modalOptionText}>Edit Profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalOption} onPress={handleLogout}>
+              <Text style={styles.modalOptionText}>Log Out</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -372,7 +437,7 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.since}>User since {userSince}</Text>
           <View style={styles.cardRow}>
             <View style={styles.cardItem}>
-              <Text style={styles.cardValue}>{friendCount}</Text>
+              <Text style={styles.cardValue}>{followerCount}</Text>
               <Text style={styles.cardLabel}>Friends</Text>
             </View>
             <View style={styles.cardItem}>
@@ -438,6 +503,7 @@ export default function ProfileScreen({ navigation }) {
                 user={user}
                 GOOGLE_MAPS_API_KEY={GOOGLE_MAPS_API_KEY}
                 onShare={onShare}
+                onEllipsisClick={handleEllipsisClick}
               />
             ))}
             {visibleCount < allEvents.length && (
@@ -461,6 +527,7 @@ const MemoProfileEventCard = memo(function ProfileEventCard({
   user,
   GOOGLE_MAPS_API_KEY,
   onShare,
+  onEllipsisClick,
 }) {
   // Description: Determine event role for user based on event arrays
   let role = '';
@@ -646,6 +713,7 @@ const MemoProfileEventCard = memo(function ProfileEventCard({
       <TouchableOpacity
         style={styles.ellipsisButtonAbsolute}
         accessibilityLabel='More options'
+        onPress={() => onEllipsisClick(item)}
       >
         <Text style={styles.ellipsisText}>•••</Text>
       </TouchableOpacity>
@@ -683,9 +751,24 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#fff' },
   modalOverlay: {
     flex: 1,
-    flexDirection: 'row',
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  modalOption: {
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalOptionText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
   },
   sidebar: {
     width: 240,

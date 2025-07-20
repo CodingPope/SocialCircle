@@ -99,14 +99,14 @@ const NotificationScreen = () => {
     if (!user?.uid) return;
     const q = query(
       collection(db, 'notifications'),
-      where('userId', '==', user.uid)
+      where('recipientId', '==', user.uid) // Ensure correct field for recipient filtering
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const notifArr = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
-      setNotifications(notifArr);
+      setNotifications(notifArr); // Properly set notifications state
     });
     return unsubscribe;
   }, [user?.uid]);

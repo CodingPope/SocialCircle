@@ -184,3 +184,14 @@ export const unfollowUser = async (currentUid, targetUid) => {
     followerCount: increment(-1),
   });
 };
+
+// Send a notification
+export const sendNotification = async (type, recipientId, data) => {
+  const notificationRef = collection(db, 'notifications');
+  await addDoc(notificationRef, {
+    type,
+    recipientId,
+    ...data,
+    createdAt: new Date(),
+  });
+};

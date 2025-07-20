@@ -333,7 +333,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         <View style={styles.cardRow}>
           <View style={styles.cardItem}>
             <Text style={styles.cardValue}>{followerCount}</Text>
-            <Text style={styles.cardLabel}>Followers</Text>
+            <Text style={styles.cardLabel}>Friends</Text>
           </View>
           <View style={styles.cardItem}>
             <Text style={styles.cardValue}>{eventsCount}</Text>
