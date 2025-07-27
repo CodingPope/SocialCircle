@@ -10,7 +10,7 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker from '@react-native-community/datetimepicker'; // ✅ Import Expo-compatible date picker
 import { Timestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import { useAuth } from '../../../context/AuthContext';
@@ -20,7 +20,7 @@ export default function NameDobScreen({ navigation }) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dob, setDob] = useState(new Date());
-  const [showPicker, setShowPicker] = useState(false);
+  const [showPicker, setShowPicker] = useState(false); // Toggle for date picker
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -64,6 +64,7 @@ export default function NameDobScreen({ navigation }) {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <Text style={styles.title}>Tell us about you</Text>
+
         <TextInput
           style={styles.input}
           placeholder='First name'
@@ -76,6 +77,7 @@ export default function NameDobScreen({ navigation }) {
           value={lastName}
           onChangeText={setLastName}
         />
+
         <Text style={styles.label}>Date of Birth</Text>
         <TouchableOpacity
           style={styles.datePickerButton}
@@ -83,22 +85,24 @@ export default function NameDobScreen({ navigation }) {
         >
           <Text style={styles.datePickerText}>{dob.toDateString()}</Text>
         </TouchableOpacity>
+
+        {/* ✅ Replace with Expo-compatible Date Picker */}
         {showPicker && (
           <DateTimePicker
             value={dob}
-            onChange={(e, d) => {
-              if (d) {
-                setDob(d);
-                setShowPicker(false);
-              }
-            }}
             mode='date'
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
             maximumDate={new Date()}
             minimumDate={
               new Date(new Date().setFullYear(new Date().getFullYear() - 100))
             }
+            onChange={(event, selectedDate) => {
+              setShowPicker(false);
+              if (selectedDate) setDob(selectedDate);
+            }}
           />
         )}
+
         {loading ? (
           <ActivityIndicator />
         ) : (

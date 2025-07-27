@@ -32,6 +32,7 @@ import {
 import { db, auth } from '../../firebase/config';
 import smileDefault from '../../../assets/smileDefault.png';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import ReportModal from '../../components/ReportModal'; // Import reusable modal component
 
 const EventChatScreen = () => {
   const route = useRoute();
@@ -46,13 +47,18 @@ const EventChatScreen = () => {
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [hostUser, setHostUser] = useState(null);
   const [requesters, setRequesters] = useState([]); // Add state for requesters
+  const [isReportModalVisible, setIsReportModalVisible] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
   const flatListRef = useRef(null);
 
   // Fetch event info + attendees
   useEffect(() => {
+    if (!auth.currentUser) return;
+
     const unsub = onSnapshot(doc(db, 'events', eventId), async (snap) => {
       const data = snap.data();
       setEvent(data);
+
       if (data?.attendees?.length) {
         const attendeePromises = data.attendees.map(async (uid) => {
           const userDoc = await getDoc(doc(db, 'users', uid));
@@ -76,15 +82,23 @@ const EventChatScreen = () => {
         setAttendees([]);
       }
     });
-    return unsub;
-  }, [eventId]);
 
-  // Fetch chat messages
+    // ✅ Track globally for logout cleanup
+    if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
+    global.unsubscribeAllListeners.push(unsub);
+
+    return () => unsub();
+  }, [eventId, auth.currentUser]);
+
+  // ✅ Chat messages listener
   useEffect(() => {
+    if (!auth.currentUser) return;
+
     const q = query(
       collection(db, 'chats', eventId, 'messages'),
       orderBy('createdAt', 'asc')
     );
+
     const unsub = onSnapshot(q, (snap) => {
       setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setLoading(false);
@@ -92,8 +106,60 @@ const EventChatScreen = () => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     });
-    return unsub;
-  }, [eventId]);
+
+    if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
+    global.unsubscribeAllListeners.push(unsub);
+
+    return () => unsub();
+  }, [eventId, auth.currentUser]);
+
+  // ✅ Host user info when event changes (no snapshot, just getDoc)
+  useEffect(() => {
+    const hostId = event?.hostId || event?.ownerId;
+    if (hostId) {
+      getDoc(doc(db, 'users', hostId)).then((userDoc) => {
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          setHostUser({
+            displayName:
+              userData.displayName ||
+              `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
+              'User',
+            photoURL: userData.profileImage || userData.avatarURL || null,
+            ranking:
+              typeof userData.ranking === 'number' ? userData.ranking : null,
+          });
+        } else {
+          setHostUser(null);
+        }
+      });
+    } else {
+      setHostUser(null);
+    }
+  }, [event?.hostId, event?.ownerId]);
+
+  // Fetch chat messages
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const q = query(
+      collection(db, 'chats', eventId, 'messages'),
+      orderBy('createdAt', 'asc')
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+
+    if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
+    global.unsubscribeAllListeners.push(unsub);
+
+    return () => unsub();
+  }, [eventId, auth.currentUser]);
 
   // Fetch host user info when event changes
   useEffect(() => {
@@ -250,6 +316,40 @@ const EventChatScreen = () => {
     fetchRequesters();
   }, [event?.requests]);
 
+  // Long press message handler
+  const handleLongPressMessage = (message) => {
+    setSelectedUser({ id: message.senderId, type: 'message', message });
+    setIsReportModalVisible(true);
+  };
+
+  // Long press attendee handler
+  const handleLongPressAttendee = (attendee) => {
+    setSelectedUser({ id: attendee.id, type: 'attendee', attendee });
+    setIsReportModalVisible(true);
+  };
+
+  // Remove user from event
+  const handleRemoveUser = async (userId) => {
+    try {
+      const eventRef = doc(db, 'events', eventId);
+      await updateDoc(eventRef, {
+        attendees: event.attendees.filter((uid) => uid !== userId),
+      });
+      setAttendees((prev) => prev.filter((attendee) => attendee.id !== userId));
+      Alert.alert('User removed successfully.');
+    } catch (err) {
+      console.error('Error removing user:', err.message);
+      Alert.alert('Failed to remove user.');
+    }
+  };
+
+  // Report submit handler
+  const handleReportSubmit = (reportDetails) => {
+    // Description: Submit report logic
+    console.log('Report submitted:', reportDetails);
+    setIsReportModalVisible(false);
+  };
+
   if (loading || !event) {
     return <ActivityIndicator style={{ flex: 1 }} />;
   }
@@ -297,21 +397,39 @@ const EventChatScreen = () => {
                   marginHorizontal: 10,
                 }}
               >
-                <Image
-                  source={
-                    sender?.photoURL ? { uri: sender.photoURL } : smileDefault
-                  }
-                  style={styles.messageAvatar}
-                />
+                <TouchableOpacity
+                  onPress={() => {
+                    navigation.navigate('OtherUserProfile', {
+                      userId: sender?.id,
+                    });
+                  }}
+                  onLongPress={() => handleLongPressMessage(item)}
+                >
+                  <Image
+                    source={
+                      sender?.photoURL ? { uri: sender.photoURL } : smileDefault // Fallback to default image
+                    }
+                    style={styles.messageAvatar}
+                  />
+                </TouchableOpacity>
                 <View
                   style={{
                     maxWidth: '75%',
                     alignItems: isCurrentUser ? 'flex-end' : 'flex-start',
                   }}
                 >
-                  <Text style={styles.senderName}>
-                    {sender?.displayName || 'User'}
-                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      navigation.navigate('OtherUserProfile', {
+                        userId: sender?.id,
+                      });
+                    }}
+                    onLongPress={() => handleLongPressMessage(item)}
+                  >
+                    <Text style={styles.senderName}>
+                      {sender?.displayName || 'User'}
+                    </Text>
+                  </TouchableOpacity>
                   <View
                     style={[
                       styles.messageBubble,
@@ -390,9 +508,9 @@ const EventChatScreen = () => {
                 <View style={styles.hostRow}>
                   <Image
                     source={
-                      hostUser.photoURL
+                      hostUser?.photoURL
                         ? { uri: hostUser.photoURL }
-                        : smileDefault
+                        : smileDefault // Fallback to default image
                     }
                     style={styles.hostAvatar}
                   />
@@ -492,24 +610,40 @@ const EventChatScreen = () => {
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Attendees</Text>
               <FlatList
-                data={attendees.slice(0, 10)} // Show only first 10
+                data={attendees.slice(0, 10)}
                 horizontal
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
-                  <View style={{ alignItems: 'center', marginRight: 12 }}>
+                  <TouchableOpacity
+                    style={{ alignItems: 'center', marginRight: 12 }}
+                    onPress={() => {
+                      setIsModalVisible(false);
+                      navigation.navigate('OtherUserProfile', {
+                        userId: item.id,
+                      });
+                    }}
+                    onLongPress={() => {
+                      if (isCreator) {
+                        setSelectedUser({ id: item.id, type: 'attendee' });
+                        setIsReportModalVisible(true);
+                      }
+                    }}
+                    delayLongPress={500} // smoother long press
+                  >
                     <Image
                       source={
-                        item.photoURL ? { uri: item.photoURL } : smileDefault
+                        item.photoURL ? { uri: item.photoURL } : smileDefault // Fallback to default image
                       }
                       style={styles.attendeeImage}
                     />
                     <Text style={styles.attendeeName}>
                       {item.displayName?.split(' ')[0]}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 )}
                 showsHorizontalScrollIndicator={false}
               />
+
               {attendees.length > 10 && (
                 <TouchableOpacity
                   onPress={() => console.log('Navigate to full attendee list')}
@@ -538,7 +672,11 @@ const EventChatScreen = () => {
                       }}
                     >
                       <Image
-                        source={{ uri: requester.photoURL }}
+                        source={
+                          requester.photoURL
+                            ? { uri: requester.photoURL }
+                            : smileDefault // Fallback to default image
+                        }
                         style={styles.requestAvatar}
                       />
                       <View style={styles.requestDetails}>
@@ -625,6 +763,16 @@ const EventChatScreen = () => {
             </TouchableOpacity>
           </ScrollView>
         </Modal>
+
+        {/* Report Modal */}
+        <ReportModal
+          isVisible={isReportModalVisible}
+          onClose={() => setIsReportModalVisible(false)}
+          onSubmit={handleReportSubmit}
+          user={selectedUser}
+          isCreator={isCreator}
+          onRemove={handleRemoveUser}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -694,7 +842,7 @@ const styles = StyleSheet.create({
   attendeeImage: {
     width: 50,
     height: 50,
-    borderRadius: 25,
+    borderRadius: 15,
     backgroundColor: '#eee',
     marginBottom: 4,
   },

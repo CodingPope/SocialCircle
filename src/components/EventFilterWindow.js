@@ -7,68 +7,140 @@ import {
   ScrollView,
   TouchableWithoutFeedback,
   Animated,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/config.js';
 
 const InterestSelector = ({ selectedInterests, toggleInterest }) => {
-  const interests = [
-    'Hiking',
-    'Surf boarding',
-    'Volleyball',
-    'Bar hopping',
-    'Coffee',
-    'Dog walk',
-    'Run',
-    'Picnic',
-    'Game night',
-    'Board games',
-    'Book club',
-    'Workshop',
-    'Networking',
-    'Yoga',
-    'Cooking class',
-    'Movie night',
-    'Live music',
-    'Art exhibit',
-    'Photography walk',
-  ];
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activities, setActivities] = useState([]);
+  const [filteredActivities, setFilteredActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchActivities = async () => {
+      try {
+        const allActivities = [];
+
+        const categoriesSnapshot = await getDocs(collection(db, 'categories'));
+        for (const categoryDoc of categoriesSnapshot.docs) {
+          const activitiesSnapshot = await getDocs(
+            collection(db, `categories/${categoryDoc.id}/activities`)
+          );
+
+          activitiesSnapshot.forEach((activityDoc) => {
+            const activityName = activityDoc.id.replace(/_/g, ' ');
+            allActivities.push(activityName);
+          });
+        }
+
+        const sorted = [...new Set(allActivities)].sort((a, b) =>
+          a.localeCompare(b, 'en', { sensitivity: 'base' })
+        );
+
+        setActivities(sorted);
+        setFilteredActivities(sorted);
+      } catch (error) {
+        console.error('Error fetching activities:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchActivities();
+  }, []);
+
+  // ✅ Debounced search
+  useEffect(() => {
+    const delay = setTimeout(() => {
+      const filtered = activities.filter((activity) =>
+        activity.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+
+      // Move selected interests to the top
+      const sortedFiltered = [
+        ...filtered.filter((activity) => selectedInterests.includes(activity)),
+        ...filtered.filter((activity) => !selectedInterests.includes(activity)),
+      ];
+
+      setFilteredActivities(sortedFiltered);
+    }, 300);
+    return () => clearTimeout(delay);
+  }, [searchTerm, activities, selectedInterests]);
 
   return (
-    <ScrollView style={styles.interestSelector}>
-      {interests.map((interest) => (
-        <TouchableOpacity
-          key={interest}
-          style={[
-            styles.interestItem,
-            selectedInterests.includes(interest) && styles.selectedInterest,
-          ]}
-          onPress={() => toggleInterest(interest)}
-        >
-          <Text
-            style={{
-              color: selectedInterests.includes(interest) ? '#fff' : '#000',
-            }}
+    <View>
+      {/* Search box */}
+      <View style={styles.searchBoxContainer}>
+        <TextInput
+          style={styles.searchBox}
+          placeholder='Search activities...'
+          value={searchTerm}
+          onChangeText={setSearchTerm}
+        />
+        {searchTerm.length > 0 && (
+          <TouchableOpacity
+            style={styles.clearButton}
+            onPress={() => setSearchTerm('')}
           >
-            {interest}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
+            <Text style={styles.clearButtonText}>X</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Activity List */}
+      {loading ? (
+        <ActivityIndicator size='large' color='#007BFF' />
+      ) : filteredActivities.length === 0 ? (
+        <Text
+          style={{ textAlign: 'center', color: '#888', marginVertical: 10 }}
+        >
+          No activities found.
+        </Text>
+      ) : (
+        <ScrollView style={styles.interestSelector}>
+          {filteredActivities.map((activity) => (
+            <TouchableOpacity
+              key={activity}
+              style={[
+                styles.interestItem,
+                selectedInterests.includes(activity) && styles.selectedInterest,
+              ]}
+              onPress={() => toggleInterest(activity)}
+            >
+              <Text
+                style={{
+                  color: selectedInterests.includes(activity) ? '#fff' : '#000',
+                }}
+              >
+                {activity}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+    </View>
   );
 };
 
+// ✅ Main Event Filter Window
 const EventFilterWindow = ({
   isVisible,
   onClose,
   onApplyFilters,
   selectedFilters,
-  currentUserGender, // ✅ Added prop
+  currentUserGender,
+  userInterests,
+  updateSelectedFilters,
 }) => {
   const [selectedDate, setSelectedDate] = useState(
     selectedFilters?.date || null
   );
   const [selectedInterests, setSelectedInterests] = useState(
-    selectedFilters?.interests || []
+    selectedFilters?.interests || userInterests || []
   );
   const [genderOnly, setGenderOnly] = useState(
     selectedFilters?.genderOnly || false
@@ -95,19 +167,37 @@ const EventFilterWindow = ({
   useEffect(() => {
     if (selectedFilters) {
       setSelectedDate(selectedFilters.date || null);
-      setSelectedInterests(selectedFilters.interests || []);
-      setGenderOnly(selectedFilters.genderOnly || false); // ✅ restore state
+      setSelectedInterests(selectedFilters.interests || userInterests || []);
+      setGenderOnly(selectedFilters.genderOnly || false);
+    } else {
+      setSelectedDate(null);
+      setSelectedInterests(userInterests || []);
+      setGenderOnly(false);
     }
-  }, [selectedFilters]);
+  }, [selectedFilters, userInterests]);
 
   if (!isVisible) return null;
 
   const handleApplyFilters = () => {
-    onApplyFilters({
+    const updatedFilters = {
       date: selectedDate,
       interests: selectedInterests,
-      genderOnly: genderOnly ? currentUserGender : null, // ✅ Include gender filter
-    });
+      genderOnly: genderOnly ? currentUserGender : null,
+    };
+    onApplyFilters(updatedFilters);
+    updateSelectedFilters(updatedFilters);
+  };
+
+  const handleClearFilters = () => {
+    setSelectedDate(null);
+    setSelectedInterests([]);
+    setGenderOnly(false);
+  };
+
+  const handleResetFilters = () => {
+    setSelectedDate(null);
+    setSelectedInterests(userInterests || []); // Reset to user's interests
+    setGenderOnly(false);
   };
 
   const handleDateChange = (date) => {
@@ -118,12 +208,11 @@ const EventFilterWindow = ({
   };
 
   const toggleInterest = (interest) => {
-    setSelectedInterests((prev) => {
-      const updated = prev.includes(interest)
-        ? prev.filter((i) => i !== interest)
-        : [...prev, interest];
-      return updated;
-    });
+    setSelectedInterests((prevSelected) =>
+      prevSelected.includes(interest)
+        ? prevSelected.filter((i) => i !== interest)
+        : [...prevSelected, interest]
+    );
   };
 
   return (
@@ -152,7 +241,6 @@ const EventFilterWindow = ({
             <DateTimePicker
               value={selectedDate ? new Date(selectedDate) : new Date()}
               mode='date'
-              display='default'
               onChange={(event, date) => {
                 setShowDatePicker(false);
                 handleDateChange(date);
@@ -166,7 +254,6 @@ const EventFilterWindow = ({
             toggleInterest={toggleInterest}
           />
 
-          {/* ✅ Gender Filter Button */}
           <Text style={styles.sectionTitle}>Privacy</Text>
           <TouchableOpacity
             style={[
@@ -185,6 +272,21 @@ const EventFilterWindow = ({
             </Text>
           </TouchableOpacity>
 
+          <View style={styles.filterButtonsContainer}>
+            <TouchableOpacity
+              style={styles.clearFilterButton}
+              onPress={handleClearFilters}
+            >
+              <Text style={styles.clearButtonText}>Clear Filters</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.resetButton}
+              onPress={handleResetFilters}
+            >
+              <Text style={styles.resetButtonText}>Reset Filters</Text>
+            </TouchableOpacity>
+          </View>
+
           <TouchableOpacity
             style={styles.applyButton}
             onPress={handleApplyFilters}
@@ -197,6 +299,7 @@ const EventFilterWindow = ({
   );
 };
 
+// ✅ Styles
 const styles = StyleSheet.create({
   overlay: {
     position: 'absolute',
@@ -229,6 +332,53 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginBottom: 20,
+  },
+  searchBoxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    marginBottom: 10,
+  },
+  searchBox: {
+    flex: 1,
+    paddingVertical: 8,
+    color: '#444',
+  },
+  clearButton: {
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    color: '#000',
+    fontWeight: 'bold',
+  },
+  filterButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  clearFilterButton: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  resetButton: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  resetButtonText: {
+    color: '#000',
+    fontWeight: 'bold',
   },
   interestSelector: { maxHeight: 200, marginBottom: 20 },
   interestItem: {

@@ -2,12 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef } from './src/navigation/RootNavigation';
-import { useAuth } from './src/context/AuthContext';
+import { useAuth, AuthProvider } from './src/context/AuthContext'; // ✅ Import AuthProvider
 import { db } from './src/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 
-export default function App() {
+function AppContent() {
   const { user } = useAuth();
   const [profileComplete, setProfileComplete] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -45,5 +45,13 @@ export default function App() {
     <NavigationContainer ref={navigationRef}>
       <AppNavigator user={user} profileComplete={profileComplete} />
     </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

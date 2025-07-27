@@ -34,7 +34,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
-  const snapPoints = useMemo(() => ['90%'], []);
+  const snapPoints = useMemo(() => ['90%', '95%'], []);
 
   useEffect(() => {
     if (!event?.location) {
@@ -138,11 +138,13 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       // Create a notification for the event owner
       const notificationRef = collection(db, 'notifications');
       await addDoc(notificationRef, {
-        type: 'join_request', // Notification type
+        type: 'rsvp_request', // Notification type
         eventId: event.id, // Event ID
+        eventTitle: event.title || 'Untitled Event', // Include event title
         requesterId: user.uid, // User requesting to join
         recipientId: event.ownerId, // Event owner
-        message: `${user.displayName || 'User'} requested to join your event.`,
+        userName: user.firstName || 'User',
+        message: `${user.firstName || 'User'} requested to join your event.`,
         createdAt: new Date(), // Timestamp
       });
 

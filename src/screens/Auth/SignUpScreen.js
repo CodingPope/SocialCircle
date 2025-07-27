@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
+  Image,
 } from 'react-native';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../../firebase/config';
@@ -44,6 +45,10 @@ export default function SignUpScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <Image
+        source={require('../../../assets/SocialCircleLogoClear.png')}
+        style={styles.logo}
+      />
       <TextInput
         style={styles.input}
         placeholder='Email'
@@ -66,6 +71,7 @@ export default function SignUpScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', padding: 20 },
+  logo: { width: 150, height: 150, alignSelf: 'center', marginBottom: 20 },
   input: {
     borderWidth: 1,
     borderColor: '#ccc',

@@ -5,23 +5,32 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 
 const AuthContext = createContext({ user: null, loading: true });
-
+if (!global.unsubscribeAllListeners) {
+  global.unsubscribeAllListeners = [];
+}
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1) Listen for Firebase auth changes
+    let unsubscribeDoc = null; // Track the Firestore listener
+
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      // ✅ Stop any previous Firestore listener before attaching a new one
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+        unsubscribeDoc = null;
+      }
+
       if (!firebaseUser) {
         setUser(null);
         setLoading(false);
         return;
       }
 
-      // 2) If logged in, subscribe to their Firestore profile doc
+      // ✅ Start a new Firestore listener for the logged-in user
       const userDoc = doc(db, 'users', firebaseUser.uid);
-      const unsubscribeDoc = onSnapshot(
+      unsubscribeDoc = onSnapshot(
         userDoc,
         (snapshot) => {
           const data = snapshot.data() || {};
@@ -34,18 +43,17 @@ export function AuthProvider({ children }) {
         },
         (err) => {
           console.error('Failed to read user profile', err);
-          // fallback so the app at least unblocks
           setUser({ uid: firebaseUser.uid, email: firebaseUser.email });
           setLoading(false);
         }
       );
-
-      // tear down the snapshot listener when auth‐changes again
-      return unsubscribeDoc;
     });
 
-    // clean up
-    return unsubscribeAuth;
+    // ✅ Cleanup when the component unmounts
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeDoc) unsubscribeDoc();
+    };
   }, []);
 
   return (

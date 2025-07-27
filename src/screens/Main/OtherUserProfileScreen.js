@@ -1,4 +1,3 @@
-// src/screens/Main/OtherUserProfileScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   SafeAreaView,
@@ -6,71 +5,71 @@ import {
   Text,
   Image,
   TouchableOpacity,
-  FlatList,
   StyleSheet,
   Modal,
   Alert,
   Share,
-  ScrollView, // <-- add ScrollView import
+  ScrollView,
+  StatusBar,
+  Platform,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { getUserData, db } from '../../firebase/config';
 import {
-  collection,
-  getDocs,
-  query,
-  where,
-  addDoc,
-  Timestamp,
-} from 'firebase/firestore'; // add Timestamp
+  getUserData,
+  updateUserData,
+  updateUserRating,
+  db,
+} from '../../firebase/config';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
-import { updateUserData } from '../../firebase/config';
-// Make sure addFriend and removeFriend are implemented and exported from '../../firebase/config'
-import { addFriend, removeFriend } from '../../firebase/config';
+import PopupMenu from '../../components/PopupMenu'; // Import the PopupMenu component
+
+function mergeUniqueEvents(...eventArrays) {
+  const map = new Map();
+  eventArrays.flat().forEach((ev) => {
+    if (ev && ev.id) map.set(ev.id, ev);
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    const getDate = (e) =>
+      e.date?.toDate
+        ? e.date.toDate()
+        : new Date(e.date?.seconds ? e.date.seconds * 1000 : e.date);
+    return getDate(b) - getDate(a); // Sort from future to past
+  });
+}
 
 export default function OtherUserProfileScreen({ route, navigation }) {
-  // Assume route.params.userId is passed in
   const { userId } = route.params;
   const [user, setUser] = useState(null);
-  const [events, setEvents] = useState([]);
-  const [menuVisible, setMenuVisible] = useState(false);
   const [userEvents, setUserEvents] = useState({
     created: [],
     attending: [],
     attended: [],
   });
   const [loadingEvents, setLoadingEvents] = useState(true);
-  const { user: currentUser } = useAuth(); // Get current logged-in user
+  const { user: currentUser } = useAuth();
   const [isFollowing, setIsFollowing] = useState(false);
-  const [isFollowedBy, setIsFollowedBy] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(10);
+  const [selectedRating, setSelectedRating] = useState(0);
   const [requestingFollow, setRequestingFollow] = useState(false);
+  const [sharedEvents, setSharedEvents] = useState(false); // Track if shared events exist
+  const [ratingModalVisible, setRatingModalVisible] = useState(false); // Modal for rating
 
   useEffect(() => {
-    // Fetch other user's data
     const fetchUser = async () => {
       const data = await getUserData(userId);
       setUser(data);
-      setEvents(data.events || []);
+      if (currentUser?.following?.includes(userId)) {
+        setIsFollowing(true);
+      }
     };
     fetchUser();
-  }, [userId]);
+  }, [userId, currentUser]);
 
   useEffect(() => {
-    // Description: Check if current user is friends with this user
-    if (user && currentUser) {
-      setIsFollowing(
-        Array.isArray(currentUser.friends) &&
-          currentUser.friends.includes(userId)
-      );
-      setIsFollowedBy(
-        Array.isArray(user.friends) && user.friends.includes(currentUser.uid)
-      );
-    }
-  }, [user, currentUser, userId]);
-
-  useEffect(() => {
-    // Description: Fetch event objects for created (hosting/hosted), attending, and attended events from Firestore
     async function fetchUserEvents() {
       setLoadingEvents(true);
       if (!userId) {
@@ -80,71 +79,73 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       }
       const userData = await getUserData(userId);
 
-      // createdEvents: events they've hosted or are hosting
-      // attendingEvents: events they're currently attending
-      // attendedEvents: events they've attended in the past
-      const createdIds = Array.isArray(userData.createdEvents)
-        ? userData.createdEvents
-        : [];
-      const attendingIds = Array.isArray(userData.attendingEvents)
-        ? userData.attendingEvents
-        : [];
-      const attendedIds = Array.isArray(userData.attendedEvents)
-        ? userData.attendedEvents
-        : [];
-
-      // Batch fetch events by IDs from Firestore
       const fetchEventsByIds = async (ids) => {
         if (!ids.length) return [];
-        try {
-          const eventsRef = collection(db, 'events');
-          // Firestore 'in' query supports up to 30 items per query
-          const chunks = [];
-          for (let i = 0; i < ids.length; i += 30) {
-            chunks.push(ids.slice(i, i + 30));
-          }
-          let results = [];
-          for (const chunk of chunks) {
-            const q = query(eventsRef, where('__name__', 'in', chunk));
-            const snapshot = await getDocs(q);
-            results = results.concat(
-              snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
-            );
-          }
-          return results;
-        } catch (err) {
-          console.warn(
-            'Batch event fetch failed, falling back to events array',
-            err
-          );
-          // Fallback: filter from events if available
-          return events.filter((ev) => ids.includes(ev.id));
+        const eventsRef = collection(db, 'events');
+        const chunks = [];
+        for (let i = 0; i < ids.length; i += 30) {
+          chunks.push(ids.slice(i, i + 30));
         }
+        let results = [];
+        for (const chunk of chunks) {
+          const q = query(eventsRef, where('__name__', 'in', chunk));
+          const snapshot = await getDocs(q);
+          results = results.concat(
+            snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+          );
+        }
+        return results;
       };
 
       const [created, attending, attended] = await Promise.all([
-        fetchEventsByIds(createdIds),
-        fetchEventsByIds(attendingIds),
-        fetchEventsByIds(attendedIds),
+        fetchEventsByIds(userData.createdEvents || []),
+        fetchEventsByIds(userData.attendingEvents || []),
+        fetchEventsByIds(userData.attendedEvents || []),
       ]);
-
       setUserEvents({ created, attending, attended });
       setLoadingEvents(false);
     }
     fetchUserEvents();
-  }, [userId, events]);
+  }, [userId]);
 
-  // Merge and sort all events (hosting/hosted, attending, attended)
-  const allEvents = mergeUniqueEvents(
-    userEvents.created,
-    userEvents.attending,
-    userEvents.attended
-  );
+  useEffect(() => {
+    const checkSharedEvents = async () => {
+      if (!currentUser || !userId) return;
 
-  // Lazy load: show first N events, load more on "Show More"
-  const EVENTS_PAGE_SIZE = 10;
-  const [visibleCount, setVisibleCount] = useState(EVENTS_PAGE_SIZE);
-  const visibleEvents = allEvents.slice(0, visibleCount);
+      try {
+        // Fetch events attended by the current user
+        const currentUserEventsQuery = query(
+          collection(db, 'events'),
+          where('attendees', 'array-contains', currentUser.uid)
+        );
+        const currentUserEventsSnapshot = await getDocs(currentUserEventsQuery);
+        const currentUserEventIds = currentUserEventsSnapshot.docs.map(
+          (doc) => doc.id
+        );
+
+        // Fetch events attended by the profile user
+        const profileUserEventsQuery = query(
+          collection(db, 'events'),
+          where('attendees', 'array-contains', userId)
+        );
+        const profileUserEventsSnapshot = await getDocs(profileUserEventsQuery);
+        const profileUserEventIds = profileUserEventsSnapshot.docs.map(
+          (doc) => doc.id
+        );
+
+        // Check for shared events
+        const shared = currentUserEventIds.some((id) =>
+          profileUserEventIds.includes(id)
+        );
+        setSharedEvents(shared);
+      } catch (error) {
+        console.error('Error checking shared events:', error);
+        setSharedEvents(false);
+      }
+    };
+
+    checkSharedEvents();
+  }, [currentUser, userId]);
 
   if (!user) return null;
 
@@ -162,13 +163,6 @@ export default function OtherUserProfileScreen({ route, navigation }) {
           .toDate()
           .toLocaleString('default', { month: 'short', year: 'numeric' })
       : '';
-  const eventsCount = Array.isArray(user.events)
-    ? user.events.length
-    : user.eventCount || 0;
-  const bio = user.bio || '';
-  const MAX_BIO_LENGTH = 100;
-
-  // Show follower count (social proof)
   const followerCount =
     typeof user.followerCount === 'number'
       ? user.followerCount
@@ -176,694 +170,502 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       ? user.followers.length
       : 0;
 
-  // Popup actions
-  const handleReport = () => {
-    setMenuVisible(false);
-    Alert.alert('Report User', 'Reporting functionality coming soon.');
-  };
+  const allEvents = mergeUniqueEvents(
+    userEvents.created,
+    userEvents.attending,
+    userEvents.attended
+  );
+  const visibleEvents = allEvents.slice(0, visibleCount);
 
-  // Determine if current user is following this user
-  const isFollowingUser =
-    Array.isArray(currentUser?.following) &&
-    currentUser.following.includes(userId);
-
-  // --- Add Friend logic ---
   const handleFollow = async () => {
     if (!currentUser || !user) return;
     setRequestingFollow(true);
     try {
-      // Add userId to current user's following array
       await updateUserData(currentUser.uid, {
         following: Array.isArray(currentUser.following)
           ? [...currentUser.following, userId]
           : [userId],
       });
-      // Increment target user's followerCount
       await updateUserData(userId, {
         followerCount: (user.followerCount || 0) + 1,
       });
-      Alert.alert('Friend Added', `You are now following ${user.firstName}.`);
+      setIsFollowing(true);
     } catch (err) {
-      if (
-        err.code === 'permission-denied' ||
-        (err.message && err.message.includes('permission'))
-      ) {
-        Alert.alert(
-          'Permission Error',
-          'You can only update your own following list. If this is a mutual friend feature, each user must update their own profile separately.'
-        );
-      } else {
-        Alert.alert('Error', 'Failed to follow user.');
-      }
-      console.error(err);
+      Alert.alert('Error', 'Failed to follow user.');
     } finally {
       setRequestingFollow(false);
     }
   };
 
-  // --- Remove Friend logic ---
   const handleUnfollow = async () => {
     if (!currentUser || !user) return;
     setRequestingFollow(true);
     try {
-      // Remove userId from current user's following array
       await updateUserData(currentUser.uid, {
         following: Array.isArray(currentUser.following)
           ? currentUser.following.filter((id) => id !== userId)
           : [],
       });
-      // Decrement target user's followerCount
       await updateUserData(userId, {
         followerCount: Math.max((user.followerCount || 1) - 1, 0),
       });
-      Alert.alert(
-        'Friend Removed',
-        `You are no longer following ${user.firstName}.`
-      );
+      setIsFollowing(false);
     } catch (err) {
       Alert.alert('Error', 'Failed to unfollow user.');
-      console.error(err);
     } finally {
       setRequestingFollow(false);
     }
   };
 
-  // Helper to get unique events by id
-  function mergeUniqueEvents(...eventArrays) {
-    const map = new Map();
-    eventArrays.flat().forEach((ev) => {
-      if (ev && ev.id) map.set(ev.id, ev);
-    });
-    return Array.from(map.values());
-  }
-
-  // --- Share logic for event cards ---
   const onShare = async (item) => {
     try {
       await Share.share({
         message: `Join this event: ${item.title}\n\n${item.description}`,
       });
+    } catch {}
+  };
+
+  const handleReport = () => {
+    Alert.alert('Report User functionality coming soon.');
+    setMenuVisible(false);
+  };
+
+  const handleDeleteEvent = () => {
+    Alert.alert('Delete Event functionality coming soon.');
+    setMenuVisible(false);
+  };
+
+  const handleRateUser = async (rating) => {
+    try {
+      await updateUserRating(userId, currentUser.uid, rating);
+
+      // Fetch the updated user data after rating
+      const updatedUser = await getUserData(userId);
+      setUser(updatedUser);
+
+      setRatingModalVisible(false);
+      Alert.alert('Success', 'Rating updated successfully!');
     } catch (err) {
-      console.warn('Share error', err);
+      console.error('Error rating user:', err);
+      Alert.alert('Error', 'Failed to rate user.');
     }
   };
-
-  // --- Render profile header ---
-  const renderProfileHeader = () => (
-    <>
-      {/* Top nav with 3-dot menu */}
-      <View style={styles.navBar}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name='arrow-back' size={28} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setMenuVisible(true)}>
-          <Ionicons name='ellipsis-horizontal' size={28} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Modal popup for settings */}
-      <Modal
-        visible={menuVisible}
-        animationType='fade'
-        transparent
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPressOut={() => setMenuVisible(false)}
-        >
-          <View style={styles.popupMenu}>
-            <Text style={styles.popupTitle}>Settings</Text>
-            <TouchableOpacity style={styles.popupItem} onPress={handleReport}>
-              <Text style={styles.popupText}>Report User</Text>
-            </TouchableOpacity>
-            {/* Add more options here */}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Profile Header Layout */}
-      <View style={styles.header}>
-        <View style={styles.avatarRow}>
-          <Image source={{ uri: avatarURL }} style={styles.profileImage} />
-        </View>
-        <Text style={styles.name}>
-          {fullName}
-          {verified && (
-            <MaterialIcons
-              name='verified'
-              size={20}
-              color='black'
-              style={styles.verifiedIcon}
-            />
-          )}
-        </Text>
-        <Text style={styles.stat}>
-          {ratingCount === 0
-            ? '☆☆☆☆☆ (Not yet rated)'
-            : `${
-                '★'.repeat(Math.floor(rating)) +
-                '☆'.repeat(5 - Math.floor(rating))
-              } (${ratingCount})`}
-        </Text>
-        <Text style={styles.since}>User since {userSince}</Text>
-
-        {/* Card Row for Followers, Events, Badges */}
-        <View style={styles.cardRow}>
-          <View style={styles.cardItem}>
-            <Text style={styles.cardValue}>{followerCount}</Text>
-            <Text style={styles.cardLabel}>Friends</Text>
-          </View>
-          <View style={styles.cardItem}>
-            <Text style={styles.cardValue}>{eventsCount}</Text>
-            <Text style={styles.cardLabel}>Events</Text>
-          </View>
-          <View style={[styles.cardItem, { borderRightWidth: 0 }]}>
-            <MaterialIcons
-              name='star'
-              size={32}
-              color='#FFD700'
-              style={styles.badgeIcon}
-            />
-            <Text style={styles.cardLabel}>Badges</Text>
-          </View>
-        </View>
-
-        {/* Add Friend/Remove Friend Button */}
-        {currentUser &&
-          currentUser.uid !== userId &&
-          (isFollowingUser ? (
-            <TouchableOpacity
-              style={[styles.addFriendButton, { backgroundColor: '#ccc' }]}
-              onPress={handleUnfollow}
-              disabled={requestingFollow}
-            >
-              <Text style={[styles.addFriendText, { color: '#333' }]}>
-                {requestingFollow ? 'Adding...' : 'Remove Friend'}
-              </Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.addFriendButton}
-              onPress={handleFollow}
-              disabled={requestingFollow}
-            >
-              <Text style={styles.addFriendText}>
-                {requestingFollow ? 'Removing...' : 'Add Friend'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        <View style={styles.bioContainer}>
-          <Text style={styles.bioText}>
-            {bio.length > MAX_BIO_LENGTH
-              ? bio.slice(0, MAX_BIO_LENGTH) + '...'
-              : bio}
-          </Text>
-        </View>
-      </View>
-      {/* Timeline Section Header */}
-      <View style={styles.timelineHeader}>
-        <Text style={styles.timelineTitle}>Event Timeline</Text>
-      </View>
-    </>
-  );
-
-  // --- Render each event card ---
-  const renderEventItem = ({ item }) => {
-    // Description: Determine event role for user based on createdEvents and attendedEvents arrays
-    let role = '';
-    const now = new Date();
-    // Use item.date as the main event time
-    let eventDate = null;
-    if (item.date) {
-      if (item.date.toDate) eventDate = item.date.toDate();
-      else if (item.date instanceof Date) eventDate = item.date;
-      else if (typeof item.date === 'object' && item.date.seconds)
-        eventDate = new Date(item.date.seconds * 1000);
-    }
-    const isUpcoming = eventDate ? eventDate >= now : false;
-
-    // Get user's event arrays for role logic
-    const createdEventsArr = Array.isArray(user.createdEvents)
-      ? user.createdEvents
-      : [];
-    const attendedEventsArr = Array.isArray(user.attendedEvents)
-      ? user.attendedEvents
-      : [];
-
-    // Only use createdEvents and attendedEvents for role
-    if (createdEventsArr.includes(item.id)) {
-      role = isUpcoming ? 'Hosting' : 'Hosted';
-    } else if (attendedEventsArr.includes(item.id)) {
-      role = isUpcoming ? 'Attending' : 'Attended';
-    } else {
-      role = isUpcoming ? 'Attending' : 'Attended';
-    }
-
-    // Description: Use event image or exclude image section if none exists
-    const imageUrl = item.imageURL || item.imageUri || item.imageUrl || null;
-
-    // --- Date/time logic ---
-    let eventDateTime = '';
-    if (item.date) {
-      // Firestore Timestamp object
-      if (item.date.toDate) {
-        eventDateTime = item.date.toDate().toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-      }
-      // JS Date object
-      else if (item.date instanceof Date) {
-        eventDateTime = item.date.toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-      }
-      // Timestamp as seconds
-      else if (typeof item.date === 'object' && item.date.seconds) {
-        eventDateTime = new Date(item.date.seconds * 1000).toLocaleString(
-          undefined,
-          {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          }
-        );
-      }
-    } else if (item.startAt) {
-      // Firestore Timestamp object
-      if (item.startAt.toDate) {
-        eventDateTime = item.startAt.toDate().toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-      }
-      // JS Date object
-      else if (item.startAt instanceof Date) {
-        eventDateTime = item.startAt.toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-      }
-      // Timestamp as seconds
-      else if (typeof item.startAt === 'object' && item.startAt.seconds) {
-        eventDateTime = new Date(item.startAt.seconds * 1000).toLocaleString(
-          undefined,
-          {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          }
-        );
-      }
-    }
-
-    // --- Location logic ---
-    let cityState = '';
-    if (item.location) {
-      // Firestore location object
-      if (item.location.city && item.location.state) {
-        cityState = `${item.location.city}, ${item.location.state}`;
-      }
-      // Address string
-      else if (typeof item.location === 'string') {
-        const parts = item.location.split(',');
-        if (parts.length >= 2) {
-          cityState = `${parts[parts.length - 2].trim()}, ${parts[
-            parts.length - 1
-          ].trim()}`;
-        } else {
-          cityState = item.location.trim();
-        }
-      }
-      // Nested address string
-      else if (item.location.address) {
-        const addrParts = item.location.address.split(',');
-        if (addrParts.length >= 2) {
-          cityState = `${addrParts[addrParts.length - 2].trim()}, ${addrParts[
-            addrParts.length - 1
-          ].trim()}`;
-        } else {
-          cityState = item.location.address.trim();
-        }
-      }
-      // Lat/lng object (optional: show "Location available")
-      else if (item.location.latitude && item.location.longitude) {
-        cityState = 'Location available';
-      }
-    }
-
-    // --- Attendee count ---
-    const attendeeCount = Array.isArray(item.attendees)
-      ? item.attendees.length
-      : 0;
-
-    return (
-      <View key={item.id} style={styles.eventCard}>
-        {imageUrl && (
-          <Image source={{ uri: imageUrl }} style={styles.eventImage} />
-        )}
-        <TouchableOpacity style={styles.ellipsisButtonAbsolute}>
-          <Text style={styles.ellipsisText}>•••</Text>
-        </TouchableOpacity>
-        <View style={styles.eventInfo}>
-          <View style={styles.eventInfoHeader}>
-            <Text style={styles.eventRole}>{role}</Text>
-          </View>
-          <Text style={styles.eventTitle}>{item.title}</Text>
-          <View style={styles.eventMetaRow}>
-            <Text style={styles.eventDate}>{eventDateTime}</Text>
-            {cityState ? (
-              <Text style={styles.eventLocation}>{cityState}</Text>
-            ) : null}
-          </View>
-          <Text style={styles.eventAttendees}>{attendeeCount} attending</Text>
-          {/* Share Button in bottom right */}
-          <View style={styles.eventCardFooter}>
-            <TouchableOpacity
-              style={styles.shareButton}
-              onPress={() => onShare(item)}
-            >
-              <Text style={styles.shareButtonText}>Share</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  };
-
-  // --- Show More Button ---
-  const renderFooter = () =>
-    visibleCount < allEvents.length ? (
-      <TouchableOpacity
-        style={styles.showMoreButton}
-        onPress={() => setVisibleCount((c) => c + EVENTS_PAGE_SIZE)}
-      >
-        <Text style={styles.showMoreText}>Show More</Text>
-      </TouchableOpacity>
-    ) : null;
 
   return (
     <SafeAreaView style={styles.safe}>
-      <FlatList
-        data={loadingEvents ? [] : visibleEvents}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={renderProfileHeader}
-        renderItem={renderEventItem}
-        ListFooterComponent={
-          loadingEvents ? (
-            <View style={{ alignItems: 'center', marginTop: 32 }}>
-              <Text>Loading events...</Text>
+      {/* Rating Modal */}
+      {ratingModalVisible && (
+        <Modal
+          visible={ratingModalVisible}
+          transparent
+          animationType='slide'
+          onRequestClose={() => setRatingModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.ratingModal}>
+              <Text style={styles.modalTitle}>Rate {fullName}</Text>
+
+              {/* ⭐ Star Row */}
+              <View style={styles.starRow}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <TouchableOpacity
+                    key={star}
+                    onPress={() => setSelectedRating(star)}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.star,
+                        {
+                          color: star <= selectedRating ? '#FFD700' : '#ccc',
+                        },
+                      ]}
+                    >
+                      ★
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* ✅ Rating Value (optional) */}
+              {selectedRating > 0 && (
+                <Text style={styles.selectedRatingText}>
+                  {selectedRating} out of 5
+                </Text>
+              )}
+
+              {/* ✅ Buttons */}
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  onPress={() => setRatingModalVisible(false)}
+                  style={styles.cancelButton}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    handleRateUser(selectedRating);
+                    setRatingModalVisible(false);
+                  }}
+                  style={styles.submitButton}
+                  disabled={selectedRating === 0}
+                >
+                  <Text style={styles.submitButtonText}>Submit</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          ) : (
-            renderFooter
-          )
-        }
-        contentContainerStyle={{ paddingBottom: 32 }}
-        showsVerticalScrollIndicator={false}
+          </View>
+        </Modal>
+      )}
+
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {/* Header */}
+        <LinearGradient
+          colors={['#4DA0B0', '#D39D38']}
+          style={styles.profileHeader}
+        >
+          <View style={styles.navBar}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Ionicons name='arrow-back' size={28} color='#fff' />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setMenuVisible(true)}>
+              <Ionicons name='ellipsis-horizontal' size={28} color='#fff' />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.avatarWrapper}>
+            <Image source={{ uri: avatarURL }} style={styles.profileImage} />
+            {verified && (
+              <MaterialIcons
+                name='verified'
+                size={22}
+                color='#fff'
+                style={styles.verifiedBadge}
+              />
+            )}
+          </View>
+          <Text style={styles.name}>{fullName}</Text>
+          <Text style={styles.stat}>
+            {ratingCount === 0
+              ? '☆☆☆☆☆ (Not yet rated)'
+              : `${
+                  '★'.repeat(Math.floor(rating)) +
+                  '☆'.repeat(5 - Math.floor(rating))
+                } (${ratingCount})`}
+          </Text>
+          <Text style={styles.since}>User since {userSince}</Text>
+        </LinearGradient>
+
+        {/* Stats Row */}
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>{followerCount}</Text>
+            <Text style={styles.statLabel}>Friends</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statValue}>
+              {user.eventCount || allEvents.length}
+            </Text>
+            <Text style={styles.statLabel}>Events</Text>
+          </View>
+          <View style={styles.statCard}>
+            <MaterialIcons name='star' size={28} color='#FFD700' />
+            <Text style={styles.statLabel}>Badges</Text>
+          </View>
+        </View>
+
+        {/* Follow/Unfollow and Rate User Buttons */}
+        {currentUser?.uid !== userId && (
+          <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={[
+                styles.followButton,
+                { backgroundColor: isFollowing ? '#ccc' : '#007AFF' },
+              ]}
+              onPress={isFollowing ? handleUnfollow : handleFollow}
+              disabled={requestingFollow}
+            >
+              <Text
+                style={[
+                  styles.followButtonText,
+                  { color: isFollowing ? '#333' : '#fff' },
+                ]}
+              >
+                {requestingFollow
+                  ? 'Processing...'
+                  : isFollowing
+                  ? 'Unfollow'
+                  : 'Follow'}
+              </Text>
+            </TouchableOpacity>
+            {sharedEvents && (
+              <TouchableOpacity
+                style={[styles.followButton, { backgroundColor: '#FFD700' }]}
+                onPress={() => setRatingModalVisible(true)}
+              >
+                <Text style={[styles.followButtonText, { color: '#333' }]}>
+                  Rate User
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Bio */}
+        {user.bio ? (
+          <View style={styles.bioContainer}>
+            <Text style={styles.bioText}>{user.bio}</Text>
+          </View>
+        ) : null}
+
+        {/* Events */}
+        <View style={styles.timelineHeader}>
+          <Text style={styles.timelineTitle}>{fullName}'s Events</Text>
+        </View>
+        {loadingEvents ? (
+          <Text style={{ textAlign: 'center', marginTop: 20 }}>
+            Loading events...
+          </Text>
+        ) : (
+          visibleEvents.map((event) => {
+            const now = new Date();
+            const isPastEvent = event.date?.seconds
+              ? new Date(event.date.seconds * 1000) < now
+              : false;
+
+            const role = isPastEvent
+              ? user.createdEvents?.includes(event.id)
+                ? 'Hosted'
+                : 'Attended'
+              : user.createdEvents?.includes(event.id)
+              ? 'Hosting'
+              : 'Attending';
+
+            const eventDate = event.date?.seconds
+              ? new Date(event.date.seconds * 1000).toLocaleDateString()
+              : 'Date not available';
+
+            return (
+              <View key={event.id} style={styles.eventCard}>
+                {event.imageUrl && (
+                  <Image
+                    source={{ uri: event.imageUrl }}
+                    style={styles.eventImage}
+                  />
+                )}
+                <View style={styles.eventInfo}>
+                  <Text style={styles.eventTitle}>{event.title}</Text>
+                  <View style={styles.pillRow}>
+                    <View style={styles.pill}>
+                      <Text style={styles.pillText}>{role}</Text>
+                    </View>
+                    <View style={styles.pill}>
+                      <Text style={styles.pillText}>{eventDate}</Text>
+                    </View>
+                    <View style={[styles.pill, { backgroundColor: '#E8F5E9' }]}>
+                      <Text style={[styles.pillText, { color: '#388E3C' }]}>
+                        {event.attendees?.length || 0} Attending
+                      </Text>
+                    </View>
+                  </View>
+                  {event.location?.address && (
+                    <Text style={styles.eventLocation}>
+                      {event.location.address}
+                    </Text>
+                  )}
+                  <TouchableOpacity
+                    style={styles.shareButton}
+                    onPress={() => onShare(event)}
+                  >
+                    <Text style={styles.shareButtonText}>Share</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </ScrollView>
+      <PopupMenu
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        isOwner={false} // Adjust based on context
+        onReport={handleReport}
+        onDelete={handleDeleteEvent}
       />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
+  safe: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, // Add padding for Android
+  },
+  scrollContent: { paddingBottom: 20 },
+  profileHeader: {
+    paddingBottom: 40,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
   navBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginHorizontal: 16,
-    paddingVertical: 12,
+    marginTop: 10,
   },
-  header: {
-    alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 16,
+  avatarWrapper: {
+    alignSelf: 'center',
+    marginTop: 10,
+    borderWidth: 3,
+    borderColor: '#fff',
+    borderRadius: 15,
+    padding: 3,
+    backgroundColor: '#fff',
   },
-  avatarRow: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  profileImage: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    marginBottom: 8,
-  },
+  profileImage: { width: 120, height: 120, borderRadius: 15 },
+  verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
   name: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#000',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  verifiedIcon: {
-    marginLeft: 6,
-  },
-  stat: {
-    fontSize: 16,
-    color: '#222',
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  since: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  cardRow: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    marginHorizontal: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    overflow: 'hidden',
-  },
-  cardItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 18,
-    borderRightWidth: 1,
-    borderColor: '#eee',
-    justifyContent: 'center',
-  },
-  cardValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000',
-    marginBottom: 2,
-  },
-  cardLabel: {
-    fontSize: 15,
-    color: '#444',
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  badgeIcon: {
-    marginBottom: 2,
-  },
-  addFriendButton: {
-    backgroundColor: '#0066cc',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 32,
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  addFriendText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  bioContainer: {
-    backgroundColor: '#f0f0f0',
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 8,
-    width: '100%',
-  },
-  bioText: {
-    fontSize: 15,
-    color: '#333',
     textAlign: 'center',
+    marginTop: 6,
   },
-  tabRow: {
+  stat: { color: '#fff', fontSize: 15, textAlign: 'center', marginTop: 4 },
+  since: { color: '#fff', fontSize: 13, textAlign: 'center', marginTop: 2 },
+  statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginHorizontal: 16,
-    borderBottomWidth: 1,
-    borderColor: '#ddd',
+    marginTop: -30,
+    paddingHorizontal: 10,
   },
-  tabButton: { paddingVertical: 12 },
-  tabButtonActive: { borderBottomWidth: 2, borderColor: '#000' },
-  tabText: { color: '#666' },
-  tabTextActive: { color: '#000', fontWeight: 'bold' },
-  list: { paddingBottom: 16 },
+  statCard: {
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    elevation: 3,
+  },
+  statValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  statLabel: { fontSize: 13, color: '#777', marginTop: 4 },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 12,
+  },
+  followButton: {
+    flex: 1,
+    marginHorizontal: 5,
+    paddingVertical: 10,
+    borderRadius: 25,
+    alignItems: 'center',
+  },
+  followButtonText: { fontWeight: 'bold', fontSize: 16 },
+  bioContainer: {
+    backgroundColor: '#fff',
+    marginTop: 16,
+    marginHorizontal: 16,
+    padding: 12,
+    borderRadius: 10,
+    elevation: 1,
+  },
+  bioText: { fontSize: 15, color: '#333' },
+  timelineHeader: { marginTop: 20, marginHorizontal: 16 },
+  timelineTitle: { fontSize: 18, fontWeight: 'bold', color: '#222' },
   eventCard: {
     flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#fff',
     marginHorizontal: 16,
-    marginVertical: 8,
+    marginTop: 12,
+    borderRadius: 12,
     padding: 12,
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
     elevation: 2,
+    position: 'relative',
   },
-  eventImagePlaceholder: {
-    width: 50,
-    height: 50,
-    backgroundColor: '#ddd',
-    borderRadius: 4,
-    marginRight: 12,
-  },
+  eventImage: { width: 70, height: 70, borderRadius: 10, marginRight: 10 },
   eventInfo: { flex: 1 },
-  eventTitle: { fontSize: 16, fontWeight: '600' },
-  eventDetails: { color: '#666', marginTop: 4 },
+  eventTitle: { fontSize: 16, fontWeight: '600', marginBottom: 6 },
+  pillRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  pill: {
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  pillText: { fontSize: 12, color: '#555' },
+  eventLocation: { fontSize: 13, color: '#007AFF', marginTop: 2 },
+  shareButton: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+  },
+  shareButtonText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
   modalOverlay: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  popupMenu: {
+  ratingModal: {
     backgroundColor: '#fff',
+    borderRadius: 16,
     padding: 24,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    elevation: 5,
+    width: '80%',
+    alignItems: 'center',
   },
-  popupTitle: {
+  modalTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '600',
+    marginBottom: 16,
+    color: '#333',
+  },
+  starRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  star: {
+    fontSize: 36,
+    marginHorizontal: 4,
+  },
+  selectedRatingText: {
+    fontSize: 14,
+    color: '#666',
     marginBottom: 16,
   },
-  popupItem: {
-    paddingVertical: 12,
-  },
-  popupText: {
-    fontSize: 16,
-    color: '#0066cc',
-  },
-  timelineHeader: {
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    backgroundColor: '#f9f9f9',
-    borderTopWidth: 1,
-    borderColor: '#eee',
-  },
-  timelineTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  eventCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginVertical: 8,
-    padding: 12,
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  eventImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 4,
-    marginRight: 12,
-  },
-  eventInfo: { flex: 1 },
-  eventRole: {
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
-    marginBottom: 4,
-  },
-  eventMetaRow: {
+  buttonRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  eventDate: {
-    fontSize: 14,
-    color: '#333',
-  },
-  eventLocation: {
-    fontSize: 14,
-    color: '#0066cc',
-  },
-  eventAttendees: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
-  eventCardFooter: {
-    marginTop: 8,
-    alignItems: 'flex-end',
     width: '100%',
-  },
-  shareButton: {
-    backgroundColor: '#0066cc',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-  },
-  shareButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  showMoreButton: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 32,
     marginTop: 12,
-    marginBottom: 8,
-    alignSelf: 'center',
   },
-  showMoreText: {
-    color: '#0066cc',
-    fontWeight: 'bold',
-    fontSize: 16,
+  cancelButton: {
+    flex: 1,
+    padding: 12,
+    marginRight: 8,
+    borderRadius: 8,
+    backgroundColor: '#eee',
+    alignItems: 'center',
   },
-  ellipsisButtonAbsolute: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    padding: 8,
-  },
-  ellipsisText: {
-    fontSize: 18,
+  cancelButtonText: {
     color: '#333',
+    fontWeight: '500',
+  },
+  submitButton: {
+    flex: 1,
+    padding: 12,
+    marginLeft: 8,
+    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontWeight: '600',
   },
 });

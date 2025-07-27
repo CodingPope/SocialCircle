@@ -1,3 +1,8 @@
+import React, { useState } from 'react';
+import { View, Button, ActivityIndicator, Image, Alert } from 'react-native';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../../../firebase'; // adjust the path as necessary
+
 export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,6 +23,17 @@ export default function SignInScreen() {
   return loading ? (
     <ActivityIndicator style={{ marginTop: 16 }} />
   ) : (
-    <Button title='Login' onPress={handleSignIn} />
+    <View style={{ padding: 20 }}>
+      <Image
+        source={require('../../../assets/SocialCircleLogoClear.png')}
+        style={{
+          width: 150,
+          height: 150,
+          alignSelf: 'center',
+          marginBottom: 20,
+        }}
+      />
+      <Button title='Login' onPress={handleSignIn} />
+    </View>
   );
 }

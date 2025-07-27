@@ -7,6 +7,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Radar } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
+import EventDetails from '../components/EventDetails';
+import ConfirmationScreen from '../screens/ConfirmationScreen';
 
 // Auth Screens
 import AuthScreen from '../screens/Auth/AuthScreen';
@@ -134,6 +136,21 @@ function RootStackScreen() {
         name='Notifications'
         component={NotificationScreen}
         options={{ headerShown: false, title: 'Notifications' }}
+      />
+      <RootStack.Screen
+        name='EventDetails'
+        component={EventDetails}
+        options={{ headerShown: false }}
+      />
+      <RootStack.Screen
+        name='Interests'
+        component={InterestsScreen}
+        options={{ headerShown: true, title: 'Manage Interests' }}
+      />
+      <RootStack.Screen
+        name='ConfirmationScreen'
+        component={ConfirmationScreen}
+        options={{ title: 'Confirmation' }}
       />
     </RootStack.Navigator>
   );

@@ -23,69 +23,102 @@ import {
   getDoc,
 } from 'firebase/firestore';
 
-// Description: Renders a notification card based on type (friend request, event, etc.)
-const NotificationCard = memo(
-  ({ item, onAcceptFriend, onDenyFriend, navigation }) => {
-    // Friend request notification
-    if (item.type === 'friend_request') {
-      return (
-        <View style={styles.card}>
-          <MaterialCommunityIcons
-            name='account-plus'
-            size={28}
-            color='#0066cc'
-            style={styles.icon}
-          />
-          <View style={styles.textContainer}>
-            <Text style={styles.message}>{item.message}</Text>
-            <Text style={styles.time}>{item.time}</Text>
-          </View>
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.acceptButton]}
-              onPress={() => onAcceptFriend(item.fromUserId, item.id)}
-              accessibilityLabel='Accept friend request'
-            >
-              <Text style={styles.actionText}>Accept</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.denyButton]}
-              onPress={() => onDenyFriend(item.fromUserId, item.id)}
-              accessibilityLabel='Deny friend request'
-            >
-              <Text style={styles.actionText}>Deny</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    }
-    // Other notification types (event updates, etc.)
-    return (
+// Description: Renders a notification card based on type
+const NotificationCard = memo(({ item, onAccept, onDeny, navigation }) => {
+  const renderActions = () => (
+    <View style={styles.actionRow}>
       <TouchableOpacity
-        style={styles.card}
-        onPress={() => {
-          if (item.eventId) {
-            navigation.navigate('EventChat', { eventId: item.eventId });
-          }
-        }}
-        accessibilityLabel='Go to event chat'
+        style={[styles.actionButton, styles.acceptButton]}
+        onPress={() => onAccept(item.fromUserId, item.id)}
+        accessibilityLabel='Accept request'
       >
-        <MaterialCommunityIcons
-          name={
-            item.type === 'event_update' ? 'calendar-alert' : 'account-group'
-          }
-          size={28}
-          color='#0066cc'
-          style={styles.icon}
-        />
-        <View style={styles.textContainer}>
-          <Text style={styles.message}>{item.message}</Text>
-          <Text style={styles.time}>{item.time}</Text>
-        </View>
+        <Text style={styles.actionText}>Accept</Text>
       </TouchableOpacity>
-    );
-  }
-);
+      <TouchableOpacity
+        style={[styles.actionButton, styles.denyButton]}
+        onPress={() => onDeny(item.fromUserId, item.id)}
+        accessibilityLabel='Deny request'
+      >
+        <Text style={styles.actionText}>Deny</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderContent = () => {
+    switch (item.type) {
+      case 'friend_request':
+        return (
+          <>
+            <MaterialCommunityIcons
+              name='account-plus'
+              size={28}
+              color='#0066cc'
+              style={styles.icon}
+            />
+            <View style={styles.textContainer}>
+              <Text style={styles.message}>{item.message}</Text>
+              <Text style={styles.time}>{item.time}</Text>
+            </View>
+            {renderActions()}
+          </>
+        );
+      case 'rsvp_request':
+        return (
+          <>
+            <MaterialCommunityIcons
+              name='account-check'
+              size={32}
+              color='#0066cc'
+              style={styles.centeredIcon}
+            />
+            <View style={styles.textContainer}>
+              <Text style={styles.eventTitle}>
+                {item.eventTitle || 'Event Title Unavailable'}
+              </Text>
+              <Text style={styles.message}>
+                {item.fromUserName} requested to join your event
+              </Text>
+            </View>
+            {renderActions()}
+          </>
+        );
+      default:
+        return (
+          <TouchableOpacity
+            style={styles.card}
+            onPress={() =>
+              item.eventId &&
+              navigation.navigate('EventChat', { eventId: item.eventId })
+            }
+            accessibilityLabel='Go to event chat'
+          >
+            <MaterialCommunityIcons
+              name={
+                item.type === 'event_update'
+                  ? 'calendar-alert'
+                  : 'account-group'
+              }
+              size={28}
+              color='#0066cc'
+              style={styles.icon}
+            />
+            <View style={styles.textContainer}>
+              <Text style={styles.message}>{item.message}</Text>
+              <Text style={styles.time}>{item.time}</Text>
+            </View>
+          </TouchableOpacity>
+        );
+    }
+  };
+
+  return (
+    <View
+      style={[styles.card, item.type === 'rsvp_request' && styles.centeredCard]}
+    >
+      {renderContent()}
+    </View>
+  );
+});
 
 const NotificationScreen = () => {
   const navigation = useNavigation();
@@ -94,27 +127,24 @@ const NotificationScreen = () => {
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
-  // Fetch notifications from Firestore for current user
   useEffect(() => {
     if (!user?.uid) return;
     const q = query(
       collection(db, 'notifications'),
-      where('recipientId', '==', user.uid) // Ensure correct field for recipient filtering
+      where('recipientId', '==', user.uid)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const notifArr = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
-      setNotifications(notifArr); // Properly set notifications state
+      setNotifications(notifArr);
     });
     return unsubscribe;
   }, [user?.uid]);
 
-  // Accept friend request: add each user to other's friends array, remove friendRequest, mark notification as read
-  const onAcceptFriend = async (fromUserId, notificationId) => {
+  const handleAccept = async (fromUserId, notificationId) => {
     try {
-      // Add each user to other's friends array
       await updateDoc(doc(db, 'users', user.uid), {
         friends: [...(user.friends || []), fromUserId],
       });
@@ -124,7 +154,6 @@ const NotificationScreen = () => {
       await updateDoc(fromUserDocRef, {
         friends: [...(fromUserData.friends || []), user.uid],
       });
-      // Optionally: remove friendRequest from user's array (if you track it)
       await updateDoc(doc(db, 'notifications', notificationId), { read: true });
       alert(`Accepted friend request from: ${fromUserId}`);
     } catch (err) {
@@ -132,8 +161,7 @@ const NotificationScreen = () => {
     }
   };
 
-  // Deny friend request: remove friendRequest from current user's array, mark notification as read
-  const onDenyFriend = async (fromUserId, notificationId) => {
+  const handleDeny = async (fromUserId, notificationId) => {
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         friendRequests: (user.friendRequests || []).filter(
@@ -147,20 +175,17 @@ const NotificationScreen = () => {
     }
   };
 
-  // Show confirmation modal before deleting notification
   const confirmDeleteNotification = (id) => {
     setPendingDeleteId(id);
     setDeleteModalVisible(true);
   };
 
-  // Delete notification from state (UI only, not Firestore)
   const handleDeleteNotification = () => {
     setNotifications((prev) => prev.filter((n) => n.id !== pendingDeleteId));
     setDeleteModalVisible(false);
     setPendingDeleteId(null);
   };
 
-  // Render hidden row for swipe-to-delete
   const renderHiddenItem = (data) => (
     <View style={styles.rowBack}>
       <TouchableOpacity
@@ -198,8 +223,8 @@ const NotificationScreen = () => {
           renderItem={({ item }) => (
             <NotificationCard
               item={item}
-              onAcceptFriend={onAcceptFriend}
-              onDenyFriend={onDenyFriend}
+              onAccept={handleAccept}
+              onDeny={handleDeny}
               navigation={navigation}
             />
           )}
@@ -266,10 +291,23 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     elevation: 1,
   },
-
+  centeredCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   icon: { marginRight: 12 },
+  centeredIcon: {
+    marginBottom: 8,
+  },
   textContainer: { flex: 1 },
   message: { fontSize: 16, color: '#222', fontWeight: '500' },
+  eventTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#222',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
   time: { fontSize: 13, color: '#888', marginTop: 2 },
   actionRow: {
     flexDirection: 'row',

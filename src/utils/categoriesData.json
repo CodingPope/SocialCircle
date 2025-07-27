@@ -1,0 +1,34 @@
+[
+  {
+    "id": "family_parenting",
+    "name": "Family & Parenting",
+    "activities": [
+      { "id": "stroller_fitness", "name": "Stroller Fitness Meetups" },
+      { "id": "toddler_playdates", "name": "Toddler Playdates" },
+      { "id": "family_hikes", "name": "Family Hikes" },
+      { "id": "kids_art_classes", "name": "Kids Art Classes" },
+      { "id": "parent_support_groups", "name": "Parent Support Groups" },
+      { "id": "family_camping", "name": "Family Camping Trips" },
+      { "id": "park_playdates", "name": "Park Playdates" },
+      { "id": "family_game_nights", "name": "Family Game Nights" },
+      { "id": "parent_and_me_yoga", "name": "Parent & Me Yoga" },
+      { "id": "kids_coding_clubs", "name": "Kids Coding Clubs" }
+    ]
+  },
+  {
+    "id": "creative_makers",
+    "name": "Creative & Makers",
+    "activities": [
+      { "id": "cosplay_meetups", "name": "Cosplay & Costume Making Meetups" },
+      { "id": "maker_spaces", "name": "Maker Space Open Labs" },
+      { "id": "lego_clubs", "name": "LEGO Builders Clubs" },
+      { "id": "rc_cars", "name": "RC Car Racing" },
+      { "id": "model_trains", "name": "Model Train Meetups" },
+      { "id": "3d_printing", "name": "3D Printing Workshops" },
+      { "id": "prop_making", "name": "Prop Making Workshops" },
+      { "id": "diy_furniture", "name": "DIY Furniture Building" },
+      { "id": "resin_art", "name": "Resin Art Workshops" },
+      { "id": "miniature_painting", "name": "Miniature Painting Clubs" }
+    ]
+  }
+]

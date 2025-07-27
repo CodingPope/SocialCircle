@@ -1,193 +1,64 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  StyleSheet,
-  TouchableOpacity,
-  Linking,
-} from 'react-native';
-import { format } from 'date-fns';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
-import EventPopUpCard from './EventPopUpCard';
-import { GOOGLE_MAPS_API_KEY } from '@env';
-import { MaterialIcons } from '@expo/vector-icons';
+import { View, Text, StyleSheet } from 'react-native';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetFlatList,
 } from '@gorhom/bottom-sheet';
+import EventPopUpCard from './EventPopUpCard';
+import PostCard from './PostCard';
+import { db } from '../firebase/config';
+import { doc, getDoc } from 'firebase/firestore';
+import { getUserById } from '../services/userService';
 
 const EventListView = ({ events, onCloseListView }) => {
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [enhancedEvents, setEnhancedEvents] = useState([]);
   const bottomSheetRef = useRef(null);
-  const snapPoints = useMemo(() => ['80%', '90%'], []);
+  const snapPoints = useMemo(() => ['93%', '50%'], []);
 
-  const handleEventPress = (event) => {
-    setSelectedEvent(event);
-  };
+  const handleEventPress = (event) => setSelectedEvent(event);
+  const closeModal = () => setSelectedEvent(null);
 
-  const closeModal = () => {
-    setSelectedEvent(null);
-  };
+  const fetchHostPhotosAndRatings = async () => {
+    const updated = await Promise.all(
+      events.map(async (event) => {
+        if (!event.ownerId)
+          return {
+            ...event,
+            hostPhoto: null,
+            hostRating: 0,
+            hostName: 'Unknown Host',
+          };
 
-  const formatTimestamp = (timestamp) => {
-    if (!timestamp) return 'Date not set';
-    if (timestamp.toDate) {
-      // Firestore Timestamp
-      return format(timestamp.toDate(), 'MMM d, yyyy h:mm a');
-    }
-    if (timestamp instanceof Date) {
-      return format(timestamp, 'MMM d, yyyy h:mm a');
-    }
-    if (timestamp.seconds) {
-      return format(new Date(timestamp.seconds * 1000), 'MMM d, yyyy h:mm a');
-    }
-    return 'Date not set';
-  };
+        const userData = await getUserById(event.ownerId);
 
-  const fetchUserProfilePicture = async (ownerId) => {
-    try {
-      const ref = doc(db, 'users', ownerId);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const userData = snap.data();
-        return userData.profileImage || userData.avatarURL || null;
-      }
-    } catch (err) {
-      console.error('Error fetching user profile picture:', err);
-    }
-    return null;
-  };
-
-  const fetchCityAndState = async (location) => {
-    // Try lat/lng geocode, else fallback to city/state/address string
-    if (location && location.latitude && location.longitude) {
-      try {
-        const res = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.latitude},${location.longitude}&key=${GOOGLE_MAPS_API_KEY}`
-        );
-        const data = await res.json();
-        if (data.status === 'OK' && data.results.length) {
-          const addressComponents = data.results[0].address_components;
-          const city = addressComponents.find((c) =>
-            c.types.includes('locality')
-          )?.short_name;
-          const state = addressComponents.find((c) =>
-            c.types.includes('administrative_area_level_1')
-          )?.short_name;
-          return city && state ? `${city}, ${state}` : 'Address not available';
-        }
-      } catch (err) {
-        console.error('Error fetching address:', err);
-      }
-    }
-    // Fallback: city/state/address string
-    if (location && location.city && location.state) {
-      return `${location.city}, ${location.state}`;
-    }
-    if (typeof location === 'string') {
-      const parts = location.split(',');
-      if (parts.length >= 2) {
-        return `${parts[parts.length - 2].trim()}, ${parts[
-          parts.length - 1
-        ].trim()}`;
-      }
-      return location.trim();
-    }
-    if (location && location.address) {
-      const addrParts = location.address.split(',');
-      if (addrParts.length >= 2) {
-        return `${addrParts[addrParts.length - 2].trim()}, ${addrParts[
-          addrParts.length - 1
-        ].trim()}`;
-      }
-      return location.address.trim();
-    }
-    return 'Location not specified';
-  };
-
-  const EventItem = ({ item }) => {
-    const [profileImageUri, setProfileImageUri] = useState(null);
-    const [address, setAddress] = useState('Fetching address...');
-
-    useEffect(() => {
-      if (item.ownerId) {
-        fetchUserProfilePicture(item.ownerId).then(setProfileImageUri);
-      }
-      if (item.location) {
-        fetchCityAndState(item.location).then(setAddress);
-      } else {
-        setAddress('Location not specified');
-      }
-    }, [item.ownerId, item.location]);
-
-    const openInMaps = () => {
-      if (item.location) {
-        const { latitude, longitude } = item.location;
-        const url = `https://www.google.com/maps?q=${latitude},${longitude}`;
-        Linking.openURL(url);
-      }
-    };
-
-    return (
-      <TouchableOpacity
-        style={styles.eventCard}
-        onPress={() => handleEventPress(item)}
-      >
-        {item.imageUrl && (
-          <Image
-            source={{ uri: item.imageUrl }}
-            style={styles.eventImage}
-            resizeMode='cover'
-          />
-        )}
-        <View style={styles.eventDetailsContainer}>
-          <Text style={styles.eventTitle}>
-            {item.title || 'Untitled Event'}
-          </Text>
-          <View style={styles.eventInfoRow}>
-            <Image
-              source={
-                profileImageUri
-                  ? { uri: profileImageUri }
-                  : require('../../assets/smileDefault.png')
-              }
-              style={styles.userProfilePic}
-            />
-            <View style={styles.eventInfoTextContainer}>
-              <Text style={styles.eventTime}>{formatTimestamp(item.date)}</Text>
-              <TouchableOpacity
-                style={styles.addressContainer}
-                onPress={openInMaps}
-              >
-                <MaterialIcons name='location-pin' size={16} color='blue' />
-                <Text style={styles.eventLocation}>{address}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-          <View style={styles.eventFooterRow}>
-            <Text style={styles.eventCapacity}>
-              {item.capacity
-                ? `${item.attendees?.length || 0}/${item.capacity} Going`
-                : `${item.attendees?.length || 0} Going`}
-            </Text>
-            <TouchableOpacity style={styles.rsvpButton}>
-              <Text style={styles.rsvpButtonText}>Join</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
+        return {
+          ...event,
+          hostPhoto: userData?.profileImage || userData?.avatarURL || null,
+          hostRating: userData?.rating || 0,
+          hostName:
+            userData?.displayName ||
+            userData?.username ||
+            userData?.name || // ✅ added
+            userData?.fullName || // ✅ added
+            `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim() || // ✅ added
+            event.ownerName || // ✅ fallback if event already stores host name
+            'Unknown Host',
+        };
+      })
     );
+    setEnhancedEvents(updated);
   };
 
-  // Custom header for BottomSheet with close button and drag indicator
+  useEffect(() => {
+    fetchHostPhotosAndRatings();
+  }, [events]);
+
   const renderHeader = () => (
     <View style={styles.sheetHeader}>
       <View style={styles.dragBarContainer}>
         <View style={styles.dragBar} />
       </View>
-
       <Text style={styles.sheetTitle}>List view</Text>
     </View>
   );
@@ -211,11 +82,27 @@ const EventListView = ({ events, onCloseListView }) => {
       handleComponent={renderHeader}
     >
       <BottomSheetFlatList
-        data={events}
+        data={enhancedEvents}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <EventItem item={item} />}
         contentContainerStyle={styles.listContainer}
+        renderItem={({ item }) =>
+          item.imageUrl ? (
+            <PostCard
+              event={item}
+              onPress={() => handleEventPress(item)}
+              onJoinPress={() => console.log('Join event logic')}
+            />
+          ) : (
+            <PostCard
+              event={item}
+              onPress={() => handleEventPress(item)}
+              onJoinPress={() => console.log('Join event logic')}
+              onEllipsisPress={() => console.log('Ellipsis logic')}
+            />
+          )
+        }
       />
+
       {selectedEvent && (
         <EventPopUpCard
           event={selectedEvent}
@@ -250,8 +137,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    // Add relative positioning for drag bar
-    position: 'relative',
     justifyContent: 'center',
   },
   dragBarContainer: {
@@ -269,7 +154,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#e0e0e0',
     marginBottom: 4,
   },
-
   sheetTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -279,77 +163,6 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     padding: 10,
-  },
-  eventCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  eventImage: {
-    width: '100%',
-    height: 200,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-  },
-  eventDetailsContainer: {
-    padding: 10,
-  },
-  eventInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  userProfilePic: {
-    width: 50,
-    height: 50,
-    borderRadius: 10,
-    marginRight: 10,
-  },
-  eventInfoTextContainer: {
-    flex: 1,
-  },
-  eventFooterRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  eventTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  eventTime: {
-    fontSize: 14,
-    color: '#666',
-  },
-  addressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  eventLocation: {
-    fontSize: 14,
-    color: 'blue',
-    marginLeft: 4,
-  },
-  eventCapacity: {
-    fontSize: 14,
-    color: '#333',
-  },
-  rsvpButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 6,
-  },
-  rsvpButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
   },
 });
 

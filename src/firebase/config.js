@@ -19,6 +19,7 @@ import {
   arrayUnion,
   arrayRemove,
   increment, // <-- add increment import
+  deleteDoc, // Add this import
 } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -194,4 +195,68 @@ export const sendNotification = async (type, recipientId, data) => {
     ...data,
     createdAt: new Date(),
   });
+};
+
+// Update user rating
+export const updateUserRating = async (uid, raterUid, rating) => {
+  const userDoc = doc(db, 'users', uid);
+  const userSnapshot = await getDoc(userDoc);
+
+  if (userSnapshot.exists()) {
+    const userData = userSnapshot.data();
+    const ratings = userData.ratings || {}; // Ensure ratings map exists
+
+    // Update the ratings map
+    ratings[raterUid] = rating;
+
+    // Calculate the new average rating
+    const totalRatings = Object.values(ratings);
+    const newRatingCount = totalRatings.length;
+    const newRating =
+      totalRatings.reduce((sum, r) => sum + r, 0) / newRatingCount;
+
+    // Update Firestore with the new rating and rating count
+    await updateDoc(userDoc, {
+      ratings, // Save the updated ratings map
+      rating: newRating,
+      ratingCount: newRatingCount,
+    });
+  }
+};
+
+// Delete an event (post)
+export const deleteEvent = async (eventId, userId) => {
+  try {
+    // Remove the event document
+    await deleteDoc(doc(db, 'events', eventId));
+
+    // Remove the event reference from the user's createdEvents array
+    await updateDoc(doc(db, 'users', userId), {
+      createdEvents: arrayRemove(eventId),
+    });
+
+    // Optionally: Decrement the user's eventCount
+    await updateEventCount(userId);
+  } catch (error) {
+    console.error('Error deleting event:', error);
+    throw error;
+  }
+};
+
+// Report a post (event or user)
+export const reportContent = async (reporterId, targetId, type, reason) => {
+  try {
+    const reportRef = collection(db, 'reports');
+    await addDoc(reportRef, {
+      reporterId,
+      targetId, // Could be eventId or userId
+      type, // e.g., "event" or "user"
+      reason: reason || 'No reason provided',
+      status: 'pending',
+      createdAt: new Date(),
+    });
+  } catch (error) {
+    console.error('Error reporting content:', error);
+    throw error;
+  }
 };

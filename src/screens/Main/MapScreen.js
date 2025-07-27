@@ -1,5 +1,3 @@
-// src/screens/Main/MapScreen.js
-
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -7,10 +5,9 @@ import {
   StyleSheet,
   TouchableOpacity,
   Text,
-  TextInput,
-  FlatList,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -30,7 +27,7 @@ import EventListView from '../../components/EventListView';
 import EventFilterWindow from '../../components/EventFilterWindow';
 import EventPopUpCard from '../../components/EventPopUpCard';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import { Ionicons } from '@expo/vector-icons'; // Add this import
+import { Ionicons } from '@expo/vector-icons';
 
 const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
 
@@ -44,6 +41,7 @@ const CustomDotMarker = ({ color, label, scale }) => (
 
 export default function MapScreen() {
   const { user } = useAuth();
+  const userInterests = user?.interests || [];
   const db = getFirestore();
 
   const [events, setEvents] = useState([]);
@@ -52,13 +50,8 @@ export default function MapScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [region, setRegion] = useState(null);
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterVisible, setFilterVisible] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState(null);
-
   const [showListView, setShowListView] = useState(false);
   const [showFilterWindow, setShowFilterWindow] = useState(false);
-
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [selectedFilters, setSelectedFilters] = useState({
     date: null,
@@ -66,9 +59,11 @@ export default function MapScreen() {
   });
 
   const [isLocating, setIsLocating] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  const [isSearchFocused, setIsSearchFocused] = useState(false); // ✅ TRACKS DROPDOWN STATE
 
   const unsubscribeRef = useRef(null);
-  const searchInputRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -84,54 +79,58 @@ export default function MapScreen() {
       const initialRegion = {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
-        latitudeDelta: 0.0922,
-        longitudeDelta: 0.0421,
+        latitudeDelta: 0.0922 * 1.5,
+        longitudeDelta: 0.0421 * 1.5,
       };
       setRegion(initialRegion);
-      fetchEventsInRegion(initialRegion);
+      setSelectedFilters((prev) => ({
+        ...prev,
+        interests: userInterests,
+      }));
+
+      await fetchEventsInRegion(initialRegion, true);
     })();
-  }, []);
+  }, [userInterests]);
 
   const applyFilters = (filters) => {
     setSelectedFilters(filters);
     const { date, interests, genderOnly } = filters;
     let filtered = [...events];
 
-    // --- Remove expired events (date + 1 hour) ---
     const now = Date.now();
     filtered = filtered.filter((event) => {
       let eventTime = null;
       if (event.endAt) {
-        if (event.endAt.toDate) eventTime = event.endAt.toDate().getTime();
-        else if (event.endAt.seconds) eventTime = event.endAt.seconds * 1000;
+        eventTime = event.endAt.toDate
+          ? event.endAt.toDate().getTime()
+          : event.endAt.seconds * 1000;
       } else if (event.date) {
         if (event.date.toDate) eventTime = event.date.toDate().getTime();
         else if (event.date.seconds) eventTime = event.date.seconds * 1000;
         else if (event.date instanceof Date) eventTime = event.date.getTime();
       }
-      // Remove if eventTime is not set or is more than 1 hour ago
       return eventTime && eventTime + 60 * 60 * 1000 > now;
     });
 
-    if (date) filtered = filtered.filter((event) => event.date === date);
-    if (interests && interests.length > 0)
-      filtered = filtered.filter((event) => interests.includes(event.category));
-    // Description: Filter events by privacy if genderOnly is set
+    if (date) filtered = filtered.filter((e) => e.date === date);
+    if (interests?.length > 0)
+      filtered = filtered.filter((e) => interests.includes(e.category));
     if (genderOnly) {
-      filtered = filtered.filter(
-        (event) => event.privacy === genderOnly // Only show events with privacy set to user's gender
-      );
+      filtered = filtered.filter((e) => e.privacy === genderOnly);
     }
     setFilteredEvents(filtered);
   };
 
-  const fetchEventsInRegion = (region) => {
+  const fetchEventsInRegion = async (region, isInitial = false) => {
     if (!region) return;
     const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
-    const latMin = latitude - latitudeDelta / 2;
-    const latMax = latitude + latitudeDelta / 2;
-    const lngMin = longitude - longitudeDelta / 2;
-    const lngMax = longitude + longitudeDelta / 2;
+
+    const multiplier = 1.5;
+    const latMin = latitude - (latitudeDelta * multiplier) / 2;
+    const latMax = latitude + (latitudeDelta * multiplier) / 2;
+    const lngMin = longitude - (longitudeDelta * multiplier) / 2;
+    const lngMax = longitude + (longitudeDelta * multiplier) / 2;
+
     if (unsubscribeRef.current) unsubscribeRef.current();
     const q = query(
       collection(db, 'events'),
@@ -140,14 +139,21 @@ export default function MapScreen() {
       where('location.longitude', '>=', lngMin),
       where('location.longitude', '<=', lngMax)
     );
-    unsubscribeRef.current = onSnapshot(q, (snap) => {
-      const regionEvents = snap.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setEvents(regionEvents);
-      // Description: Always re-apply filters after fetching events
-      applyFilters(selectedFilters);
+
+    return new Promise((resolve) => {
+      unsubscribeRef.current = onSnapshot(q, (snap) => {
+        const regionEvents = snap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setEvents(regionEvents);
+        applyFilters(selectedFilters);
+
+        if (isInitial) {
+          setInitialLoading(false);
+        }
+        resolve();
+      });
     });
   };
 
@@ -159,10 +165,10 @@ export default function MapScreen() {
   const handleMapLongPress = async (e) => {
     const coordinate = e.nativeEvent.coordinate;
     try {
-      const response = await fetch(
+      const res = await fetch(
         `https://maps.googleapis.com/maps/api/geocode/json?latlng=${coordinate.latitude},${coordinate.longitude}&key=${GOOGLE_MAPS_API_KEY}`
       );
-      const json = await response.json();
+      const json = await res.json();
       const address = json.results?.[0]?.formatted_address || 'Unknown address';
       setNewEventLocation({ ...coordinate, address });
       setShowCreateModal(true);
@@ -189,7 +195,6 @@ export default function MapScreen() {
     return '#E74C3C';
   };
 
-  // --- Search Autocomplete Handler ---
   const handlePlaceSelect = (data, details) => {
     if (details?.geometry?.location) {
       const { lat, lng } = details.geometry.location;
@@ -201,13 +206,12 @@ export default function MapScreen() {
       };
       setRegion(newRegion);
       fetchEventsInRegion(newRegion);
+      if (Platform.OS === 'android') setIsSearchFocused(false); // ✅ close overlay
     }
   };
 
-  // --- Add handler for list view toggle ---
   const handleToggleListView = () => setShowListView((prev) => !prev);
 
-  // Handler to center map on user's current location
   const handleCenterOnUser = async () => {
     setIsLocating(true);
     try {
@@ -220,47 +224,101 @@ export default function MapScreen() {
       };
       setRegion(userRegion);
       fetchEventsInRegion(userRegion);
-    } catch (err) {
+    } catch {
       Alert.alert('Error', 'Unable to get your location.');
     }
     setIsLocating(false);
   };
 
+  const updateSelectedFilters = (filters) => {
+    setSelectedFilters(filters);
+  };
+
+  if (initialLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size='large' color='#007AFF' />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {/* Always show search bar at the top */}
-      <View style={styles.searchBarContainer}>
+      {/* Search + Filter Bar */}
+      <View style={styles.searchBarUnified} pointerEvents='box-none'>
+        <Ionicons
+          name='search'
+          size={18}
+          color='#A0A0A0'
+          style={{ marginLeft: 10, marginRight: 6 }}
+        />
         <GooglePlacesAutocomplete
           placeholder='Search places'
           minLength={2}
           fetchDetails={true}
-          onPress={handlePlaceSelect}
+          onFocus={() => Platform.OS === 'android' && setIsSearchFocused(true)}
+          onBlur={() => Platform.OS === 'android' && setIsSearchFocused(false)}
+          onPress={(data, details = null) => handlePlaceSelect(data, details)}
           query={{
             key: GOOGLE_PLACES_API_KEY,
             language: 'en',
+            types: 'geocode',
           }}
-          styles={{
-            textInput: styles.searchInput,
-            container: { flex: 1 },
-            listView: { backgroundColor: '#fff', zIndex: 2 },
-          }}
+          keyboardShouldPersistTaps='handled'
+          nestedScrollEnabled={true}
           enablePoweredByContainer={false}
-          debounce={300}
+          nearbyPlacesAPI='GooglePlacesSearch'
+          debounce={200}
+          styles={{
+            container: {
+              flex: 1,
+            },
+            textInput: {
+              height: 44,
+              fontSize: 16,
+              backgroundColor: 'transparent',
+              paddingHorizontal: 0,
+            },
+            listView: {
+              position: 'absolute',
+              top: 44,
+              left: 0,
+              right: 0,
+              backgroundColor: '#fff',
+              zIndex: 9999,
+              elevation: 9999,
+            },
+          }}
         />
         <TouchableOpacity
-          style={styles.filterButton}
+          style={styles.filterButtonUnified}
           onPress={() => setShowFilterWindow((prev) => !prev)}
         >
-          <Text style={styles.filterButtonText}>Filter</Text>
+          <Text style={styles.filterButtonTextUnified}>Filter</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ✅ ANDROID ONLY: Transparent overlay to block map touches */}
+      {Platform.OS === 'android' && isSearchFocused && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'transparent',
+            zIndex: 5,
+          }}
+          pointerEvents='auto'
+        />
+      )}
 
       {region && (
         <MapView
           style={styles.map}
           region={region}
           onRegionChangeComplete={handleRegionChangeComplete}
-          onMapReady={() => fetchEventsInRegion(region)}
           onLongPress={handleMapLongPress}
         >
           {filteredEvents.map((event) => (
@@ -284,7 +342,7 @@ export default function MapScreen() {
         </MapView>
       )}
 
-      {/* Floating List Button (bottom left) */}
+      {/* Left FABs */}
       <View style={styles.leftFabContainer}>
         <TouchableOpacity
           style={styles.listFab}
@@ -306,7 +364,7 @@ export default function MapScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Floating Action Button (bottom right) */}
+      {/* Create Event FAB */}
       <TouchableOpacity
         style={styles.fab}
         onPress={() => setShowCreateModal(true)}
@@ -314,7 +372,7 @@ export default function MapScreen() {
         <Ionicons name='add' size={32} color='#fff' style={styles.fabIcon} />
       </TouchableOpacity>
 
-      {/* Event List View as overlay modal */}
+      {/* Event List Overlay */}
       {showListView && (
         <View style={styles.listViewOverlay}>
           <EventListView
@@ -324,6 +382,7 @@ export default function MapScreen() {
         </View>
       )}
 
+      {/* Create Event Modal */}
       <Modal
         visible={showCreateModal}
         animationType='slide'
@@ -339,11 +398,16 @@ export default function MapScreen() {
             setShowCreateModal(false);
             setNewEventLocation(null);
             if (loc)
-              setRegion({ ...loc, latitudeDelta: 0.05, longitudeDelta: 0.05 });
+              setRegion({
+                ...loc,
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05,
+              });
           }}
         />
       </Modal>
 
+      {/* Filter Window */}
       {showFilterWindow && (
         <EventFilterWindow
           isVisible={showFilterWindow}
@@ -353,11 +417,13 @@ export default function MapScreen() {
             setShowFilterWindow(false);
           }}
           selectedFilters={selectedFilters}
-          currentUserGender={user.sex} // e.g., "male" or "female"
+          currentUserGender={user.sex}
+          userInterests={userInterests}
+          updateSelectedFilters={updateSelectedFilters}
         />
       )}
 
-      {/* Overlay: EventPopUpCard (always highest zIndex except modals) */}
+      {/* Event PopUpCard */}
       {selectedEvent && (
         <View style={styles.eventPopUpContainer}>
           <EventPopUpCard
@@ -372,7 +438,7 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { flex: 1 },
+  map: { flex: 1, zIndex: 1 },
   dot: {
     height: 18,
     width: 18,
@@ -393,13 +459,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 22, // Ensure above map
+    zIndex: 22,
   },
-  fabIcon: {
-    // Description: Center icon in FAB
-    textAlign: 'center',
-    textAlignVertical: 'center',
-  },
+  fabIcon: { textAlign: 'center', textAlignVertical: 'center' },
   leftFabContainer: {
     position: 'absolute',
     bottom: 20,
@@ -434,46 +496,59 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  searchBarContainer: {
+  searchBarUnified: {
     position: 'absolute',
-    top: 60,
+    top: 50,
     left: 10,
-    right: 80,
+    right: 10,
+    elevation: 9999,
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    paddingHorizontal: 10,
     alignItems: 'center',
-    zIndex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    height: 44,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    zIndex: 10,
   },
-  searchInput: { flex: 1, height: 40 },
-  filterButton: {
-    position: 'absolute',
-    right: -70,
-    height: 40,
-    width: 70,
+  searchInputUnified: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    fontSize: 16,
+    height: 44,
+    paddingVertical: 0,
+  },
+  filterButtonUnified: {
     backgroundColor: '#007AFF',
-    borderRadius: 8,
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 15,
+    borderTopRightRadius: 15,
+    borderBottomRightRadius: 15,
   },
-  filterButtonText: { color: '#fff', fontWeight: 'bold' },
+  filterButtonTextUnified: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 15,
+  },
   eventPopUpContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 100, // Highest overlay except modals
+    zIndex: 100,
   },
   listViewOverlay: {
-    // Description: Full-screen overlay for EventListView, above all UI except EventFilterWindow
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 50, // Lower than EventFilterWindow (which should be 100+)
+    zIndex: 50,
     backgroundColor: 'transparent',
   },
 });
