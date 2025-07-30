@@ -21,8 +21,8 @@ export default function LocationScreen() {
 
   useEffect(() => {
     if (user.location?.latitude != null && user.location?.longitude != null) {
-      // Location already exists, navigate to Map
-      resetRoot([{ name: 'Map' }]);
+      // Navigate to MainTabs to include bottom tab navigation
+      resetRoot([{ name: 'MainTabs' }]);
       return;
     }
     (async () => {
@@ -38,7 +38,7 @@ export default function LocationScreen() {
       try {
         const { coords } = await Location.getCurrentPositionAsync({});
         console.log('Got coords:', coords);
-        // write lat/lng to Firestore
+        // Write lat/lng to Firestore
         await updateDoc(doc(db, 'users', user.uid), {
           location: {
             latitude: coords.latitude,
@@ -46,9 +46,9 @@ export default function LocationScreen() {
           },
         });
         setLoading(false);
-        console.log('Location saved, navigating to Map...');
-        // reset nav stack to Map
-        resetRoot([{ name: 'Map' }]);
+        console.log('Location saved, navigating to MainTabs...');
+        // Navigate to MainTabs to include bottom tab navigation
+        resetRoot([{ name: 'MainTabs' }]);
       } catch (error) {
         console.error('Error getting location:', error);
         setError('Error getting location');

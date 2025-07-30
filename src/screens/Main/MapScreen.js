@@ -41,7 +41,17 @@ const CustomDotMarker = ({ color, label, scale }) => (
 
 export default function MapScreen() {
   const { user } = useAuth();
-  const userInterests = user?.interests || [];
+
+  if (!user) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size='large' color='#007AFF' />
+      </View>
+    );
+  }
+
+  const userInterests = Array.isArray(user?.interests) ? user.interests : [];
+
   const db = getFirestore();
 
   const [events, setEvents] = useState([]);
@@ -113,10 +123,21 @@ export default function MapScreen() {
     });
 
     if (date) filtered = filtered.filter((e) => e.date === date);
-    if (interests?.length > 0)
-      filtered = filtered.filter((e) => interests.includes(e.category));
+    if (interests?.length > 0) {
+      const interestIds = interests.map((i) => i.id);
+      filtered = filtered.filter((e) => interestIds.includes(e.category));
+    }
     if (genderOnly) {
       filtered = filtered.filter((e) => e.privacy === genderOnly);
+    }
+    if (userInterests.length === 0) {
+      return (
+        <View
+          style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+        >
+          <Text>You must select some interests to view events.</Text>
+        </View>
+      );
     }
     setFilteredEvents(filtered);
   };
@@ -254,10 +275,15 @@ export default function MapScreen() {
         />
         <GooglePlacesAutocomplete
           placeholder='Search places'
+          predefinedPlaces={[]}
           minLength={2}
           fetchDetails={true}
-          onFocus={() => Platform.OS === 'android' && setIsSearchFocused(true)}
-          onBlur={() => Platform.OS === 'android' && setIsSearchFocused(false)}
+          textInputProps={{
+            onFocus: () =>
+              Platform.OS === 'android' && setIsSearchFocused(true),
+            onBlur: () =>
+              Platform.OS === 'android' && setIsSearchFocused(false),
+          }}
           onPress={(data, details = null) => handlePlaceSelect(data, details)}
           query={{
             key: GOOGLE_PLACES_API_KEY,

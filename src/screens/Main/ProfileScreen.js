@@ -320,7 +320,7 @@ export default function ProfileScreen({ navigation }) {
         setIsEditing(true);
         break;
       case 'Manage Interests':
-        navigation.navigate('Interests'); // Navigate to InterestsScreen
+        navigation.navigate('ManageInterestsScreen'); // Updated navigation
         break;
       case 'Logout':
         handleLogout();

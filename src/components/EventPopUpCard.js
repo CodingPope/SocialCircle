@@ -309,7 +309,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
             <View>
               <Text style={styles.userName}>{displayName}</Text>
               <Text style={styles.userRating}>
-                {'★'.repeat(Math.round(userDetails.rating || 0))}{' '}
+                {'★'.repeat(Math.round(userDetails.rating || 0))}
                 {userDetails.ratingCount || 0} reviews
               </Text>
             </View>

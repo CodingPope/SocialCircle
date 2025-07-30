@@ -1,4 +1,3 @@
-// src/screens/Main/CreateEventScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -9,7 +8,7 @@ import {
   Alert,
   StyleSheet,
   KeyboardAvoidingView,
-  ScrollView,
+  FlatList,
   Platform,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
@@ -18,7 +17,8 @@ import * as ImagePicker from 'expo-image-picker';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { Ionicons } from '@expo/vector-icons';
-import { SelectList } from 'react-native-dropdown-select-list';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import {
   getFirestore,
   collection,
@@ -34,6 +34,7 @@ import { useAuth } from '../../context/AuthContext';
 import { updateEventCount } from '../../firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import InterestSelector from '../../components/InterestSelector'; // Import the reusable InterestSelector
 
 const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
 
@@ -42,27 +43,20 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const db = getFirestore();
   const storage = getStorage();
 
-  // Image upload state
   const [imageUri, setImageUri] = useState(null);
   const [imageUrl, setImageUrl] = useState('');
-
-  // Basic fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date());
-
-  // Manual address
   const [manualAddress, setManualAddress] = useState('');
   const [manualLocation, setManualLocation] = useState(null);
 
-  // Category search + selection
-  const [categories, setCategories] = useState([]);
-  const [category, setCategory] = useState('');
+  const [interestOptions, setInterestOptions] = useState([]);
+  const [selectedInterest, setSelectedInterest] = useState(null);
+  const [isInterestPickerOpen, setIsInterestPickerOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(''); // State for search term
 
-  // Age range slider
   const [ageRange, setAgeRange] = useState([18, 99]);
-
-  // Privacy segmented control (fallback for Android)
   const [privacyIndex, setPrivacyIndex] = useState(0);
   const segments = [
     'Public',
@@ -74,6 +68,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     'rsvp',
     `${user.sex === 'female' ? 'female-only' : 'male-only'}`,
   ];
+  const [placeInput, setPlaceInput] = useState('');
 
   const [capacity, setCapacity] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -86,7 +81,6 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     hideDatePicker();
   };
 
-  // Geocode address
   const handleGeocode = async () => {
     if (!manualAddress.trim()) return Alert.alert('Enter an address');
     try {
@@ -108,7 +102,6 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     }
   };
 
-  // Image picker + upload
   const pickImageAndUpload = async () => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -131,7 +124,6 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     }
   };
 
-  // Create event
   const handleCreate = async () => {
     if (!title.trim()) return Alert.alert('Title is required');
     if (description.trim().length < 30)
@@ -139,7 +131,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     if (date - new Date() < 60 * 60 * 1000)
       return Alert.alert('Event must be at least 1 hour ahead');
     if (!manualLocation && !location) return Alert.alert('Address is required');
-    if (!category) return Alert.alert('Select a category');
+    if (!selectedInterest) return Alert.alert('Select an interest');
+
     const privacyValue = privacyValues[privacyIndex];
     if (
       (privacyValue === 'female-only' && user.gender !== 'female') ||
@@ -157,7 +150,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         date: Timestamp.fromDate(date),
         privacy: privacyValue,
         ageRange,
-        category,
+        interest: selectedInterest,
         imageUrl: imageUrl || null,
         location: eventLocation,
         capacity: capacity ? parseInt(capacity, 10) : 0,
@@ -179,33 +172,23 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
   // Fetch categories (activities) from Firestore
   useEffect(() => {
-    const fetchActivities = async () => {
+    const fetchInterests = async () => {
       try {
-        const allActivities = [];
-        const categoriesSnapshot = await getDocs(collection(db, 'categories'));
-        for (const categoryDoc of categoriesSnapshot.docs) {
-          const activitiesSnapshot = await getDocs(
-            collection(db, `categories/${categoryDoc.id}/activities`)
-          );
-          activitiesSnapshot.forEach((activityDoc) => {
-            const activityName = activityDoc.id.replace(/_/g, ' ');
-            allActivities.push(activityName);
-          });
-        }
-        const sortedActivities = [...new Set(allActivities)].sort((a, b) =>
-          a.localeCompare(b, 'en', { sensitivity: 'base' })
-        );
-        const formattedCategories = sortedActivities.map((activity) => ({
-          key: activity,
-          value: activity,
-        }));
-        setCategories(formattedCategories);
-      } catch (error) {
-        console.error('Error fetching activities:', error);
-        Alert.alert('Failed to load activities');
+        const snapshot = await getDocs(collection(db, 'categories'));
+        const interests = snapshot.docs.flatMap((doc) => {
+          const data = doc.data();
+          return (data.interests || []).map((i) => ({
+            label: i.name,
+            value: i.name,
+          }));
+        });
+        setInterestOptions(JSON.parse(JSON.stringify(interests)));
+      } catch (err) {
+        console.error('Error fetching interests:', err);
+        Alert.alert('Failed to load interests');
       }
     };
-    fetchActivities();
+    fetchInterests();
   }, []);
 
   useEffect(() => {
@@ -218,211 +201,223 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     }
   }, [location]);
 
+  // Replace your return statement with this
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
-    >
-      <KeyboardAwareScrollView
-        contentContainerStyle={{ paddingBottom: 30 }}
-        keyboardShouldPersistTaps='handled'
-        nestedScrollEnabled={true} // ✅ important for Android
-        extraScrollHeight={100}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
-        {/* Photo */}
-        {imageUri ? (
-          <Image source={{ uri: imageUri }} style={styles.preview} />
-        ) : (
-          <View style={styles.previewPlaceholder}>
-            <Text>No Image</Text>
-          </View>
-        )}
-        <TouchableOpacity style={styles.photoBtn} onPress={pickImageAndUpload}>
-          <Text style={styles.photoBtnText}>
-            {imageUri ? 'Change Photo' : 'Add Photo'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Title & Description */}
-        <Text style={styles.label}>Title</Text>
-        <TextInput
-          style={styles.input}
-          value={title}
-          onChangeText={setTitle}
-          placeholder='Event title'
-        />
-        <Text style={styles.label}>Description</Text>
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          value={description}
-          onChangeText={setDescription}
-          placeholder='What’s your event about?'
-          multiline
-        />
-
-        {/* Date & Time */}
-        <Text style={styles.label}>Date & Time</Text>
-        <TouchableOpacity style={styles.input} onPress={showDatePicker}>
-          <Text>
-            {date.toLocaleString('en-US', {
-              dateStyle: 'medium',
-              timeStyle: 'short',
-            })}
-          </Text>
-        </TouchableOpacity>
-        <DateTimePickerModal
-          isVisible={isDatePickerVisible}
-          mode='datetime'
-          date={date}
-          onConfirm={handleConfirmDate}
-          onCancel={hideDatePicker}
-        />
-
-        {/* Manual Address */}
-        <Text style={styles.label}>Location</Text>
-        <GooglePlacesAutocomplete
-          placeholder='Enter address'
-          minLength={2}
-          fetchDetails={true}
-          keyboardShouldPersistTaps='handled'
-          nestedScrollEnabled={true} // ✅ add this!
-          styles={{
-            textInput: [styles.input, styles.flex],
-            container: { marginTop: 10, zIndex: 1000, elevation: 5 },
-            listView: { backgroundColor: '#fff', zIndex: 1000, elevation: 5 },
-          }}
-          onPress={(data, details) => {
-            if (details?.geometry?.location) {
-              const { lat, lng } = details.geometry.location;
-              setManualLocation({ latitude: lat, longitude: lng });
-              setManualAddress(data.description);
-              Alert.alert('Location set', 'Pin will be placed on map.');
-            }
-          }}
-          query={{
-            key: GOOGLE_PLACES_API_KEY,
-            language: 'en',
-          }}
-          enablePoweredByContainer={false}
-          debounce={300}
-        />
-        {manualLocation && (
-          <View style={styles.row}>
-            <Ionicons
-              name='location-outline'
-              size={20}
-              color='#666'
-              style={{ marginRight: 8 }}
-            />
-            <Text style={styles.pinLocationText}>
-              Pin Location: {manualAddress || 'Unknown'}
-            </Text>
-          </View>
-        )}
-
-        {/* Category Picker */}
-        <View style={{ marginTop: 15 }}>
-          <Text style={styles.label}>Category</Text>
-          <SelectList
-            data={categories}
-            setSelected={(val) => setCategory(val)}
-            save='value'
-            placeholder='Search categories'
-            boxStyles={styles.dropdownBox}
-            dropdownStyles={styles.dropdownList}
-            dropdownItemStyles={styles.dropdownItem}
-            dropdownTextStyles={styles.dropdownText}
-            inputStyles={styles.dropdownInput}
-            searchPlaceholder='Type to filter…'
-          />
-        </View>
-
-        {/* Age Range */}
-        <Text style={styles.label}>
-          Age Range: {ageRange[0]} - {ageRange[1]}
-        </Text>
-        <View style={styles.sliderWrapper}>
-          <MultiSlider
-            values={ageRange}
-            sliderLength={280}
-            onValuesChange={setAgeRange}
-            min={18}
-            max={99}
-            step={1}
-            allowOverlap={false}
-            snapped
-          />
-        </View>
-
-        {/* Privacy */}
-        <Text style={styles.label}>Privacy</Text>
-        {Platform.OS === 'ios' ? (
-          <SegmentedControl
-            values={segments}
-            selectedIndex={privacyIndex}
-            onChange={(event) =>
-              setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
-            }
-            style={styles.segment}
-          />
-        ) : (
-          <View style={styles.androidPrivacyWrapper}>
-            {segments.map((seg, idx) => (
+        <FlatList
+          data={[]} // dummy data to allow FlatList to render
+          keyExtractor={() => 'dummy'} // required prop
+          ListHeaderComponent={
+            <View>
+              {/* Image Preview */}
+              {imageUri ? (
+                <Image source={{ uri: imageUri }} style={styles.preview} />
+              ) : (
+                <View style={styles.previewPlaceholder}>
+                  <Text>No Image</Text>
+                </View>
+              )}
               <TouchableOpacity
-                key={idx}
-                style={[
-                  styles.androidPrivacyBtn,
-                  privacyIndex === idx && styles.androidPrivacyBtnActive,
-                ]}
-                onPress={() => setPrivacyIndex(idx)}
+                style={styles.photoBtn}
+                onPress={pickImageAndUpload}
               >
-                <Text
-                  style={
-                    privacyIndex === idx
-                      ? styles.androidPrivacyTxtActive
-                      : styles.androidPrivacyTxt
-                  }
-                >
-                  {seg}
+                <Text style={styles.photoBtnText}>
+                  {imageUri ? 'Change Photo' : 'Add Photo'}
                 </Text>
               </TouchableOpacity>
-            ))}
-          </View>
-        )}
 
-        {/* Capacity */}
-        <Text style={styles.label}>Capacity (optional)</Text>
-        <TextInput
-          style={styles.input}
-          value={capacity}
-          onChangeText={setCapacity}
-          placeholder='Leave empty for unlimited'
-          keyboardType='numeric'
+              {/* Title */}
+              <Text style={styles.label}>Title</Text>
+              <TextInput
+                style={styles.input}
+                value={title}
+                onChangeText={setTitle}
+                placeholder='Event title'
+              />
+
+              {/* Description */}
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder='What’s your event about?'
+                multiline
+              />
+
+              {/* Date & Time */}
+              <Text style={styles.label}>Date & Time</Text>
+              <TouchableOpacity style={styles.input} onPress={showDatePicker}>
+                <Text>
+                  {date.toLocaleString('en-US', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </Text>
+              </TouchableOpacity>
+              <DateTimePickerModal
+                isVisible={isDatePickerVisible}
+                mode='datetime'
+                date={date}
+                onConfirm={handleConfirmDate}
+                onCancel={hideDatePicker}
+              />
+
+              {/* Address Input */}
+              <Text style={styles.label}>Location</Text>
+              <View style={{ zIndex: 10 }}>
+                <GooglePlacesAutocomplete
+                  placeholder='Enter address'
+                  minLength={2}
+                  fetchDetails={true}
+                  debounce={300}
+                  enablePoweredByContainer={false}
+                  keyboardShouldPersistTaps='handled'
+                  predefinedPlaces={[]} // ✅ Prevents `.filter()` crash
+                  styles={{
+                    textInput: [styles.input, styles.flex],
+                    container: { flex: 1 },
+                    listView: {
+                      backgroundColor: '#fff',
+                      elevation: 5,
+                      position: 'absolute',
+                      top: 55,
+                      maxHeight: 200,
+                    },
+                  }}
+                  textInputProps={{
+                    value: placeInput,
+                    onChangeText: setPlaceInput,
+                  }}
+                  onPress={(data, details = null) => {
+                    if (details?.geometry?.location) {
+                      const { lat, lng } = details.geometry.location;
+                      setManualLocation({ latitude: lat, longitude: lng });
+                      setManualAddress(data?.description ?? '');
+                      Alert.alert('Location set', 'Pin will be placed on map.');
+                    }
+                  }}
+                  query={{
+                    key: GOOGLE_MAPS_API_KEY,
+                    language: 'en',
+                  }}
+                />
+              </View>
+              {manualLocation && (
+                <View style={styles.row}>
+                  <Ionicons
+                    name='location-outline'
+                    size={20}
+                    color='#666'
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.pinLocationText}>
+                    Pin Location: {manualAddress || 'Unknown'}
+                  </Text>
+                </View>
+              )}
+
+              {/* Interests */}
+              <Text style={styles.label}>Interest</Text>
+              <InterestSelector
+                selectedInterests={selectedInterest ? [selectedInterest] : []}
+                toggleInterest={(interest) => setSelectedInterest(interest)}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+              />
+
+              {/* Age Slider */}
+              <Text style={styles.label}>
+                Age Range: {ageRange[0]} - {ageRange[1]}
+              </Text>
+              <View style={styles.sliderWrapper}>
+                <MultiSlider
+                  values={ageRange}
+                  sliderLength={280}
+                  onValuesChange={setAgeRange}
+                  min={18}
+                  max={99}
+                  step={1}
+                  allowOverlap={false}
+                  snapped
+                />
+              </View>
+
+              {/* Privacy */}
+              <Text style={styles.label}>Privacy</Text>
+              {Platform.OS === 'ios' ? (
+                <SegmentedControl
+                  values={segments}
+                  selectedIndex={privacyIndex}
+                  onChange={(event) =>
+                    setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
+                  }
+                  style={styles.segment}
+                />
+              ) : (
+                <View style={styles.androidPrivacyWrapper}>
+                  {segments.map((seg, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[
+                        styles.androidPrivacyBtn,
+                        privacyIndex === idx && styles.androidPrivacyBtnActive,
+                      ]}
+                      onPress={() => setPrivacyIndex(idx)}
+                    >
+                      <Text
+                        style={
+                          privacyIndex === idx
+                            ? styles.androidPrivacyTxtActive
+                            : styles.androidPrivacyTxt
+                        }
+                      >
+                        {seg}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Capacity */}
+              <Text style={styles.label}>Capacity (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={capacity}
+                onChangeText={setCapacity}
+                placeholder='Leave empty for unlimited'
+                keyboardType='numeric'
+              />
+
+              {/* Buttons */}
+              <TouchableOpacity
+                style={[styles.btn, uploading && styles.btnDis]}
+                onPress={handleCreate}
+                disabled={uploading}
+              >
+                <Text style={styles.btnTxt}>
+                  {uploading ? 'Creating...' : 'Create Event'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onCancel} style={styles.cancel}>
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          }
         />
-
-        {/* Submit & Cancel */}
-        <TouchableOpacity
-          style={[styles.btn, uploading && styles.btnDis]}
-          onPress={handleCreate}
-          disabled={uploading}
-        >
-          <Text style={styles.btnTxt}>
-            {uploading ? 'Creating...' : 'Create Event'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={onCancel} style={styles.cancel}>
-          <Text>Cancel</Text>
-        </TouchableOpacity>
-      </KeyboardAwareScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    padding: 20,
-    paddingTop: 60,
+    paddingHorizontal: 20,
     backgroundColor: '#fff',
     flex: 1,
   },
@@ -475,7 +470,12 @@ const styles = StyleSheet.create({
   },
   dropdownItem: { paddingVertical: 12, paddingHorizontal: 10 },
   dropdownText: { fontSize: 14 },
-  sliderWrapper: { height: 60, justifyContent: 'center', marginTop: 10 },
+  sliderWrapper: {
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+  },
   segment: { marginTop: 10, marginBottom: 20 },
   androidPrivacyWrapper: {
     flexDirection: 'row',

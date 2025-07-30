@@ -24,23 +24,16 @@ const InterestSelector = ({ selectedInterests, toggleInterest }) => {
     const fetchActivities = async () => {
       try {
         const allActivities = [];
-
         const categoriesSnapshot = await getDocs(collection(db, 'categories'));
         for (const categoryDoc of categoriesSnapshot.docs) {
-          const activitiesSnapshot = await getDocs(
-            collection(db, `categories/${categoryDoc.id}/activities`)
-          );
-
-          activitiesSnapshot.forEach((activityDoc) => {
-            const activityName = activityDoc.id.replace(/_/g, ' ');
-            allActivities.push(activityName);
+          const categoryData = categoryDoc.data();
+          categoryData.interests.forEach((interest) => {
+            allActivities.push(interest.name);
           });
         }
-
         const sorted = [...new Set(allActivities)].sort((a, b) =>
           a.localeCompare(b, 'en', { sensitivity: 'base' })
         );
-
         setActivities(sorted);
         setFilteredActivities(sorted);
       } catch (error) {
@@ -49,23 +42,18 @@ const InterestSelector = ({ selectedInterests, toggleInterest }) => {
         setLoading(false);
       }
     };
-
     fetchActivities();
   }, []);
 
-  // ✅ Debounced search
   useEffect(() => {
     const delay = setTimeout(() => {
       const filtered = activities.filter((activity) =>
         activity.toLowerCase().includes(searchTerm.toLowerCase())
       );
-
-      // Move selected interests to the top
       const sortedFiltered = [
         ...filtered.filter((activity) => selectedInterests.includes(activity)),
         ...filtered.filter((activity) => !selectedInterests.includes(activity)),
       ];
-
       setFilteredActivities(sortedFiltered);
     }, 300);
     return () => clearTimeout(delay);
@@ -73,7 +61,6 @@ const InterestSelector = ({ selectedInterests, toggleInterest }) => {
 
   return (
     <View>
-      {/* Search box */}
       <View style={styles.searchBoxContainer}>
         <TextInput
           style={styles.searchBox}
@@ -90,8 +77,6 @@ const InterestSelector = ({ selectedInterests, toggleInterest }) => {
           </TouchableOpacity>
         )}
       </View>
-
-      {/* Activity List */}
       {loading ? (
         <ActivityIndicator size='large' color='#007BFF' />
       ) : filteredActivities.length === 0 ? (
@@ -102,9 +87,9 @@ const InterestSelector = ({ selectedInterests, toggleInterest }) => {
         </Text>
       ) : (
         <ScrollView style={styles.interestSelector}>
-          {filteredActivities.map((activity) => (
+          {filteredActivities.map((activity, index) => (
             <TouchableOpacity
-              key={activity}
+              key={`${activity}-${index}`} // Ensure unique key for each activity
               style={[
                 styles.interestItem,
                 selectedInterests.includes(activity) && styles.selectedInterest,
@@ -126,7 +111,6 @@ const InterestSelector = ({ selectedInterests, toggleInterest }) => {
   );
 };
 
-// ✅ Main Event Filter Window
 const EventFilterWindow = ({
   isVisible,
   onClose,
@@ -196,7 +180,7 @@ const EventFilterWindow = ({
 
   const handleResetFilters = () => {
     setSelectedDate(null);
-    setSelectedInterests(userInterests || []); // Reset to user's interests
+    setSelectedInterests(userInterests || []);
     setGenderOnly(false);
   };
 
@@ -216,90 +200,77 @@ const EventFilterWindow = ({
   };
 
   return (
-    <TouchableWithoutFeedback
-      onPress={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <View style={styles.overlay}>
-        <Animated.View
-          style={{
-            transform: [{ translateY: slideAnim }],
-            ...styles.container,
-          }}
+    <View style={styles.overlay}>
+      <Animated.View
+        style={{ transform: [{ translateY: slideAnim }], ...styles.container }}
+      >
+        <Text style={styles.title}>Filter Events</Text>
+
+        <Text style={styles.sectionTitle}>Date</Text>
+        <TouchableOpacity
+          style={styles.datePickerButton}
+          onPress={() => setShowDatePicker(true)}
         >
-          <Text style={styles.title}>Filter Events</Text>
-
-          <Text style={styles.sectionTitle}>Date</Text>
-          <TouchableOpacity
-            style={styles.datePickerButton}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Text>{selectedDate || 'Select Date'}</Text>
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={selectedDate ? new Date(selectedDate) : new Date()}
-              mode='date'
-              onChange={(event, date) => {
-                setShowDatePicker(false);
-                handleDateChange(date);
-              }}
-            />
-          )}
-
-          <Text style={styles.sectionTitle}>Interests</Text>
-          <InterestSelector
-            selectedInterests={selectedInterests}
-            toggleInterest={toggleInterest}
+          <Text>{selectedDate || 'Select Date'}</Text>
+        </TouchableOpacity>
+        {showDatePicker && (
+          <DateTimePicker
+            value={selectedDate ? new Date(selectedDate) : new Date()}
+            mode='date'
+            onChange={(event, date) => {
+              setShowDatePicker(false);
+              handleDateChange(date);
+            }}
           />
+        )}
 
-          <Text style={styles.sectionTitle}>Privacy</Text>
-          <TouchableOpacity
-            style={[
-              styles.genderFilterButton,
-              genderOnly && styles.genderFilterButtonActive,
-            ]}
-            onPress={() => setGenderOnly((prev) => !prev)}
+        <Text style={styles.sectionTitle}>Interests</Text>
+        <InterestSelector
+          selectedInterests={selectedInterests}
+          toggleInterest={toggleInterest}
+        />
+
+        <Text style={styles.sectionTitle}>Privacy</Text>
+        <TouchableOpacity
+          style={[
+            styles.genderFilterButton,
+            genderOnly && styles.genderFilterButtonActive,
+          ]}
+          onPress={() => setGenderOnly((prev) => !prev)}
+        >
+          <Text
+            style={{ color: genderOnly ? '#fff' : '#000', fontWeight: 'bold' }}
           >
-            <Text
-              style={{
-                color: genderOnly ? '#fff' : '#000',
-                fontWeight: 'bold',
-              }}
-            >
-              {currentUserGender === 'male' ? 'Male Only' : 'Women Only'}
-            </Text>
-          </TouchableOpacity>
+            {currentUserGender === 'male' ? 'Male Only' : 'Women Only'}
+          </Text>
+        </TouchableOpacity>
 
-          <View style={styles.filterButtonsContainer}>
-            <TouchableOpacity
-              style={styles.clearFilterButton}
-              onPress={handleClearFilters}
-            >
-              <Text style={styles.clearButtonText}>Clear Filters</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.resetButton}
-              onPress={handleResetFilters}
-            >
-              <Text style={styles.resetButtonText}>Reset Filters</Text>
-            </TouchableOpacity>
-          </View>
-
+        <View style={styles.filterButtonsContainer}>
           <TouchableOpacity
-            style={styles.applyButton}
-            onPress={handleApplyFilters}
+            style={styles.clearFilterButton}
+            onPress={handleClearFilters}
           >
-            <Text style={styles.applyButtonText}>Apply Filters</Text>
+            <Text style={styles.clearButtonText}>Clear Filters</Text>
           </TouchableOpacity>
-        </Animated.View>
-      </View>
-    </TouchableWithoutFeedback>
+          <TouchableOpacity
+            style={styles.resetButton}
+            onPress={handleResetFilters}
+          >
+            <Text style={styles.resetButtonText}>Reset Filters</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          style={styles.applyButton}
+          onPress={handleApplyFilters}
+        >
+          <Text style={styles.applyButtonText}>Apply Filters</Text>
+        </TouchableOpacity>
+      </Animated.View>
+    </View>
   );
 };
 
-// ✅ Styles
 const styles = StyleSheet.create({
   overlay: {
     position: 'absolute',

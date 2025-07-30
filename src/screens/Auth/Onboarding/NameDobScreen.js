@@ -10,7 +10,7 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker'; // ✅ Import Expo-compatible date picker
+import DateTimePickerModal from 'react-native-modal-datetime-picker'; // ✅ Import DateTimePickerModal
 import { Timestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import { useAuth } from '../../../context/AuthContext';
@@ -20,9 +20,17 @@ export default function NameDobScreen({ navigation }) {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dob, setDob] = useState(new Date());
-  const [showPicker, setShowPicker] = useState(false); // Toggle for date picker
+  const [isDatePickerVisible, setIsDatePickerVisible] = useState(false); // Toggle for date picker
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const showDatePicker = () => setIsDatePickerVisible(true);
+  const hideDatePicker = () => setIsDatePickerVisible(false);
+
+  const handleConfirmDate = (selectedDate) => {
+    setDob(selectedDate);
+    hideDatePicker();
+  };
 
   const onNext = async () => {
     if (!user) return;
@@ -81,27 +89,23 @@ export default function NameDobScreen({ navigation }) {
         <Text style={styles.label}>Date of Birth</Text>
         <TouchableOpacity
           style={styles.datePickerButton}
-          onPress={() => setShowPicker(true)}
+          onPress={showDatePicker}
         >
           <Text style={styles.datePickerText}>{dob.toDateString()}</Text>
         </TouchableOpacity>
 
-        {/* ✅ Replace with Expo-compatible Date Picker */}
-        {showPicker && (
-          <DateTimePicker
-            value={dob}
-            mode='date'
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            maximumDate={new Date()}
-            minimumDate={
-              new Date(new Date().setFullYear(new Date().getFullYear() - 100))
-            }
-            onChange={(event, selectedDate) => {
-              setShowPicker(false);
-              if (selectedDate) setDob(selectedDate);
-            }}
-          />
-        )}
+        {/* ✅ Replace with DateTimePickerModal */}
+        <DateTimePickerModal
+          isVisible={isDatePickerVisible}
+          mode='date'
+          date={dob}
+          maximumDate={new Date()}
+          minimumDate={
+            new Date(new Date().setFullYear(new Date().getFullYear() - 100))
+          }
+          onConfirm={handleConfirmDate}
+          onCancel={hideDatePicker}
+        />
 
         {loading ? (
           <ActivityIndicator />

@@ -51,7 +51,7 @@ export default function PopupMenu({
           {confirmationStep ? (
             <>
               <Text style={styles.confirmationText}>
-                Are you sure you want to{' '}
+                Are you sure you want to
                 {confirmationStep === 'delete'
                   ? 'delete this post'
                   : 'report this post'}

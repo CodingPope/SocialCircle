@@ -9,13 +9,20 @@ import {
   SafeAreaView,
   Animated,
   TextInput,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import {
+  doc,
+  updateDoc,
+  collection,
+  getDocs,
+  getDoc,
+} from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import { useAuth } from '../../../context/AuthContext';
 
-function InterestsScreen({ navigation }) {
+export default function ManageInterestsScreen({ navigation }) {
   const { user } = useAuth();
   const [categories, setCategories] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -23,11 +30,12 @@ function InterestsScreen({ navigation }) {
   const [error, setError] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
-  const [filterText, setFilterText] = useState(''); // State for filtering activities
+  const [filterText, setFilterText] = useState('');
 
   useEffect(() => {
-    const fetchCategories = async () => {
+    const fetchCategoriesAndUserInterests = async () => {
       try {
+        // Fetch categories
         const snapshot = await getDocs(collection(db, 'categories'));
         const fetchedCategories = snapshot.docs.map((categoryDoc) => ({
           id: categoryDoc.id,
@@ -44,15 +52,23 @@ function InterestsScreen({ navigation }) {
         });
 
         setCategories(fetchedCategories);
+
+        // Fetch user's selected interests
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          setSelected(userData.interests || []); // Prepopulate selected interests
+        }
+
         setActiveCategory(fetchedCategories[0]?.id || '');
         fadeIn();
       } catch (e) {
         console.error(e);
-        setError('Failed to load categories.');
+        setError('Failed to load categories or user interests.');
       }
     };
 
-    fetchCategories();
+    fetchCategoriesAndUserInterests();
   }, []);
 
   const fadeIn = () => {
@@ -65,18 +81,14 @@ function InterestsScreen({ navigation }) {
   };
 
   const toggle = (itemId) => {
-    setSelected((prev) => {
-      if (prev.includes(itemId)) {
-        // Remove the item if already selected
-        return prev.filter((id) => id !== itemId);
-      } else {
-        // Add the item to the selected list
-        return [...prev, itemId];
-      }
-    });
+    setSelected((prev) =>
+      prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId]
+    );
   };
 
-  const onNext = async () => {
+  const onSave = async () => {
     setLoading(true);
     try {
       if (selected.length > 30) {
@@ -85,14 +97,11 @@ function InterestsScreen({ navigation }) {
         return;
       }
 
+      // Update user's selected interests in Firestore
       await updateDoc(doc(db, 'users', user.uid), { interests: selected });
 
-      // Navigate to MainTabs to include bottom tab navigation
-      if (user.location?.latitude != null && user.location?.longitude != null) {
-        navigation.replace('MainTabs');
-      } else {
-        navigation.replace('Location');
-      }
+      Alert.alert('Success', 'Your interests have been updated.');
+      navigation.goBack(); // Navigate back to the profile page
     } catch (e) {
       setError(e.message);
     } finally {
@@ -115,16 +124,16 @@ function InterestsScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* ✅ Header */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name='arrow-back' size={24} color='#333' />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Choose Your Interests</Text>
+        <Text style={styles.headerTitle}>Manage Interests</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      {/* ✅ Category Label */}
+      {/* Category Label */}
       <Text style={styles.sectionLabel}>Select a Category</Text>
       <View style={styles.categoriesContainer}>
         {categories.length > 0 && (
@@ -143,7 +152,7 @@ function InterestsScreen({ navigation }) {
                     )
                     .map((cat) => (
                       <TouchableOpacity
-                        key={cat.id} // Ensure unique key for each category
+                        key={cat.id}
                         style={[
                           styles.categoryChip,
                           activeCategory === cat.id &&
@@ -151,7 +160,7 @@ function InterestsScreen({ navigation }) {
                         ]}
                         onPress={() => {
                           setActiveCategory(cat.id);
-                          if (cat.id !== 'all') setFilterText(''); // Clear filter when switching from "All"
+                          if (cat.id !== 'all') setFilterText('');
                           fadeIn();
                         }}
                       >
@@ -172,7 +181,8 @@ function InterestsScreen({ navigation }) {
           </ScrollView>
         )}
       </View>
-      {/* ✅ Activities Label */}
+
+      {/* Activities Label */}
       <Text style={styles.sectionLabel}>
         {activeCategory === 'all'
           ? 'Filter All Activities'
@@ -181,7 +191,7 @@ function InterestsScreen({ navigation }) {
             }`}
       </Text>
 
-      {/* ✅ Filter Textbox */}
+      {/* Filter Textbox */}
       {activeCategory === 'all' && (
         <TextInput
           style={styles.filterInput}
@@ -191,30 +201,25 @@ function InterestsScreen({ navigation }) {
         />
       )}
 
-      {/* ✅ Selected Count */}
+      {/* Selected Count */}
       <View style={styles.selectedCountRow}>
         <Text style={styles.selectedCountText}>{selected.length} Selected</Text>
       </View>
 
-      {/* ✅ Activities */}
-      <Animated.View
-        style={{
-          flex: 1,
-          opacity: fadeAnim,
-        }}
-      >
+      {/* Activities */}
+      <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         <ScrollView style={styles.activitiesScroll}>
           <View style={styles.activitiesGrid}>
             {filteredActivities.length > 0 ? (
               filteredActivities.map((activity) => (
                 <TouchableOpacity
-                  key={activity.name} // Use unique key for each activity
+                  key={activity.name}
                   style={[
                     styles.activityChip,
                     selected.includes(activity.name) &&
                       styles.selectedActivityChip,
                   ]}
-                  onPress={() => toggle(activity.name)} // Toggle individual activity
+                  onPress={() => toggle(activity.name)}
                   activeOpacity={0.7}
                 >
                   <Text
@@ -245,12 +250,12 @@ function InterestsScreen({ navigation }) {
         </ScrollView>
       </Animated.View>
 
-      {/* ✅ Button */}
+      {/* Save Button */}
       {loading ? (
         <ActivityIndicator style={{ marginVertical: 20 }} />
       ) : (
-        <TouchableOpacity style={styles.nextButton} onPress={onNext}>
-          <Text style={styles.nextButtonText}>Next</Text>
+        <TouchableOpacity style={styles.saveButton} onPress={onSave}>
+          <Text style={styles.saveButtonText}>Save</Text>
         </TouchableOpacity>
       )}
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -397,6 +402,13 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#fff',
   },
+  saveButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 25,
+    paddingVertical: 14,
+    alignItems: 'center',
+    margin: 16,
+  },
+  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  error: { color: 'red', textAlign: 'center', marginBottom: 10 },
 });
-
-export default InterestsScreen; // Ensure the component is exported correctly

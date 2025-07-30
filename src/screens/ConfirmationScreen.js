@@ -16,7 +16,7 @@ export default function ConfirmationScreen({ route, navigation }) {
   return (
     <View style={styles.container}>
       <Text style={styles.message}>
-        Are you sure you want to{' '}
+        Are you sure you want to
         {action === 'delete' ? 'delete this post' : 'report this post'}?
       </Text>
       <View style={styles.buttonContainer}>

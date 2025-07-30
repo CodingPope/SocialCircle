@@ -16,6 +16,7 @@ import NameDobScreen from '../screens/Auth/Onboarding/NameDobScreen';
 import SexScreen from '../screens/Auth/Onboarding/SexScreen';
 import InterestsScreen from '../screens/Auth/Onboarding/InterestsScreen';
 import LocationScreen from '../screens/Auth/Onboarding/LocationScreen';
+import ManageInterestsScreen from '../screens/Auth/Onboarding/ManageInterestsScreen';
 
 // Main Screens
 import MapScreen from '../screens/Main/MapScreen';
@@ -123,6 +124,11 @@ function RootStackScreen() {
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       <RootStack.Screen name='MainTabs' component={MainTabs} />
       <RootStack.Screen
+        name='Map'
+        component={MapScreen} // Ensure MapScreen is registered here
+        options={{ headerShown: false, title: 'Map' }}
+      />
+      <RootStack.Screen
         name='EventChat'
         component={EventChatScreen}
         options={{ headerShown: false, title: 'Event Chat' }}
@@ -151,6 +157,11 @@ function RootStackScreen() {
         name='ConfirmationScreen'
         component={ConfirmationScreen}
         options={{ title: 'Confirmation' }}
+      />
+      <RootStack.Screen
+        name='ManageInterestsScreen'
+        component={ManageInterestsScreen}
+        options={{ headerShown: false }}
       />
     </RootStack.Navigator>
   );
