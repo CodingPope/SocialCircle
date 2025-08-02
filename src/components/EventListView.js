@@ -85,22 +85,21 @@ const EventListView = ({ events, onCloseListView }) => {
         data={enhancedEvents}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
-        renderItem={({ item }) =>
-          item.imageUrl ? (
-            <PostCard
-              event={item}
-              onPress={() => handleEventPress(item)}
-              onJoinPress={() => console.log('Join event logic')}
-            />
-          ) : (
-            <PostCard
-              event={item}
-              onPress={() => handleEventPress(item)}
-              onJoinPress={() => console.log('Join event logic')}
-              onEllipsisPress={() => console.log('Ellipsis logic')}
-            />
-          )
-        }
+        renderItem={({ item }) => (
+          <PostCard
+            event={{
+              ...item,
+              address: item.address, // Pass address directly
+              location: item.location, // Pass location for fallback
+              formattedDate: item.formattedDate, // Ensure date is passed
+              interest: item.interest, // Pass interest
+              attendees: item.attendees, // Pass attendees
+            }}
+            onPress={() => handleEventPress(item)}
+            onJoinPress={() => console.log('Join event logic')}
+            onEllipsisPress={() => console.log('Ellipsis logic')}
+          />
+        )}
       />
 
       {selectedEvent && (

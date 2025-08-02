@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet } from 'react-native';
+import { View, Text, Button, StyleSheet, TouchableOpacity } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { useAuth } from '../../../context/AuthContext';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -14,7 +14,11 @@ export default function SexScreen({ navigation }) {
     setLoading(true);
     try {
       await updateDoc(doc(db, 'users', user.uid), { sex });
-      navigation.replace('Interests');
+      if (user.location?.latitude != null && user.location?.longitude != null) {
+        navigation.replace('InterestsScreen'); // Ensure this matches the registered screen name
+      } else {
+        navigation.replace('LocationScreen'); // Ensure this matches the registered screen name
+      }
     } finally {
       setLoading(false);
     }
@@ -22,6 +26,14 @@ export default function SexScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* Go Back Button */}
+      <TouchableOpacity
+        onPress={() => navigation.goBack()}
+        style={styles.goBackButton}
+      >
+        <Text style={styles.goBackText}>Go Back</Text>
+      </TouchableOpacity>
+
       <Text style={styles.title}>I am</Text>
       <Picker selectedValue={sex} onValueChange={setSex} style={styles.picker}>
         <Picker.Item label='Male' value='male' />
@@ -42,4 +54,15 @@ const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', padding: 20 },
   title: { fontSize: 24, textAlign: 'center', marginBottom: 16 },
   picker: { marginBottom: 24 },
+  goBackButton: {
+    marginBottom: 16,
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  goBackText: {
+    color: '#007AFF',
+    fontSize: 16,
+    textAlign: 'center',
+  },
 });

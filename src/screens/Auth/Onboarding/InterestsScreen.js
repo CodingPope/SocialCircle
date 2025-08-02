@@ -86,13 +86,7 @@ function InterestsScreen({ navigation }) {
       }
 
       await updateDoc(doc(db, 'users', user.uid), { interests: selected });
-
-      // Navigate to MainTabs to include bottom tab navigation
-      if (user.location?.latitude != null && user.location?.longitude != null) {
-        navigation.replace('MainTabs');
-      } else {
-        navigation.replace('Location');
-      }
+      navigation.navigate('Map'); // Navigate to MapScreen
     } catch (e) {
       setError(e.message);
     } finally {
@@ -115,9 +109,13 @@ function InterestsScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* ✅ Header */}
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        {/* Go Back Button */}
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.goBackButton}
+        >
           <Ionicons name='arrow-back' size={24} color='#333' />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Choose Your Interests</Text>
@@ -270,6 +268,12 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#333' },
+  goBackButton: {
+    marginRight: 16,
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
 
   // ✅ Categories
   categoriesContainer: {

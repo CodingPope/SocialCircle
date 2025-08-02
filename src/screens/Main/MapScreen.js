@@ -524,7 +524,7 @@ const styles = StyleSheet.create({
   },
   searchBarUnified: {
     position: 'absolute',
-    top: 50,
+    top: 70,
     left: 10,
     right: 10,
     elevation: 9999,

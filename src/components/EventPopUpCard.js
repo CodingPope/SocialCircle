@@ -34,7 +34,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
-  const snapPoints = useMemo(() => ['90%', '95%'], []);
+  const snapPoints = useMemo(() => ['80%', '90%', '95%'], []);
 
   useEffect(() => {
     if (!event?.location) {

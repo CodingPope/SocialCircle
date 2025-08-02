@@ -6,6 +6,7 @@ import {
   Button,
   StyleSheet,
   ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { useNavigation } from '@react-navigation/native';
@@ -18,6 +19,7 @@ export default function LocationScreen() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const navigation = useNavigation();
 
   useEffect(() => {
     if (user.location?.latitude != null && user.location?.longitude != null) {
@@ -37,8 +39,6 @@ export default function LocationScreen() {
       console.log('Getting current position...');
       try {
         const { coords } = await Location.getCurrentPositionAsync({});
-        console.log('Got coords:', coords);
-        // Write lat/lng to Firestore
         await updateDoc(doc(db, 'users', user.uid), {
           location: {
             latitude: coords.latitude,
@@ -46,9 +46,7 @@ export default function LocationScreen() {
           },
         });
         setLoading(false);
-        console.log('Location saved, navigating to MainTabs...');
-        // Navigate to MainTabs to include bottom tab navigation
-        resetRoot([{ name: 'MainTabs' }]);
+        navigation.replace('InterestsScreen'); // Navigate to InterestsScreen
       } catch (error) {
         console.error('Error getting location:', error);
         setError('Error getting location');
@@ -60,7 +58,19 @@ export default function LocationScreen() {
   if (loading) return <ActivityIndicator style={{ flex: 1 }} />;
   return (
     <View style={styles.container}>
-      <Text>{error || 'Unable to get location'}</Text>
+      {/* Go Back Button */}
+      <TouchableOpacity
+        onPress={() => navigation.goBack()}
+        style={styles.goBackButton}
+      >
+        <Text style={styles.goBackText}>Go Back</Text>
+      </TouchableOpacity>
+
+      {loading ? (
+        <ActivityIndicator style={{ flex: 1 }} />
+      ) : (
+        <Text>{error || 'Unable to get location'}</Text>
+      )}
       <Button
         title='Try Again'
         onPress={() => {
@@ -78,5 +88,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
+  },
+  goBackButton: {
+    marginBottom: 16,
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  goBackText: {
+    color: '#007AFF',
+    fontSize: 16,
+    textAlign: 'center',
   },
 });

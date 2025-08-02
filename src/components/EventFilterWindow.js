@@ -9,6 +9,7 @@ import {
   Animated,
   TextInput,
   ActivityIndicator,
+  PanResponder, // Added for swipe gesture
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { collection, getDocs } from 'firebase/firestore';
@@ -160,6 +161,29 @@ const EventFilterWindow = ({
     }
   }, [selectedFilters, userInterests]);
 
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderMove: (e, gestureState) => {
+        if (gestureState.dy > 0) {
+          slideAnim.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (e, gestureState) => {
+        if (gestureState.dy > 100) {
+          onClose();
+        } else {
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
   if (!isVisible) return null;
 
   const handleApplyFilters = () => {
@@ -200,74 +224,90 @@ const EventFilterWindow = ({
   };
 
   return (
-    <View style={styles.overlay}>
-      <Animated.View
-        style={{ transform: [{ translateY: slideAnim }], ...styles.container }}
-      >
-        <Text style={styles.title}>Filter Events</Text>
-
-        <Text style={styles.sectionTitle}>Date</Text>
-        <TouchableOpacity
-          style={styles.datePickerButton}
-          onPress={() => setShowDatePicker(true)}
+    <TouchableWithoutFeedback onPress={onClose}>
+      <View style={styles.overlay}>
+        <Animated.View
+          {...panResponder.panHandlers}
+          style={{
+            transform: [{ translateY: slideAnim }],
+            ...styles.container,
+          }}
         >
-          <Text>{selectedDate || 'Select Date'}</Text>
-        </TouchableOpacity>
-        {showDatePicker && (
-          <DateTimePicker
-            value={selectedDate ? new Date(selectedDate) : new Date()}
-            mode='date'
-            onChange={(event, date) => {
-              setShowDatePicker(false);
-              handleDateChange(date);
-            }}
-          />
-        )}
+          <View style={styles.dragBarContainer}>
+            <View style={styles.dragBar} />
+          </View>
+          <TouchableWithoutFeedback>
+            <View>
+              <Text style={styles.title}>Filter Events</Text>
 
-        <Text style={styles.sectionTitle}>Interests</Text>
-        <InterestSelector
-          selectedInterests={selectedInterests}
-          toggleInterest={toggleInterest}
-        />
+              <Text style={styles.sectionTitle}>Date</Text>
+              <TouchableOpacity
+                style={styles.datePickerButton}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Text>{selectedDate || 'Select Date'}</Text>
+              </TouchableOpacity>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={selectedDate ? new Date(selectedDate) : new Date()}
+                  mode='date'
+                  onChange={(event, date) => {
+                    setShowDatePicker(false);
+                    handleDateChange(date);
+                  }}
+                />
+              )}
 
-        <Text style={styles.sectionTitle}>Privacy</Text>
-        <TouchableOpacity
-          style={[
-            styles.genderFilterButton,
-            genderOnly && styles.genderFilterButtonActive,
-          ]}
-          onPress={() => setGenderOnly((prev) => !prev)}
-        >
-          <Text
-            style={{ color: genderOnly ? '#fff' : '#000', fontWeight: 'bold' }}
-          >
-            {currentUserGender === 'male' ? 'Male Only' : 'Women Only'}
-          </Text>
-        </TouchableOpacity>
+              <Text style={styles.sectionTitle}>Interests</Text>
+              <InterestSelector
+                selectedInterests={selectedInterests}
+                toggleInterest={toggleInterest}
+              />
 
-        <View style={styles.filterButtonsContainer}>
-          <TouchableOpacity
-            style={styles.clearFilterButton}
-            onPress={handleClearFilters}
-          >
-            <Text style={styles.clearButtonText}>Clear Filters</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.resetButton}
-            onPress={handleResetFilters}
-          >
-            <Text style={styles.resetButtonText}>Reset Filters</Text>
-          </TouchableOpacity>
-        </View>
+              <Text style={styles.sectionTitle}>Privacy</Text>
+              <TouchableOpacity
+                style={[
+                  styles.genderFilterButton,
+                  genderOnly && styles.genderFilterButtonActive,
+                ]}
+                onPress={() => setGenderOnly((prev) => !prev)}
+              >
+                <Text
+                  style={{
+                    color: genderOnly ? '#fff' : '#000',
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {currentUserGender === 'male' ? 'Male Only' : 'Women Only'}
+                </Text>
+              </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.applyButton}
-          onPress={handleApplyFilters}
-        >
-          <Text style={styles.applyButtonText}>Apply Filters</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
+              <View style={styles.filterButtonsContainer}>
+                <TouchableOpacity
+                  style={styles.clearFilterButton}
+                  onPress={handleClearFilters}
+                >
+                  <Text style={styles.clearButtonText}>Clear Filters</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.resetButton}
+                  onPress={handleResetFilters}
+                >
+                  <Text style={styles.resetButtonText}>Reset Filters</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.applyButton}
+                onPress={handleApplyFilters}
+              >
+                <Text style={styles.applyButtonText}>Apply Filters</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableWithoutFeedback>
+        </Animated.View>
+      </View>
+    </TouchableWithoutFeedback>
   );
 };
 
@@ -377,6 +417,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   applyButtonText: { color: '#fff', fontWeight: 'bold' },
+  dragBarContainer: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  dragBar: {
+    width: 40,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#e0e0e0',
+  },
 });
 
 export default EventFilterWindow;

@@ -56,7 +56,7 @@ export default function NameDobScreen({ navigation }) {
         lastName,
         dob: Timestamp.fromDate(dob),
       });
-      navigation.replace('Sex');
+      navigation.replace('Sex'); // Ensure this matches the route name in AppNavigator
     } catch (e) {
       setError(e.message);
     } finally {
@@ -71,6 +71,14 @@ export default function NameDobScreen({ navigation }) {
       keyboardVerticalOffset={100}
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* Go Back Button */}
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.goBackButton}
+        >
+          <Text style={styles.goBackText}>Go Back</Text>
+        </TouchableOpacity>
+
         <Text style={styles.title}>Tell us about you</Text>
 
         <TextInput
@@ -105,6 +113,8 @@ export default function NameDobScreen({ navigation }) {
           }
           onConfirm={handleConfirmDate}
           onCancel={hideDatePicker}
+          themeVariant='light' // Explicitly set theme to light
+          textColor='#000' // Ensure text is visible
         />
 
         {loading ? (
@@ -165,4 +175,15 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   error: { color: 'red', textAlign: 'center', marginTop: 10 },
+  goBackButton: {
+    marginBottom: 16,
+    padding: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  goBackText: {
+    color: '#007AFF',
+    fontSize: 16,
+    textAlign: 'center',
+  },
 });

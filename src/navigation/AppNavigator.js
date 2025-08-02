@@ -44,7 +44,10 @@ function OnboardingStackScreen() {
     <OnboardingStack.Navigator screenOptions={{ headerShown: false }}>
       <OnboardingStack.Screen name='NameDob' component={NameDobScreen} />
       <OnboardingStack.Screen name='Sex' component={SexScreen} />
-      <OnboardingStack.Screen name='Interests' component={InterestsScreen} />
+      <OnboardingStack.Screen
+        name='InterestsScreen'
+        component={InterestsScreen}
+      />
       <OnboardingStack.Screen name='Location' component={LocationScreen} />
     </OnboardingStack.Navigator>
   );

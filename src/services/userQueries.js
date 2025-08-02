@@ -17,15 +17,36 @@ export async function fetchUserInterests() {
 
     if (userDoc.exists()) {
       const userData = userDoc.data();
-      // Replace underscores with spaces in interest names
-      return (userData.interests || []).map((interest) =>
-        interest.replace(/_/g, ' ')
-      );
+      return userData.interests || []; // Ensure interests are returned as an array
     } else {
       throw new Error('User document does not exist');
     }
   } catch (error) {
     console.error('Error fetching user interests:', error);
-    return []; // Return an empty array on error
+    return [];
+  }
+}
+
+// Description: Fetches user data by their ID from Firestore
+export async function fetchUserById(userId) {
+  try {
+    const db = getFirestore();
+    const userDocRef = doc(db, 'users', userId);
+    const userDoc = await getDoc(userDocRef);
+
+    if (userDoc.exists()) {
+      const userData = userDoc.data();
+      return {
+        firstName: userData.firstName || '',
+        lastName: userData.lastName || '',
+        profileImage: userData.profileImage || null,
+        rating: userData.rating || 0,
+      }; // Ensure the returned data matches the schema
+    } else {
+      throw new Error(`User document with ID ${userId} does not exist`);
+    }
+  } catch (error) {
+    console.error(`Error fetching user by ID (${userId}):`, error);
+    throw error; // Re-throw the error for the caller to handle
   }
 }

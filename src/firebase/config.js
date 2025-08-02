@@ -18,8 +18,11 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
-  increment, // <-- add increment import
-  deleteDoc, // Add this import
+  increment,
+  collection,
+  query,
+  where,
+  deleteDoc,
 } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -260,3 +263,40 @@ export const reportContent = async (reporterId, targetId, type, reason) => {
     throw error;
   }
 };
+
+export async function softDeleteEvent(eventId) {
+  try {
+    const eventRef = doc(db, 'events', eventId);
+    const snapshot = await getDoc(eventRef);
+    if (!snapshot.exists()) throw new Error('Event does not exist');
+
+    await updateDoc(eventRef, {
+      isDeleted: true,
+      deletedAt: new Date(),
+    });
+  } catch (error) {
+    console.error('Error soft-deleting event:', error);
+    throw error;
+  }
+}
+
+export async function getUserEventsByIds(eventIds) {
+  if (!eventIds || eventIds.length === 0) return [];
+  const chunks = [];
+  for (let i = 0; i < eventIds.length; i += 30) {
+    chunks.push(eventIds.slice(i, i + 30));
+  }
+  let allResults = [];
+  for (const chunk of chunks) {
+    const q = query(
+      collection(db, 'events'),
+      where('__name__', 'in', chunk),
+      where('isDeleted', '!=', true)
+    );
+    const snapshot = await getDocs(q);
+    allResults = allResults.concat(
+      snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    );
+  }
+  return allResults;
+}

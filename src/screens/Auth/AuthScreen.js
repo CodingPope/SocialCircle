@@ -16,7 +16,7 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../firebase/config';
 import * as Google from 'expo-auth-session/providers/google';
 import Animated, {
@@ -28,7 +28,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
-export default function AuthScreen() {
+export default function AuthScreen({ navigation }) {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -67,7 +67,13 @@ export default function AuthScreen() {
     setLoading(true);
     try {
       if (mode === 'login') {
-        await signInWithEmailAndPassword(auth, email, password);
+        const result = await signInWithEmailAndPassword(auth, email, password);
+        const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+        if (userDoc.exists()) {
+          navigation.replace('Map'); // Navigate to MapScreen for existing users
+        } else {
+          navigation.replace('NameDobScreen'); // Navigate to onboarding for new users
+        }
       } else {
         const result = await createUserWithEmailAndPassword(
           auth,
@@ -79,6 +85,7 @@ export default function AuthScreen() {
           friends: [],
           interests: [],
         });
+        navigation.replace('NameDobScreen'); // Navigate to onboarding for new users
       }
     } catch (err) {
       Alert.alert(

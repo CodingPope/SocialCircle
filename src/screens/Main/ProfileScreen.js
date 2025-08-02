@@ -37,6 +37,8 @@ import {
   where,
   doc,
   getDoc,
+  updateDoc,
+  arrayRemove,
 } from 'firebase/firestore';
 import PostCard from '../../components/PostCard';
 import PopupMenu from '../../components/PopupMenu'; // Import the PopupMenu component
@@ -195,7 +197,7 @@ export default function ProfileScreen({ navigation }) {
   const visibleEvents = allEvents.slice(0, visibleCount);
 
   useEffect(() => {
-    const fetchHostPhotosAndNames = async () => {
+    const enhanceEventData = async () => {
       const updated = await Promise.all(
         visibleEvents.map(async (event) => {
           if (!event.ownerId) {
@@ -204,6 +206,16 @@ export default function ProfileScreen({ navigation }) {
               hostPhoto: null,
               hostRating: 0,
               hostName: 'Unknown Host',
+              formattedDate: event.date?.seconds
+                ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : 'Date TBD',
+              location: event.location?.address || 'Location not available',
             };
           }
 
@@ -223,6 +235,19 @@ export default function ProfileScreen({ navigation }) {
                   `${data.firstName || ''} ${data.lastName || ''}`.trim() ||
                   event.ownerName || // fallback if stored directly on event
                   'Unknown Host',
+                formattedDate: event.date?.seconds
+                  ? new Date(event.date.seconds * 1000).toLocaleString(
+                      'en-US',
+                      {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }
+                    )
+                  : 'Date TBD',
+                location: event.location?.address || 'Location not available',
               };
             }
           } catch (err) {
@@ -234,6 +259,16 @@ export default function ProfileScreen({ navigation }) {
             hostPhoto: null,
             hostRating: 0,
             hostName: 'Unknown Host',
+            formattedDate: event.date?.seconds
+              ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              : 'Date TBD',
+            location: event.location?.address || 'Location not available',
           };
         })
       );
@@ -242,9 +277,20 @@ export default function ProfileScreen({ navigation }) {
     };
 
     if (visibleEvents.length) {
-      fetchHostPhotosAndNames();
+      enhanceEventData();
     }
   }, [visibleEvents]);
+
+  // Helper function to format location
+  const formatLocation = (location) => {
+    if (!location) return 'Location not available';
+    if (location.latitude && location.longitude) {
+      return `Lat: ${location.latitude.toFixed(
+        4
+      )}, Lng: ${location.longitude.toFixed(4)}`;
+    }
+    return 'Location not specified';
+  };
 
   const handleLogout = async () => {
     try {
@@ -303,9 +349,45 @@ export default function ProfileScreen({ navigation }) {
     setModalVisible(true);
   };
 
-  const handleDeleteEvent = () => {
-    Alert.alert('Delete Event functionality coming soon.');
-    setModalVisible(false);
+  const handleDeleteEvent = async () => {
+    if (!selectedEvent?.id) return;
+
+    try {
+      const eventRef = doc(db, 'events', selectedEvent.id);
+
+      // Mark the event as deleted
+      await updateDoc(eventRef, {
+        isDeleted: true,
+        deletedAt: new Date(),
+      });
+
+      // Clean up references from associated users
+      const attendees = selectedEvent.attendees || [];
+      for (const userId of attendees) {
+        const userRef = doc(db, 'users', userId);
+        await updateDoc(userRef, {
+          attendedEvents: arrayRemove(selectedEvent.id),
+        });
+      }
+
+      // Remove the event from the creator's createdEvents list
+      const creatorRef = doc(db, 'users', selectedEvent.ownerId);
+      await updateDoc(creatorRef, {
+        createdEvents: arrayRemove(selectedEvent.id),
+      });
+
+      // Update the local state to reflect the deletion
+      setEnhancedEvents((prevEvents) =>
+        prevEvents.filter((event) => event.id !== selectedEvent.id)
+      );
+
+      Alert.alert('Success', 'The event has been deleted.');
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      Alert.alert('Error', 'Failed to delete the event. Please try again.');
+    } finally {
+      setModalVisible(false);
+    }
   };
 
   const handleReportEvent = () => {
@@ -509,7 +591,13 @@ export default function ProfileScreen({ navigation }) {
             return (
               <PostCard
                 key={event.id}
-                event={{ ...event, role }}
+                event={{
+                  ...event,
+                  role,
+                  address: event.address, // Pass address directly
+                  location: event.location, // Pass location for fallback
+                  formattedDate: event.formattedDate, // Ensure date is passed
+                }}
                 onPress={(e) => handleEventClick(e.id)}
                 onEllipsisPress={(e) => handleEllipsisClick(e)}
               />

@@ -11,14 +11,14 @@ import {
   FlatList,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
+import { geohashForLocation } from 'geofire-common';
 import {
   getFirestore,
   collection,
@@ -77,7 +77,12 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const hideDatePicker = () => setIsDatePickerVisible(false);
 
   const handleConfirmDate = (selectedDate) => {
-    setDate(selectedDate);
+    // Round minutes to the nearest multiple of 5
+    const roundedDate = new Date(selectedDate);
+    const minutes = roundedDate.getMinutes();
+    roundedDate.setMinutes(Math.round(minutes / 5) * 5);
+
+    setDate(roundedDate);
     hideDatePicker();
   };
 
@@ -126,8 +131,10 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
   const handleCreate = async () => {
     if (!title.trim()) return Alert.alert('Title is required');
-    if (description.trim().length < 30)
-      return Alert.alert('Description must be at least 30 characters');
+    if (title.trim().length > 40)
+      return Alert.alert('Title must not exceed 40 characters');
+    if (description.trim().length < 10)
+      return Alert.alert('Description must be at least 10 characters');
     if (date - new Date() < 60 * 60 * 1000)
       return Alert.alert('Event must be at least 1 hour ahead');
     if (!manualLocation && !location) return Alert.alert('Address is required');
@@ -140,23 +147,42 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     ) {
       return Alert.alert('Gender privacy mismatch');
     }
+
     const eventLocation = manualLocation || location;
+    const geohash = geohashForLocation([
+      eventLocation.latitude,
+      eventLocation.longitude,
+    ]);
+
+    const extractedCity = manualAddress?.split(',')?.[1]?.trim() || '';
+
+    const newEvent = {
+      title: title.trim(),
+      description: description.trim(),
+      imageUrl: imageUrl || null,
+      location: eventLocation,
+      geohash,
+      address: manualAddress,
+      city: extractedCity,
+      date: Timestamp.fromDate(date),
+      createdAt: Timestamp.now(),
+      ageRange,
+      capacity: capacity ? parseInt(capacity, 10) : 0,
+      privacy: privacyValue,
+      genderFilter: 'any',
+      ownerId: user.uid,
+      interest: selectedInterest,
+      eventTags: [],
+      viewCount: 0,
+      joinCount: 0,
+      status: 'active',
+      isReported: false,
+      attendees: [],
+    };
+
     setUploading(true);
     try {
-      const docRef = await addDoc(collection(db, 'events'), {
-        ownerId: user.uid,
-        title: title.trim(),
-        description: description.trim(),
-        date: Timestamp.fromDate(date),
-        privacy: privacyValue,
-        ageRange,
-        interest: selectedInterest,
-        imageUrl: imageUrl || null,
-        location: eventLocation,
-        capacity: capacity ? parseInt(capacity, 10) : 0,
-        createdAt: Timestamp.now(),
-        attendees: [],
-      });
+      const docRef = await addDoc(collection(db, 'events'), newEvent);
       await updateDoc(doc(db, 'users', user.uid), {
         createdEvents: arrayUnion(docRef.id),
       });
@@ -201,17 +227,16 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     }
   }, [location]);
 
-  // Replace your return statement with this
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+    <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
       >
         <FlatList
-          data={[]} // dummy data to allow FlatList to render
-          keyExtractor={() => 'dummy'} // required prop
+          data={[]} // Dummy data to allow FlatList to render
+          keyExtractor={() => 'dummy'} // Required prop
           ListHeaderComponent={
             <View>
               {/* Image Preview */}
@@ -238,6 +263,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 value={title}
                 onChangeText={setTitle}
                 placeholder='Event title'
+                placeholderTextColor='grey' // Updated to a darker color
               />
 
               {/* Description */}
@@ -247,6 +273,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 value={description}
                 onChangeText={setDescription}
                 placeholder='What’s your event about?'
+                placeholderTextColor='grey' // Updated to a darker color
                 multiline
               />
 
@@ -266,6 +293,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 date={date}
                 onConfirm={handleConfirmDate}
                 onCancel={hideDatePicker}
+                themeVariant='light' // Explicitly set theme to light
+                textColor='#000' // Ensure text is visible
               />
 
               {/* Address Input */}
@@ -273,12 +302,13 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
               <View style={{ zIndex: 10 }}>
                 <GooglePlacesAutocomplete
                   placeholder='Enter address'
+                  placeholderTextColor='grey' // Updated to a darker color
                   minLength={2}
                   fetchDetails={true}
                   debounce={300}
                   enablePoweredByContainer={false}
                   keyboardShouldPersistTaps='handled'
-                  predefinedPlaces={[]} // ✅ Prevents `.filter()` crash
+                  predefinedPlaces={[]} // Prevents `.filter()` crash
                   styles={{
                     textInput: [styles.input, styles.flex],
                     container: { flex: 1 },
@@ -358,6 +388,10 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                     setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
                   }
                   style={styles.segment}
+                  backgroundColor='#f0f0f0'
+                  tintColor='#007AFF'
+                  fontStyle={{ color: '#333' }}
+                  activeFontStyle={{ color: '#fff' }}
                 />
               ) : (
                 <View style={styles.androidPrivacyWrapper}>
@@ -371,11 +405,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                       onPress={() => setPrivacyIndex(idx)}
                     >
                       <Text
-                        style={
-                          privacyIndex === idx
-                            ? styles.androidPrivacyTxtActive
-                            : styles.androidPrivacyTxt
-                        }
+                        style={[
+                          styles.androidPrivacyTxt,
+                          privacyIndex === idx &&
+                            styles.androidPrivacyTxtActive,
+                        ]}
                       >
                         {seg}
                       </Text>
@@ -391,6 +425,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 value={capacity}
                 onChangeText={setCapacity}
                 placeholder='Leave empty for unlimited'
+                placeholderTextColor='grey' // Updated to a darker color
                 keyboardType='numeric'
               />
 
@@ -404,8 +439,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                   {uploading ? 'Creating...' : 'Create Event'}
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={onCancel} style={styles.cancel}>
-                <Text>Cancel</Text>
+              <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
           }
@@ -416,8 +451,13 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
   container: {
-    paddingHorizontal: 20,
+    padding: 20,
+    paddingBottom: 70,
     backgroundColor: '#fff',
     flex: 1,
   },
@@ -448,6 +488,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     padding: 10,
     marginTop: 5,
+    color: '#333',
   },
   textArea: { height: 80, textAlignVertical: 'top' },
   row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
@@ -490,13 +531,19 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginHorizontal: 3,
     alignItems: 'center',
+    backgroundColor: '#fff', // Ensure white background
   },
   androidPrivacyBtnActive: {
     backgroundColor: '#007AFF',
     borderColor: '#007AFF',
   },
-  androidPrivacyTxt: { color: '#333' },
-  androidPrivacyTxtActive: { color: '#fff', fontWeight: 'bold' },
+  androidPrivacyTxt: {
+    color: '#333', // Dark text for better visibility
+  },
+  androidPrivacyTxtActive: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
   btn: {
     backgroundColor: '#007AFF',
     padding: 15,
@@ -506,5 +553,16 @@ const styles = StyleSheet.create({
   },
   btnDis: { backgroundColor: '#99cfff' },
   btnTxt: { color: '#fff', fontWeight: 'bold' },
-  cancel: { marginTop: 15, alignItems: 'center' },
+  cancelButton: {
+    marginTop: 15,
+    padding: 12,
+    borderRadius: 6,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#007AFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
 });

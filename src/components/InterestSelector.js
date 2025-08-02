@@ -64,6 +64,7 @@ const InterestSelector = ({
           placeholder='Search interests...'
           value={searchTerm}
           onChangeText={setSearchTerm}
+          placeholderTextColor='grey' // Updated to a darker color
         />
         {searchTerm.length > 0 && (
           <TouchableOpacity

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,38 +11,51 @@ import {
 import { Video } from 'expo-video';
 import Avatar from './ui/Avatar';
 import PopupMenu from './PopupMenu';
-import { useAuth } from '../context/AuthContext'; // Import useAuth for current user context
-import { deleteEvent, reportContent } from '../firebase/config'; // Import functions
+import { useAuth } from '../context/AuthContext';
+import { deleteEvent, reportContent } from '../firebase/config';
+import { GOOGLE_MAPS_API_KEY } from '@env';
 
-export default function PostCard({ event, onPress, onJoinPress }) {
-  const { user } = useAuth(); // Get the current user
+export default function PostCard({ event, onPress }) {
+  const { user } = useAuth();
   const [menuVisible, setMenuVisible] = useState(false);
+  const [resolvedAddress, setResolvedAddress] = useState(
+    event.address || 'Fetching address...'
+  );
 
-  const isOwner = event.ownerId === user?.uid; // Check if the event is assigned to the current user
+  const isOwner = event.ownerId === user?.uid;
 
   const handleEllipsisPress = () => {
     setMenuVisible(true);
   };
 
-  const handleDelete = async () => {
-    setMenuVisible(false);
+  const handleDeleteEvent = async () => {
+    if (!selectedEvent?.id) return;
     try {
-      await deleteEvent(event.id, user.uid); // Call deleteEvent with event ID and user ID
-      alert('Event deleted successfully.');
+      await softDeleteEvent(selectedEvent.id);
+      Alert.alert('Deleted', 'The event was marked as deleted.');
+      // Refresh user events
+      const updatedEvents = allEvents.map((ev) =>
+        ev.id === selectedEvent.id ? { ...ev, isDeleted: true } : ev
+      );
+      setEnhancedEvents(updatedEvents);
     } catch (error) {
-      alert('Failed to delete the event. Please try again.');
+      Alert.alert('Error', 'Failed to delete the event.');
+    } finally {
+      setModalVisible(false);
     }
   };
 
   const handleReport = async () => {
     setMenuVisible(false);
     try {
-      await reportContent(user.uid, event.id, 'event', 'Inappropriate content'); // Example reason
+      await reportContent(user.uid, event.id, 'event', 'Inappropriate content');
       alert('Event reported successfully.');
     } catch (error) {
       alert('Failed to report the event. Please try again.');
     }
   };
+
+  const isDeleted = event?.isDeleted;
 
   const postType = event.postType || 'event';
 
@@ -55,29 +68,44 @@ export default function PostCard({ event, onPress, onJoinPress }) {
       })
     : 'Date TBD';
 
-  const getFormattedLocation = (loc) => {
-    if (!loc) return 'Location not available';
-    if (loc.city && loc.state && loc.address) {
-      return `${loc.address}, ${loc.city}, ${loc.state}`;
+  useEffect(() => {
+    if (
+      !event.address &&
+      event.location?.latitude &&
+      event.location?.longitude
+    ) {
+      const fetchAddress = async () => {
+        try {
+          const { latitude, longitude } = event.location;
+          const res = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
+          );
+          const data = await res.json();
+          if (data.status === 'OK' && data.results.length) {
+            setResolvedAddress(data.results[0].formatted_address);
+          } else {
+            setResolvedAddress('Address not available');
+          }
+        } catch {
+          setResolvedAddress('Error fetching address');
+        }
+      };
+      fetchAddress();
     }
-    if (typeof loc.address === 'string') {
-      const parts = loc.address.split(',');
-      if (parts.length > 1) {
-        return parts
-          .slice(0, parts.length - 1)
-          .join(', ')
-          .trim();
-      }
-      return loc.address.trim();
-    }
-    if (loc.city && loc.state) {
-      return `${loc.city}, ${loc.state}`;
-    }
-    return 'Location not specified';
-  };
+  }, [event.address, event.location]);
+
+  const MAX_ADDRESS_LENGTH = 30;
+  const truncatedAddress =
+    resolvedAddress.length > MAX_ADDRESS_LENGTH
+      ? `${resolvedAddress.slice(0, MAX_ADDRESS_LENGTH)}...`
+      : resolvedAddress;
 
   return (
-    <TouchableOpacity style={styles.card} onPress={() => onPress?.(event)}>
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => onPress?.(event)}
+      activeOpacity={0.9}
+    >
       {/* ✅ MEDIA (Video > Image > None) */}
       {event.videoUrl ? (
         <Video
@@ -92,79 +120,72 @@ export default function PostCard({ event, onPress, onJoinPress }) {
         <Image source={{ uri: event.imageUrl }} style={styles.media} />
       ) : null}
 
-      {/* ✅ PopupMenu for Options */}
-      <PopupMenu
-        visible={menuVisible}
-        onClose={() => setMenuVisible(false)}
-        isOwner={isOwner} // Pass the correct ownership status
-        onDelete={handleDelete} // Pass delete handler
-        onReport={handleReport} // Pass report handler
-        eventId={event.id} // Pass event ID
-      />
-
       {/* ✅ INFO */}
-      <View style={styles.info}>
-        {/* ✅ Horizontal Ellipsis Button */}
+      <View
+        style={[
+          styles.info,
+          !event.imageUrl && !event.videoUrl && styles.noMediaInfo,
+        ]}
+      >
         <TouchableOpacity
-          style={styles.ellipsisButton}
+          style={styles.ellipsisButtonAbsolute}
           onPress={handleEllipsisPress}
         >
-          <Text style={styles.ellipsisText}>⋯</Text>
+          <Text style={styles.ellipsisText}>⋮</Text>
         </TouchableOpacity>
-
         <Text style={styles.title}>{event.title}</Text>
-
         <View style={styles.hostRow}>
-          <Avatar
-            uri={postType === 'groupPost' ? event.groupPhoto : event.hostPhoto}
-            size={50}
-          />
+          <Avatar uri={event.hostPhoto} size={50} />
           <View style={{ marginLeft: 8 }}>
-            {/* ✅ NEW: HOST NAME & RATING */}
-            {postType !== 'groupPost' && (
-              <View style={styles.nameRow}>
-                <Text style={styles.hostName}>
-                  {event.hostName || 'Unknown Host'}
-                </Text>
-                {event.hostRating !== undefined && (
-                  <Text style={styles.rating}>
-                    ⭐ {event.hostRating.toFixed(1)}
-                  </Text>
-                )}
-              </View>
-            )}
-            {postType === 'groupPost' && (
-              <Text style={styles.groupName}>{event.groupName}</Text>
-            )}
-            <Text style={styles.date}>{eventDateTime}</Text>
-            {event.location && (
-              <Text style={styles.location}>
-                {getFormattedLocation(event.location)}
-              </Text>
-            )}
+            <Text style={styles.hostName}>{event.hostName}</Text>
+            <Text style={styles.rating}>
+              {event.hostRating
+                ? `⭐ ${event.hostRating.toFixed(1)}`
+                : 'No Rating'}
+            </Text>
+            <Text style={styles.dateTime}>{eventDateTime}</Text>
+            <Text
+              style={styles.location}
+              numberOfLines={1}
+              ellipsizeMode='tail'
+            >
+              {truncatedAddress}
+            </Text>
           </View>
         </View>
-
-        {/* ✅ TAGS / JOIN (Only for Events) */}
-        {postType === 'event' && (
-          <View style={styles.tagRow}>
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>{event.role}</Text>
-            </View>
-            <View style={[styles.tag, { backgroundColor: '#E8F5E9' }]}>
-              <Text style={[styles.tagText, { color: '#388E3C' }]}>
-                {event.attendees?.length || 0} Attending
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.joinButton}
-              onPress={() => onJoinPress?.(event)}
-            >
-              <Text style={styles.joinText}>Join</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
+
+      {/* ✅ JOIN BUTTON */}
+      <View style={styles.actionRow}>
+        <View style={styles.infoBubbleContainer}>
+          <View style={styles.interestBubble}>
+            <Text style={styles.interestText}>
+              {event.interest || 'General'}
+            </Text>
+          </View>
+          <Text style={styles.attendeesText}>
+            {event.attendees?.length || 0} attending
+          </Text>
+        </View>
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity
+          style={styles.joinButton}
+          onPress={() => onPress?.(event)}
+        >
+          <Text style={styles.joinText}>Join</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ✅ POPUP MENU */}
+      {menuVisible && (
+        <PopupMenu
+          visible={menuVisible}
+          onClose={() => setMenuVisible(false)}
+          isOwner={isOwner}
+          onReport={handleReport}
+          onDelete={handleDeleteEvent}
+        />
+      )}
     </TouchableOpacity>
   );
 }
@@ -188,12 +209,28 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
   },
-  ellipsisButton: {
+  noMediaInfo: {
+    paddingTop: 20,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  joinButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  joinText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  ellipsisButtonAbsolute: {
     position: 'absolute',
-    top: 0,
-    right: 6,
-    padding: 5,
+    top: 8,
+    right: 8,
     zIndex: 10,
+    padding: 5,
   },
   ellipsisText: {
     fontSize: 20,
@@ -201,14 +238,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   info: { padding: 12 },
-  title: { fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  title: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+    marginRight: 40,
+  },
+  dateTime: {
+    fontSize: 14,
+    color: '#555',
+  },
   hostRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   hostName: { fontSize: 14, fontWeight: '600', color: '#333' },
   rating: { fontSize: 13, color: '#FFB300', fontWeight: '600' },
   groupName: { fontSize: 14, fontWeight: '600', color: '#333' },
   date: { fontSize: 13, color: '#555' },
-  location: { fontSize: 13, color: '#007AFF' },
+  location: {
+    fontSize: 13,
+    color: '#007AFF',
+    overflow: 'hidden',
+  },
   tagRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tag: {
     backgroundColor: '#f0f0f0',
@@ -217,12 +267,29 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   tagText: { fontSize: 12, color: '#555' },
-  joinButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginLeft: 'auto',
+  infoBubbleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  joinText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  interestBubble: {
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginRight: 8,
+  },
+  interestText: {
+    fontSize: 12,
+    color: '#555',
+  },
+  attendeesText: {
+    fontSize: 13,
+    color: 'coral',
+    fontWeight: '700',
+    backgroundColor: '#FFF3F4',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
 });
