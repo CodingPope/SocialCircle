@@ -7,6 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../ui/Avatar';
 import RatingStars from './RatingStars';
 import PopupMenu from '../PopupMenu';
+import { reportContent } from '../../firebase/config';
+import { useUserStore } from '../../store/userStore';
 
 export default function ProfileHeader({
   user,
@@ -17,6 +19,7 @@ export default function ProfileHeader({
   navigation,
 }) {
   const [menuVisible, setMenuVisible] = useState(false);
+  const currentUser = useUserStore((s) => s.user);
 
   const createdAt =
     user?.createdAt && !isNaN(new Date(user.createdAt))
@@ -45,7 +48,15 @@ export default function ProfileHeader({
 
   const handleReport = () => {
     setMenuVisible(false);
-    Alert.alert('Report functionality coming soon.');
+    if (!currentUser?.uid || !user?.id) {
+      Alert.alert('Report', 'Unable to report this profile right now.');
+      return;
+    }
+    reportContent(currentUser.uid, user.id, 'user', 'Inappropriate profile', {
+      details: 'Report from ProfileHeader menu',
+    })
+      .then(() => Alert.alert('Report', 'Thanks for the report.'))
+      .catch(() => Alert.alert('Report', 'Failed to submit report.'));
   };
 
   return (
@@ -57,6 +68,7 @@ export default function ProfileHeader({
         isOwner={true} // Assuming the profile owner is the user
         onDelete={handleDelete}
         onReport={handleReport}
+        targetType='user'
       />
 
       <View style={styles.topIcons}>

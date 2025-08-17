@@ -27,7 +27,9 @@ export const useNotificationStore = create((set, get) => ({
       // Stop existing listener if present
       const prevUnsub = get()._unsubscribe;
       if (typeof prevUnsub === 'function') {
-        try { prevUnsub(); } catch {}
+        try {
+          prevUnsub();
+        } catch {}
       }
       if (!userId) {
         set({ notifications: [], loading: false, _unsubscribe: null });
@@ -35,7 +37,10 @@ export const useNotificationStore = create((set, get) => ({
       }
 
       set({ loading: true, error: null });
-      const q = query(collection(db, 'notifications'), where('recipientId', '==', userId));
+      const q = query(
+        collection(db, 'notifications'),
+        where('recipientId', '==', userId)
+      );
       const unsub = onSnapshot(
         q,
         async (snap) => {
@@ -66,7 +71,9 @@ export const useNotificationStore = create((set, get) => ({
   unsubscribe: () => {
     const prevUnsub = get()._unsubscribe;
     if (typeof prevUnsub === 'function') {
-      try { prevUnsub(); } catch {}
+      try {
+        prevUnsub();
+      } catch {}
     }
     set({ _unsubscribe: null });
   },
@@ -87,7 +94,9 @@ export const useNotificationStore = create((set, get) => ({
 
   // Batch mark all unread notifications in the provided list as read
   markAllAsRead: async (notifications) => {
-    const list = Array.isArray(notifications) ? notifications : get().notifications;
+    const list = Array.isArray(notifications)
+      ? notifications
+      : get().notifications;
     const unread = list.filter((n) => !n.read);
     if (!unread.length) return;
     try {
@@ -115,7 +124,9 @@ export const useNotificationStore = create((set, get) => ({
     } catch (e) {
       console.warn('[notifications] softDelete failed:', e?.message || e);
       // Optimistic local removal
-      set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) }));
+      set((s) => ({
+        notifications: s.notifications.filter((n) => n.id !== id),
+      }));
     }
   },
 }));

@@ -20,7 +20,8 @@ import {
   arrayRemove,
   doc,
 } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { db, reportContent } from '../firebase/config';
+import { useUserStore } from '../store/userStore';
 import smileDefault from '../../assets/smileDefault.png';
 import * as Haptics from 'expo-haptics';
 
@@ -34,6 +35,7 @@ export default function AttendeeList({
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const currentUser = useUserStore((s) => s.user);
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -134,6 +136,19 @@ export default function AttendeeList({
               );
             } else if (buttonIndex === 1 && !isCreator) {
               // Future: open report modal
+              if (!currentUser?.uid) return;
+              reportContent(
+                currentUser.uid,
+                user.id,
+                'user',
+                'Inappropriate behavior',
+                {
+                  details: `Reported from attendee list in event ${eventId}`,
+                  context: { eventId },
+                }
+              )
+                .then(() => Alert.alert('Report', 'Thanks for the report.'))
+                .catch(() => Alert.alert('Report', 'Failed to submit report.'));
             }
           }
         );
@@ -241,6 +256,31 @@ export default function AttendeeList({
                 <Text style={[styles.modalButtonText, { color: '#fff' }]}>
                   Remove User
                 </Text>
+              </Pressable>
+            )}
+            {!isCreator && (
+              <Pressable
+                style={styles.modalButton}
+                onPress={() => {
+                  setModalVisible(false);
+                  if (!currentUser?.uid || !selectedUser?.id) return;
+                  reportContent(
+                    currentUser.uid,
+                    selectedUser.id,
+                    'user',
+                    'Inappropriate behavior',
+                    {
+                      details: `Reported from attendee list in event ${eventId}`,
+                      context: { eventId },
+                    }
+                  )
+                    .then(() => Alert.alert('Report', 'Thanks for the report.'))
+                    .catch(() =>
+                      Alert.alert('Report', 'Failed to submit report.')
+                    );
+                }}
+              >
+                <Text style={styles.modalButtonText}>Report User</Text>
               </Pressable>
             )}
             <Pressable

@@ -23,6 +23,7 @@ import {
   db,
   deleteEvent,
   sendNotification,
+  reportContent,
 } from '../../firebase/config';
 import {
   collection,
@@ -340,8 +341,22 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   };
 
   const handleReport = () => {
-    Alert.alert('Report User functionality coming soon.');
-    setMenuVisible(false);
+    // Submit a user report via callable
+    try {
+      if (!currentUser?.uid || !userId) {
+        Alert.alert('Report', 'Unable to report this profile right now.');
+        setMenuVisible(false);
+        return;
+      }
+      reportContent(currentUser.uid, userId, 'user', 'Inappropriate profile', {
+        details: 'Report from OtherUserProfileScreen menu',
+      })
+        .then(() => Alert.alert('Report', 'Thanks for the report.'))
+        .catch(() => Alert.alert('Report', 'Failed to submit report.'))
+        .finally(() => setMenuVisible(false));
+    } catch {
+      setMenuVisible(false);
+    }
   };
 
   const handleDeleteEvent = async (eventId) => {
@@ -632,6 +647,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         isOwner={false} // Adjust based on context
         onReport={handleReport}
         onDelete={handleDeleteEvent}
+        targetType='user'
       />
     </SafeAreaView>
   );

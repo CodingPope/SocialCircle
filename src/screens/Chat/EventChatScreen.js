@@ -45,6 +45,7 @@ import smileDefault from '../../../assets/smileDefault.png';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import ReportModal from '../../components/ReportModal'; // Import reusable modal component
 import { httpsCallable, getFunctions } from 'firebase/functions';
+import { reportContent } from '../../firebase/config';
 import { getApp } from 'firebase/app';
 
 const EventChatScreen = () => {
@@ -197,12 +198,12 @@ const EventChatScreen = () => {
                 userData.profileImage ||
                 userData.avatarURL ||
                 null,
-              // Added: ranking with fallback to 'rating'
-              ranking:
-                typeof userData.ranking === 'number'
-                  ? userData.ranking
-                  : typeof userData.rating === 'number'
+              // Rating: prefer 'rating' (current), fallback to legacy 'ranking'
+              rating:
+                typeof userData.rating === 'number'
                   ? userData.rating
+                  : typeof userData.ranking === 'number'
+                  ? userData.ranking
                   : null,
             };
           });
@@ -297,12 +298,12 @@ const EventChatScreen = () => {
               `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
               'User',
             photoURL: userData.profileImage || userData.avatarURL || null,
-            // NOTE: 'ranking' legacy field; fall back to 'rating' (current schema)
-            ranking:
-              typeof userData.ranking === 'number'
-                ? userData.ranking
-                : typeof userData.rating === 'number'
+            // Rating: prefer 'rating' (current), fallback to legacy 'ranking'
+            rating:
+              typeof userData.rating === 'number'
                 ? userData.rating
+                : typeof userData.ranking === 'number'
+                ? userData.ranking
                 : null,
           });
         } else {
@@ -453,11 +454,11 @@ const EventChatScreen = () => {
             `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
             'User',
           photoURL: userData.profileImage || smileDefault,
-          ranking:
-            typeof userData.ranking === 'number'
-              ? userData.ranking.toFixed(1)
-              : typeof userData.rating === 'number'
+          rating:
+            typeof userData.rating === 'number'
               ? userData.rating.toFixed(1)
+              : typeof userData.ranking === 'number'
+              ? userData.ranking.toFixed(1)
               : 'Unrated',
         };
       }
@@ -465,7 +466,7 @@ const EventChatScreen = () => {
         id: userId,
         displayName: 'User',
         photoURL: smileDefault,
-        ranking: 'Unrated',
+        rating: 'Unrated',
       };
     } catch (err) {
       console.error('Error fetching requester details:', err.message);
@@ -473,7 +474,7 @@ const EventChatScreen = () => {
         id: userId,
         displayName: 'User',
         photoURL: smileDefault,
-        ranking: 'Unrated',
+        rating: 'Unrated',
       };
     }
   };
@@ -651,8 +652,23 @@ const EventChatScreen = () => {
   // Report submit handler
   const handleReportSubmit = (reportDetails) => {
     // Description: Submit report logic
-    console.log('Report submitted:', reportDetails);
-    setIsReportModalVisible(false);
+    const targetUserId = reportDetails?.userId || selectedUser?.id || null;
+    const reason = reportDetails?.reason || 'No reason provided';
+    if (!auth?.currentUser?.uid || !targetUserId) {
+      setIsReportModalVisible(false);
+      return;
+    }
+    reportContent(auth.currentUser.uid, targetUserId, 'user', reason, {
+      details: `Report from chat of event ${eventId}`,
+      context: { eventId },
+    })
+      .then(() => {
+        console.log('Report submitted:', reportDetails);
+      })
+      .catch((e) => {
+        console.error('Report failed:', e?.message || e);
+      })
+      .finally(() => setIsReportModalVisible(false));
   };
 
   if (loading || !event) {
@@ -905,10 +921,10 @@ const EventChatScreen = () => {
                     <Text style={styles.hostName}>
                       Host: {hostUser.displayName}
                     </Text>
-                    <Text style={styles.hostRanking}>
-                      {typeof hostUser.ranking === 'number'
-                        ? `⭐ Ranking: ${hostUser.ranking.toFixed(1)} `
-                        : 'Ranking: Unrated'}
+                    <Text style={styles.hostRating}>
+                      {typeof hostUser.rating === 'number'
+                        ? `⭐ Rating: ${hostUser.rating.toFixed(1)} `
+                        : 'Rating: Unrated'}
                     </Text>
                   </View>
                 </View>
@@ -918,7 +934,7 @@ const EventChatScreen = () => {
                   <Image source={smileDefault} style={styles.hostAvatar} />
                   <View style={{ marginLeft: 10 }}>
                     <Text style={styles.hostName}>Host: User</Text>
-                    <Text style={styles.hostRanking}>Ranking: Unrated</Text>
+                    <Text style={styles.hostRating}>Rating: Unrated</Text>
                   </View>
                 </View>
               )}
@@ -1066,8 +1082,8 @@ const EventChatScreen = () => {
                         <Text style={styles.requestName}>
                           {requester.displayName}
                         </Text>
-                        <Text style={styles.requestRanking}>
-                          Ranking: {requester.ranking}
+                        <Text style={styles.requestRating}>
+                          Rating: {requester.rating}
                         </Text>
                       </View>
                       <View style={styles.requestActions}>
@@ -1321,7 +1337,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
-  hostRanking: {
+  hostRating: {
     fontSize: 13,
     color: '#888',
     marginTop: 2,
@@ -1377,7 +1393,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
-  requestRanking: {
+  requestRating: {
     fontSize: 13,
     color: '#888',
     marginTop: 2,

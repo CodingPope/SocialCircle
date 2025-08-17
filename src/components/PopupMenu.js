@@ -9,9 +9,14 @@ export default function PopupMenu({
   onReport,
   onDelete,
   eventId, // Pass the event ID as a prop
+  targetType = 'post', // NEW: controls copy for report/delete
 }) {
   const navigation = useNavigation();
   const [confirmationStep, setConfirmationStep] = useState(null);
+
+  // Helpers: noun labels
+  const noun = (targetType || 'post').toLowerCase();
+  const nounTitle = noun.charAt(0).toUpperCase() + noun.slice(1);
 
   const handleDelete = () => {
     setConfirmationStep('delete');
@@ -23,12 +28,12 @@ export default function PopupMenu({
 
   const handleConfirm = async () => {
     if (confirmationStep === 'delete') {
-      await onDelete(); // Call the delete handler passed as a prop
+      await onDelete?.(eventId);
     } else if (confirmationStep === 'report') {
-      await onReport(); // Call the report handler passed as a prop
+      await onReport?.(eventId);
     }
     setConfirmationStep(null);
-    onClose();
+    onClose?.();
   };
 
   const handleCancelConfirmation = () => {
@@ -51,11 +56,11 @@ export default function PopupMenu({
           {confirmationStep ? (
             <>
               <Text style={styles.confirmationText}>
-                Are you sure you want to
-                {confirmationStep === 'delete'
-                  ? 'delete this post'
-                  : 'report this post'}
-                ?
+                {`Are you sure you want to ${
+                  confirmationStep === 'delete'
+                    ? `delete this ${noun}`
+                    : `report this ${noun}`
+                }?`}
               </Text>
               <View style={styles.confirmationButtons}>
                 <TouchableOpacity
@@ -80,7 +85,9 @@ export default function PopupMenu({
                     style={styles.popupItem}
                     onPress={handleDelete}
                   >
-                    <Text style={styles.popupText}>Delete Post</Text>
+                    <Text
+                      style={styles.popupText}
+                    >{`Delete ${nounTitle}`}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.popupItem} onPress={onClose}>
                     <Text style={styles.popupText}>Cancel</Text>
@@ -92,7 +99,9 @@ export default function PopupMenu({
                     style={styles.popupItem}
                     onPress={handleReport}
                   >
-                    <Text style={styles.popupText}>Report Post</Text>
+                    <Text
+                      style={styles.popupText}
+                    >{`Report ${nounTitle}`}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.popupItem} onPress={onClose}>
                     <Text style={styles.popupText}>Cancel</Text>

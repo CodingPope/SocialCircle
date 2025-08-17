@@ -40,7 +40,7 @@ import categoriesData from '../../utils/categoriesData.json';
 
 // --- Date/Time constraints ---
 const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
-const MAX_LEAD_DAYS = 7;     // hard limit: at most 7 days in the future
+const MAX_LEAD_DAYS = 7; // hard limit: at most 7 days in the future
 const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
 const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
 
@@ -76,7 +76,9 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   // Default date: 30 minutes in the future, rounded up to next 5-minute slot
-  const [date, setDate] = useState(() => roundUpToFiveMinutes(new Date(Date.now() + MIN_MILLIS)));
+  const [date, setDate] = useState(() =>
+    roundUpToFiveMinutes(new Date(Date.now() + MIN_MILLIS))
+  );
   const [manualAddress, setManualAddress] = useState('');
   const [manualLocation, setManualLocation] = useState(null);
 

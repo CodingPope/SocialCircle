@@ -26,6 +26,7 @@ import {
   updateUserData,
   uploadProfileImage,
   db,
+  reportContent,
 } from '../../firebase/config';
 import { useUserStore } from '../../store/userStore';
 import { useMyEvents } from '../../hooks/useMyEvents';
@@ -70,20 +71,26 @@ export default function ProfileScreen({ navigation }) {
   const [unreadCount, setUnreadCount] = useState(0);
   useEffect(() => {
     if (!user?.uid) return;
-    // Listen for unread notifications (exclude soft-deleted)
+    // Listen for recipient notifications; compute unread locally to include docs without `read` field
     const fs = require('firebase/firestore');
     const cfg = require('../../firebase/config');
     const q = fs.query(
       fs.collection(cfg.db, 'notifications'),
-      fs.where('recipientId', '==', user.uid),
-      fs.where('read', '==', false)
+      fs.where('recipientId', '==', user.uid)
     );
 
     let unsub = fs.onSnapshot(
       q,
       (snapshot) => {
-        const activeUnread = snapshot.docs.filter((d) => !d.data().isDeleted);
-        setUnreadCount(activeUnread.length);
+        try {
+          const activeUnread = snapshot.docs.filter((d) => {
+            const data = d.data() || {};
+            return data.isDeleted !== true && data.read !== true; // count undefined or false
+          });
+          setUnreadCount(activeUnread.length);
+        } catch (e) {
+          console.warn('Notifications parse error:', e?.message || e);
+        }
       },
       (error) => {
         // Avoid unhandled errors when auth state changes and rules deny access
@@ -110,6 +117,40 @@ export default function ProfileScreen({ navigation }) {
       } catch {}
     };
   }, [user?.uid]);
+
+  // Optimistically clear badge and mark unread as read
+  const handleNotificationsPress = async () => {
+    // Optimistic UI: clear badge immediately
+    setUnreadCount(0);
+    try {
+      if (!user?.uid) {
+        navigation.navigate('Notifications');
+        return;
+      }
+      const fs = require('firebase/firestore');
+      const cfg = require('../../firebase/config');
+      const q = fs.query(
+        fs.collection(cfg.db, 'notifications'),
+        fs.where('recipientId', '==', user.uid)
+      );
+      const snap = await fs.getDocs(q);
+      if (snap?.size) {
+        const batch = fs.writeBatch(cfg.db);
+        snap.docs.forEach((d) => {
+          const data = d.data() || {};
+          if (data.isDeleted !== true && data.read !== true) {
+            batch.update(d.ref, { read: true, readAt: fs.serverTimestamp() });
+          }
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      // Non-blocking; the Notifications screen will also mark as read via its store
+      console.warn('Failed to mark notifications as read:', e?.message || e);
+    } finally {
+      navigation.navigate('Notifications');
+    }
+  };
 
   // --- Soft Delete Handler (with double confirmation) ---
   const handleDeleteAccount = async () => {
@@ -625,8 +666,24 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const handleReportEvent = () => {
-    Alert.alert('Report Event functionality coming soon.');
-    setModalVisible(false);
+    if (!selectedEvent || !selectedEvent.id || !user?.uid) {
+      Alert.alert('Report', 'Unable to report this event right now.');
+      setModalVisible(false);
+      return;
+    }
+    reportContent(
+      user.uid,
+      selectedEvent.id,
+      'event',
+      'Inappropriate content',
+      {
+        details: `Report from ProfileScreen event actions for event ${selectedEvent.id}`,
+        context: { eventId: selectedEvent.id },
+      }
+    )
+      .then(() => Alert.alert('Report', 'Thanks for the report.'))
+      .catch(() => Alert.alert('Report', 'Failed to submit report.'))
+      .finally(() => setModalVisible(false));
   };
 
   const handleMenuOptionClick = (option) => {
@@ -818,7 +875,7 @@ export default function ProfileScreen({ navigation }) {
             <Text style={styles.navTitle}>Profile</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <TouchableOpacity
-                onPress={() => navigation.navigate('Notifications')}
+                onPress={handleNotificationsPress}
                 style={{ marginRight: 16 }}
                 accessibilityLabel='Notifications'
               >

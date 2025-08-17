@@ -91,8 +91,17 @@ export default function PostCard({ event, onPress, onJoinPress }) {
   const handleReport = useCallback(async () => {
     setMenuVisible(false);
     try {
-      await reportContent(user.uid, event.id, 'event', 'Inappropriate content');
-      alert('Event reported successfully.');
+      await reportContent(
+        user.uid,
+        event.id,
+        'event',
+        'Inappropriate content',
+        {
+          details: `Auto-report from PostCard for event ${event.id}`,
+          context: { eventId: event.id },
+        }
+      );
+      alert('Thanks for the report. Our team will review it shortly.');
     } catch (error) {
       alert('Failed to report the event. Please try again.');
     }
@@ -377,6 +386,7 @@ export default function PostCard({ event, onPress, onJoinPress }) {
             isOwner={isOwner}
             onReport={handleReport}
             onDelete={handleDelete}
+            targetType='event'
           />
         )}
       </TouchableOpacity>

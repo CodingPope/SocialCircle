@@ -160,7 +160,13 @@ exports.onMessageCreateNotify = onDocumentCreated(
     const userRefs = [...targetUids].map((uid) => db.doc(`users/${uid}`));
     const userSnaps = await db.getAll(...userRefs);
     const expoTokens = userSnaps
-      .map((s) => (s.exists ? s.get('deviceToken') : null))
+      .map((s) => {
+        if (!s.exists) return null;
+        const t = s.get('deviceToken');
+        const optIn = s.get('pushOptIn');
+        if (optIn === false) return null; // respect in-app opt-out
+        return t;
+      })
       .filter(
         (t) => typeof t === 'string' && t.startsWith('ExponentPushToken')
       );
@@ -189,6 +195,88 @@ exports.onMessageCreateNotify = onDocumentCreated(
     logger.log(
       `[push] Notified ${expoTokens.length} users for event ${eventId}`
     );
+  }
+);
+
+// NEW: Trigger push when a notification document is created
+exports.onNotificationCreatedPush = onDocumentCreated(
+  'notifications/{id}',
+  async (event) => {
+    try {
+      const notif = event.data?.data();
+      if (!notif) return;
+      if (notif.isDeleted === true) return;
+
+      const recipientId = notif.recipientId;
+      if (!recipientId) return;
+
+      // Idempotency: skip if push already sent (best-effort)
+      const ref = db.doc(`notifications/${event.params.id}`);
+      const snap = await ref.get();
+      if (snap.exists && snap.get('pushSentAt')) return;
+
+      // Fetch recipient token + opt-in
+      const userSnap = await db.doc(`users/${recipientId}`).get();
+      if (!userSnap.exists) return;
+      const token = userSnap.get('deviceToken');
+      const optIn = userSnap.get('pushOptIn');
+      const canPush =
+        !!token &&
+        token.startsWith('ExponentPushToken') &&
+        (optIn === undefined || optIn === true);
+      if (!canPush) return;
+
+      // Build title/body based on notification type
+      let title = 'Social Circle';
+      let body = 'You have a new notification';
+      switch (notif.type) {
+        case 'rsvp_request':
+          title = 'RSVP Request';
+          body = 'Someone requested to join your event';
+          break;
+        case 'request_accepted':
+          title = 'Request Accepted';
+          body = 'Your RSVP request was accepted!';
+          break;
+        case 'chat':
+          title = 'New message';
+          body =
+            typeof notif.message === 'string' && notif.message.trim().length
+              ? notif.message.trim()
+              : 'You have a new message';
+          break;
+        default:
+          if (typeof notif.title === 'string' && notif.title.trim().length) {
+            title = notif.title.trim();
+          }
+          if (
+            typeof notif.message === 'string' &&
+            notif.message.trim().length
+          ) {
+            body = notif.message.trim();
+          }
+      }
+
+      const data = {
+        notificationId: event.params.id,
+        type: notif.type || 'default',
+        linkType: notif.linkType || null,
+        linkId: notif.linkId || null,
+        eventId: notif.eventId || null,
+      };
+
+      await sendExpoPushMessages([
+        { to: token, sound: 'default', title, body, data },
+      ]);
+
+      // Mark pushed (best-effort)
+      await ref.set(
+        { pushSentAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+    } catch (e) {
+      logger.error('[push] onNotificationCreatedPush error', e?.message || e);
+    }
   }
 );
 
@@ -511,6 +599,7 @@ exports.requestToJoinEvent = onCall(
             message: 'New RSVP request',
             linkType: 'event',
             linkId: eventId,
+            read: false,
           });
         }
 
@@ -623,6 +712,7 @@ exports.acceptRsvpRequest = onCall(
         linkType: 'event',
         linkId: eventId,
         message: 'Your RSVP request was accepted!',
+        read: false,
       });
     } catch (e) {
       logger.error('[acceptRsvpRequest] notify error', e?.message || e);
@@ -689,5 +779,69 @@ exports.declineRsvpRequest = onCall(
 
     // No notification for decline (product decision)
     return { ok: true };
+  }
+);
+
+// Callable: create a report (server-side write to /reports)
+exports.createReport = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 60,
+  },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid)
+      throw new HttpsError('unauthenticated', 'Authentication required');
+
+    const data = req.data || {};
+    const type = data.type;
+    const targetId = data.targetId;
+    const reason =
+      (data.reason || '').toString().trim() || 'No reason provided';
+    const details = data.details ? String(data.details).slice(0, 2000) : null;
+    const context =
+      typeof data.context === 'object' && data.context !== null
+        ? data.context
+        : {};
+
+    if (!['event', 'user'].includes(type))
+      throw new HttpsError('invalid-argument', 'Invalid type');
+    if (!targetId || typeof targetId !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing targetId');
+
+    // Sanitize evidence array (optional list of strings/URLs)
+    let evidence = [];
+    if (Array.isArray(data.evidence)) {
+      evidence = data.evidence
+        .filter((e) => typeof e === 'string')
+        .slice(0, 10)
+        .map((e) => e.slice(0, 1000));
+    }
+
+    const reportDoc = {
+      type, // 'event' | 'user'
+      targetId,
+      reporterId: uid, // authoritative source
+      reason,
+      details: details || null,
+      status: 'pending',
+      evidence,
+      context: {
+        eventId: typeof context.eventId === 'string' ? context.eventId : null,
+        messageId:
+          typeof context.messageId === 'string' ? context.messageId : null,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    try {
+      const ref = await db.collection('reports').add(reportDoc);
+      logger.log('[createReport] created', ref.id, { type, targetId, uid });
+      return { ok: true, id: ref.id };
+    } catch (err) {
+      logger.error('[createReport] error', err?.message || err);
+      throw new HttpsError('internal', 'Failed to create report');
+    }
   }
 );

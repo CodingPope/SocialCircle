@@ -294,18 +294,28 @@ export const deleteEvent = async (eventId, userId) => {
   }
 };
 
-// Report a post (event or user)
-export const reportContent = async (reporterId, targetId, type, reason) => {
+// Report a post (event or user) via callable to bypass locked Firestore rules
+export const reportContent = async (
+  reporterId,
+  targetId,
+  type,
+  reason,
+  options = {}
+) => {
   try {
-    const reportRef = collection(db, 'reports');
-    await addDoc(reportRef, {
-      reporterId,
-      targetId, // Could be eventId or userId
-      type, // e.g., "event" or "user"
+    // reporterId is ignored on server; use it only for local analytics if needed
+    const functionsRegional = getFunctions(app, 'us-central1');
+    const createReport = httpsCallable(functionsRegional, 'createReport');
+    const payload = {
+      type, // 'event' | 'user'
+      targetId,
       reason: reason || 'No reason provided',
-      status: 'pending',
-      createdAt: new Date(),
-    });
+      details: options.details || null,
+      evidence: Array.isArray(options.evidence) ? options.evidence : [],
+      context: options.context || {}, // { eventId?, messageId? }
+    };
+    const res = await createReport(payload);
+    return res?.data || { ok: true };
   } catch (error) {
     console.error('Error reporting content:', error);
     throw error;

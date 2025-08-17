@@ -17,9 +17,15 @@ import {
   arrayUnion,
   collection,
   addDoc,
+  onSnapshot, // NEW: live updates for event doc
 } from 'firebase/firestore';
 // Do NOT import addDoc directly here; use sendNotification from config.js which handles notification creation
-import { db, updateUserData, functions } from '../firebase/config';
+import {
+  db,
+  updateUserData,
+  functions,
+  reportContent,
+} from '../firebase/config';
 import { httpsCallable } from 'firebase/functions';
 import BottomSheet, {
   BottomSheetBackdrop,
@@ -40,35 +46,68 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   const [userDetails, setUserDetails] = useState(null);
   const snapPoints = useMemo(() => ['50%', '90%', '95%'], []);
 
+  // NEW: Keep a live copy of the event document
+  const [liveEvent, setLiveEvent] = useState(event || null);
+
+  // Sync local when prop id changes (open from a different card)
   useEffect(() => {
-    if (!event || event.isDeleted) {
-      onClose();
-      return;
-    }
+    setLiveEvent(event || null);
+  }, [event?.id]);
 
-    if (!event?.location) {
-      setAddress('Location not specified');
-      return;
-    }
-    const fetchAddress = async () => {
-      try {
-        const { latitude, longitude } = event.location;
-        const res = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
-        );
-        const data = await res.json();
-        if (data.status === 'OK' && data.results.length) {
-          setAddress(data.results[0].formatted_address);
-        } else {
-          setAddress('Address not available');
+  // Subscribe to Firestore event updates to reflect RSVP/attendee changes instantly
+  useEffect(() => {
+    if (!event?.id) return;
+    const ref = doc(db, 'events', event.id);
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          onClose && onClose();
+          return;
         }
-      } catch (err) {
-        setAddress('Error fetching address');
-      }
+        const data = { id: snap.id, ...snap.data() };
+        setLiveEvent(data);
+        // Auto-close if soft-deleted
+        if (data.isDeleted === true) onClose && onClose();
+      },
+      (err) => console.error('EventPopUpCard snapshot error:', err)
+    );
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
     };
-    fetchAddress();
+  }, [event?.id, onClose]);
 
-    const ownerId = event.ownerId;
+  useEffect(() => {
+    if (!liveEvent || liveEvent.isDeleted) {
+      onClose && onClose();
+      return;
+    }
+
+    if (!liveEvent?.location) {
+      setAddress('Location not specified');
+    } else {
+      const fetchAddress = async () => {
+        try {
+          const { latitude, longitude } = liveEvent.location;
+          const res = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
+          );
+          const data = await res.json();
+          if (data.status === 'OK' && data.results.length) {
+            setAddress(data.results[0].formatted_address);
+          } else {
+            setAddress('Address not available');
+          }
+        } catch (err) {
+          setAddress('Error fetching address');
+        }
+      };
+      fetchAddress();
+    }
+
+    const ownerId = liveEvent.ownerId;
     if (!ownerId) return;
     const fetchUser = async () => {
       try {
@@ -80,19 +119,20 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       }
     };
     fetchUser();
-  }, [event]);
+  }, [liveEvent]);
 
-  const isSoftDeleted = event?.isDeleted === true;
+  const isSoftDeleted = liveEvent?.isDeleted === true;
   const isExpired = (() => {
-    if (!event) return false;
+    const e = liveEvent;
+    if (!e) return false;
     let eventTime = null;
-    if (event.endAt) {
-      if (event.endAt.toDate) eventTime = event.endAt.toDate().getTime();
-      else if (event.endAt.seconds) eventTime = event.endAt.seconds * 1000;
-    } else if (event.date) {
-      if (event.date.toDate) eventTime = event.date.toDate().getTime();
-      else if (event.date.seconds) eventTime = event.date.seconds * 1000;
-      else if (event.date instanceof Date) eventTime = event.date.getTime();
+    if (e.endAt) {
+      if (e.endAt.toDate) eventTime = e.endAt.toDate().getTime();
+      else if (e.endAt.seconds) eventTime = e.endAt.seconds * 1000;
+    } else if (e.date) {
+      if (e.date.toDate) eventTime = e.date.toDate().getTime();
+      else if (e.date.seconds) eventTime = e.date.seconds * 1000;
+      else if (e.date instanceof Date) eventTime = e.date.getTime();
     }
     if (!eventTime) return false;
     return eventTime + 60 * 60 * 1000 <= Date.now();
@@ -111,24 +151,26 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       : require('../../assets/smileDefault.png');
 
   const openInMaps = () => {
-    if (event.location) {
-      const { latitude, longitude } = event.location;
+    if (liveEvent?.location) {
+      const { latitude, longitude } = liveEvent.location;
       Linking.openURL(`https://www.google.com/maps?q=${latitude},${longitude}`);
     }
   };
 
   // --- Join Event Logic ---
-  const attendees = Array.isArray(event.attendees) ? event.attendees : [];
-  const requests = Array.isArray(event.requests) ? event.requests : [];
-  const isOwner = event.ownerId === user?.uid;
+  const attendees = Array.isArray(liveEvent?.attendees)
+    ? liveEvent.attendees
+    : [];
+  const requests = Array.isArray(liveEvent?.requests) ? liveEvent.requests : [];
+  const isOwner = liveEvent?.ownerId === user?.uid;
   const isAttendee = attendees.includes(user?.uid);
   const hasRequested = requests.includes(user?.uid);
 
-  // --- Join/Request/Chat Button Logic ---
+  // --- Join/Request/Chat Button Logic (now reactive to liveEvent) ---
   let actionButtonLabel = 'Join Event';
   if (isAttendee || isOwner) {
     actionButtonLabel = 'Check Chat';
-  } else if (event.privacy === 'rsvp') {
+  } else if (liveEvent?.privacy === 'rsvp') {
     actionButtonLabel = hasRequested ? 'Request Pending' : 'Request To Join';
   }
 
@@ -143,14 +185,13 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       return;
     }
     if (isAttendee || isOwner) {
-      // Use navigation prop for navigation actions
       navigation.navigate('EventChat', {
-        eventId: event.id,
+        eventId: liveEvent.id,
         locationName: address,
       });
       return;
     }
-    if (event.privacy === 'rsvp') {
+    if (liveEvent?.privacy === 'rsvp') {
       if (hasRequested) {
         alert('Your request is pending approval.');
         return;
@@ -162,10 +203,10 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   };
 
   const handleRequestToJoin = async () => {
-    if (!user || !event?.id) return;
+    if (!user || !liveEvent?.id) return;
     try {
       const call = httpsCallable(functions, 'requestToJoinEvent');
-      const res = await call({ eventId: event.id });
+      const res = await call({ eventId: liveEvent.id });
       const already = res?.data?.alreadyRequested;
       alert(
         already
@@ -178,7 +219,6 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
     }
   };
 
-  // Description: Centralized join implementation using eventStore.rsvpEvent
   const handleJoin = async () => {
     if (isSoftDeleted) {
       alert('This event has been archived and cannot be joined.');
@@ -188,23 +228,22 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       alert('This event has ended and cannot be joined.');
       return;
     }
-    if (!user || !event?.id) return;
+    if (!user || !liveEvent?.id) return;
 
-    // Local checks
-    const attendees = Array.isArray(event.attendees) ? event.attendees : [];
-    const isOwnerLocal = event.ownerId === user.uid;
-    if (isOwnerLocal || attendees.includes(user.uid)) {
+    const a = Array.isArray(liveEvent.attendees) ? liveEvent.attendees : [];
+    const isOwnerLocal = liveEvent.ownerId === user.uid;
+    if (isOwnerLocal || a.includes(user.uid)) {
       navigation.navigate('EventChat', {
-        eventId: event.id,
+        eventId: liveEvent.id,
         locationName: address,
       });
       return;
     }
 
     if (
-      typeof event.capacity === 'number' &&
-      event.capacity > 0 &&
-      attendees.length >= event.capacity
+      typeof liveEvent.capacity === 'number' &&
+      liveEvent.capacity > 0 &&
+      a.length >= liveEvent.capacity
     ) {
       alert('Event is full. You can join the waitlist if available.');
       return;
@@ -215,13 +254,9 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       if (typeof rsvpFn !== 'function') {
         throw new Error('RSVP function unavailable');
       }
-
-      // Call centralized RSVP which handles callables, optimistic updates, and chat creation
-      await rsvpFn(event.id, user.uid);
-
-      // Navigate to chat after success
+      await rsvpFn(liveEvent.id, user.uid);
       navigation.navigate('EventChat', {
-        eventId: event.id,
+        eventId: liveEvent.id,
         locationName: address,
       });
       return;
@@ -232,67 +267,68 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   };
 
   const handleReport = async () => {
-    if (!user || !event?.id) return;
+    if (!user || !liveEvent?.id) return;
     try {
-      const reportRef = collection(db, 'reports');
-      await addDoc(reportRef, {
-        reporterId: user.uid,
-        eventId: event.id,
-        reportedAt: new Date(),
-        status: 'pending',
-      });
-      alert('Event reported successfully. Our team will review it shortly.');
+      await reportContent(
+        user.uid,
+        liveEvent.id,
+        'event',
+        'Inappropriate or unsafe content',
+        {
+          details: `Auto-report from EventPopUpCard for event ${liveEvent.id}`,
+          context: { eventId: liveEvent.id },
+        }
+      );
+      alert('Thanks for the report. Our team will review it shortly.');
     } catch (err) {
       console.error('Report error:', err);
       alert('Failed to report the event. Please try again.');
     }
   };
 
-  if (!event) return null;
+  if (!liveEvent) return null;
 
   return (
     <BottomSheet
       ref={bottomSheetRef}
       snapPoints={snapPoints}
       enablePanDownToClose
-      onClose={onClose} // Close modal when clicking outside
+      onClose={onClose}
       backdropComponent={(props) => (
         <BottomSheetBackdrop
           {...props}
           disappearsOnIndex={-1}
           appearsOnIndex={0}
-          pressBehavior='close' // Close modal when clicking backdrop
+          pressBehavior='close'
         />
       )}
-      style={[styles.bottomSheet, { maxHeight: screenHeight }]} // limit the sheet, not the scroll
+      style={[styles.bottomSheet, { maxHeight: screenHeight }]}
     >
       <BottomSheetScrollView
         showsVerticalScrollIndicator
         contentContainerStyle={{ padding: 10, flexGrow: 1 }}
       >
-        {/* Event Image: Only show if imageUri or imageUrl exists */}
-        {(event.imageUri || event.imageUrl) && (
+        {(liveEvent.imageUri || liveEvent.imageUrl) && (
           <Image
-            source={{ uri: event.imageUri || event.imageUrl }}
+            source={{ uri: liveEvent.imageUri || liveEvent.imageUrl }}
             style={styles.image}
             resizeMode='cover'
           />
         )}
-        {/* No fallback image shown if no imageUri/imageUrl */}
-        <Text style={styles.title}>{event.title || 'Untitled Event'}</Text>
-        {event.category && (
-          <Text style={styles.categoryTag}>{event.category}</Text>
+        <Text style={styles.title}>{liveEvent.title || 'Untitled Event'}</Text>
+        {liveEvent.category && (
+          <Text style={styles.categoryTag}>{liveEvent.category}</Text>
         )}
 
         <Text style={styles.label}>Description:</Text>
         <Text style={styles.description}>
           {showFullDescription
-            ? event.description
-            : event.description?.length > 300
-            ? `${event.description.slice(0, 300)}...`
-            : event.description}
+            ? liveEvent.description
+            : liveEvent.description?.length > 300
+            ? `${liveEvent.description.slice(0, 300)}...`
+            : liveEvent.description}
         </Text>
-        {event.description && event.description.length > 300 && (
+        {liveEvent.description && liveEvent.description.length > 300 && (
           <TouchableOpacity
             onPress={() => setShowFullDescription(!showFullDescription)}
           >
@@ -304,8 +340,8 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
 
         <Text style={styles.label}>Date:</Text>
         <Text style={styles.subText}>
-          {event.date
-            ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
+          {liveEvent.date
+            ? new Date(liveEvent.date.seconds * 1000).toLocaleString('en-US', {
                 weekday: 'long',
                 year: 'numeric',
                 month: 'long',
@@ -325,7 +361,6 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
           <TouchableOpacity
             style={styles.userContainer}
             onPress={() => {
-              // Description: Consistent profile navigation logic for Social Circle
               if (userDetails.id === user?.uid) {
                 navigation.navigate('MainTabs', { screen: 'ProfileStack' });
               } else {
@@ -338,7 +373,6 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
             <Image source={profileImageSource} style={styles.userImage} />
             <View>
               <Text style={styles.userName}>{displayName}</Text>
-              {/* Description: Unified host rating display to match PostCard (gold star + numeric rating) */}
               <Text style={styles.userRating}>
                 {typeof userDetails.rating === 'number' &&
                 userDetails.rating > 0
@@ -350,33 +384,22 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
         )}
 
         <View style={styles.actionsContainer}>
-          {/* Capacity display */}
-          {typeof event.capacity === 'number' && event.capacity > 0 ? (
+          {typeof liveEvent.capacity === 'number' && liveEvent.capacity > 0 ? (
             <Text style={styles.capacityText}>
-              {attendees.length} / {event.capacity} Joined
+              {attendees.length} / {liveEvent.capacity} Joined
             </Text>
           ) : (
             <Text style={styles.capacityText}>{attendees.length} joined</Text>
           )}
-          {/* Main Action Button */}
           <TouchableOpacity
             style={styles.joinButton}
             onPress={handleActionButton}
           >
             <Text style={styles.joinButtonText}>{actionButtonLabel}</Text>
           </TouchableOpacity>
-          {/* Report Button */}
           <TouchableOpacity style={styles.reportButton} onPress={handleReport}>
             <Text style={styles.reportButtonText}>Report</Text>
           </TouchableOpacity>
-          {/* <View style={styles.secondaryActionsContainer}>
-            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.shareIconButton}>
-              <MaterialIcons name='share' size={20} color='#007BFF' />
-            </TouchableOpacity>
-          </View> */}
         </View>
       </BottomSheetScrollView>
     </BottomSheet>

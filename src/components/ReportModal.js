@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  TextInput,
+} from 'react-native';
 import Modal from 'react-native-modal';
 
 const ReportModal = ({
@@ -30,6 +36,12 @@ const ReportModal = ({
     >
       <View style={styles.container}>
         <Text style={styles.title}>Options</Text>
+        <TextInput
+          placeholder='Reason (optional)'
+          value={reportReason}
+          onChangeText={setReportReason}
+          style={styles.input}
+        />
         <TouchableOpacity style={styles.optionButton} onPress={handleReport}>
           <Text style={styles.optionText}>Report</Text>
         </TouchableOpacity>
@@ -73,6 +85,13 @@ const styles = StyleSheet.create({
   },
   removeButton: { backgroundColor: '#FF3B30' },
   optionText: { fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+  },
 });
 
 export default ReportModal;
