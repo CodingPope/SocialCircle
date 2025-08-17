@@ -468,7 +468,8 @@ exports.requestToJoinEvent = onCall(
   async (req) => {
     const uid = req.auth?.uid;
     const { eventId } = req.data || {};
-    if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!uid)
+      throw new HttpsError('unauthenticated', 'Authentication required');
     if (!eventId) throw new HttpsError('invalid-argument', 'Missing eventId');
 
     const eventRef = db.doc(`events/${eventId}`);
@@ -477,7 +478,8 @@ exports.requestToJoinEvent = onCall(
     try {
       const result = await db.runTransaction(async (tx) => {
         const evSnap = await tx.get(eventRef);
-        if (!evSnap.exists) throw new HttpsError('not-found', 'Event not found');
+        if (!evSnap.exists)
+          throw new HttpsError('not-found', 'Event not found');
         const ev = evSnap.data();
 
         if (ev.isDeleted === true)
@@ -491,8 +493,7 @@ exports.requestToJoinEvent = onCall(
         const requests = Array.isArray(ev.requests) ? ev.requests : [];
         if (attendees.includes(uid))
           throw new HttpsError('already-exists', 'Already an attendee');
-        if (requests.includes(uid))
-          return { ok: true, alreadyRequested: true }; // idempotent
+        if (requests.includes(uid)) return { ok: true, alreadyRequested: true }; // idempotent
 
         tx.update(eventRef, {
           requests: admin.firestore.FieldValue.arrayUnion(uid),
@@ -592,7 +593,9 @@ exports.acceptRsvpRequest = onCall(
           eventId,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           createdBy: hostUid,
-          participants: Array.from(new Set([hostUid, userId, ev.ownerId].filter(Boolean))),
+          participants: Array.from(
+            new Set([hostUid, userId, ev.ownerId].filter(Boolean))
+          ),
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           messageCount: 0,
           isArchived: false,

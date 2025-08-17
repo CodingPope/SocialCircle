@@ -38,7 +38,22 @@ import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplet
 import InterestSelector from '../../components/InterestSelector'; // Import the reusable InterestSelector
 import categoriesData from '../../utils/categoriesData.json';
 
-const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
+// --- Date/Time constraints ---
+const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
+const MAX_LEAD_DAYS = 7;     // hard limit: at most 7 days in the future
+const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
+const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
+
+// Description: Round UP to the next 5-minute boundary to avoid rounding backwards
+const roundUpToFiveMinutes = (inputDate) => {
+  const d = new Date(inputDate);
+  d.setSeconds(0);
+  d.setMilliseconds(0);
+  const minutes = d.getMinutes();
+  const remainder = minutes % 5;
+  if (remainder !== 0) d.setMinutes(minutes + (5 - remainder));
+  return d;
+};
 
 export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   // Description: Get current user from Zustand userStore
@@ -57,9 +72,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
   const [imageUri, setImageUri] = useState(null);
   const [imageUrl, setImageUrl] = useState('');
+  // Missing states restored
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [date, setDate] = useState(new Date());
+  // Default date: 30 minutes in the future, rounded up to next 5-minute slot
+  const [date, setDate] = useState(() => roundUpToFiveMinutes(new Date(Date.now() + MIN_MILLIS)));
   const [manualAddress, setManualAddress] = useState('');
   const [manualLocation, setManualLocation] = useState(null);
 
@@ -89,12 +106,16 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const hideDatePicker = () => setIsDatePickerVisible(false);
 
   const handleConfirmDate = (selectedDate) => {
-    // Round minutes to the nearest multiple of 5
-    const roundedDate = new Date(selectedDate);
-    const minutes = roundedDate.getMinutes();
-    roundedDate.setMinutes(Math.round(minutes / 5) * 5);
+    // Clamp to [now + 30min, now + 7days] and round up to next 5-min slot
+    const now = new Date();
+    const min = new Date(now.getTime() + MIN_MILLIS);
+    const max = new Date(now.getTime() + MAX_MILLIS);
 
-    setDate(roundedDate);
+    let picked = roundUpToFiveMinutes(selectedDate);
+    if (picked < min) picked = roundUpToFiveMinutes(min);
+    if (picked > max) picked = roundUpToFiveMinutes(max);
+
+    setDate(picked);
     hideDatePicker();
   };
 
@@ -158,15 +179,12 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       );
     }
 
-    // Description: Ensure event is at least 35 min in the future (client-side buffer) to avoid server-side min window and clock skew
+    // Description: Enforce 30 minutes minimum lead time and 7 days maximum
     const now = new Date();
-    const minDate = new Date(now.getTime() + 35 * 60 * 1000); // 35 minutes buffer
-    const maxDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    if (date < now) {
-      return Alert.alert('Event cannot be in the past');
-    }
+    const minDate = new Date(now.getTime() + MIN_MILLIS); // 30 minutes buffer
+    const maxDate = new Date(now.getTime() + MAX_MILLIS);
     if (date < minDate) {
-      return Alert.alert('Event must be at least 35 minutes in the future');
+      return Alert.alert('Event must be at least 30 minutes in the future');
     }
     if (date > maxDate) {
       return Alert.alert('Event cannot be more than 7 days in the future');
@@ -481,6 +499,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 date={date}
                 onConfirm={handleConfirmDate}
                 onCancel={hideDatePicker}
+                minimumDate={new Date(Date.now() + MIN_MILLIS)}
+                maximumDate={new Date(Date.now() + MAX_MILLIS)}
                 themeVariant='light' // Explicitly set theme to light
                 textColor='#000' // Ensure text is visible
               />

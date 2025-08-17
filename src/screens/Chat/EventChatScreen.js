@@ -400,7 +400,10 @@ const EventChatScreen = () => {
       // Optimistic local update; snapshot will reconcile
       setEvent((prev) =>
         prev
-          ? { ...prev, requests: (prev.requests || []).filter((r) => r !== userId) }
+          ? {
+              ...prev,
+              requests: (prev.requests || []).filter((r) => r !== userId),
+            }
           : prev
       );
     } catch (err) {
@@ -425,7 +428,10 @@ const EventChatScreen = () => {
 
       setEvent((prev) =>
         prev
-          ? { ...prev, requests: (prev.requests || []).filter((r) => r !== userId) }
+          ? {
+              ...prev,
+              requests: (prev.requests || []).filter((r) => r !== userId),
+            }
           : prev
       );
     } catch (err) {

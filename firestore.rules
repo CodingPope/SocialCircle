@@ -84,9 +84,19 @@ service cloud.firestore {
     }
 
     match /notifications/{id} {
-      allow read: if isOwner(resource.data.recipientId) || signedIn();
+      // Only the recipient can read their notifications
+      allow read: if isOwner(resource.data.recipientId);
+
+      // Allow recipient to toggle read status or soft-delete their notification
+      allow update: if isOwner(resource.data.recipientId) && (
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['read', 'readAt']) ||
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['isDeleted', 'deletedAt']) ||
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['read', 'readAt', 'isDeleted', 'deletedAt'])
+      );
+
+      // No hard deletes or client-side creation
+      allow delete: if false;
       allow create: if false;
-      allow update, delete: if false;
     }
 
     match /reports/{id} {
