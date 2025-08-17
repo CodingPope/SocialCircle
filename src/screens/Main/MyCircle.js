@@ -18,11 +18,12 @@ import {
   doc,
 } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { useAuth } from '../../context/AuthContext';
+import { useUserStore } from '../../store/userStore';
 import EventPopUpCard from '../../components/EventPopUpCard';
 
 export default function MyCircle({ navigation }) {
-  const { user } = useAuth();
+  // Description: Get current user from Zustand userStore
+  const user = useUserStore((state) => state.user);
   const [hostingEvents, setHostingEvents] = useState([]);
   const [attendingEvents, setAttendingEvents] = useState([]);
   const [friends, setFriends] = useState([]);
@@ -31,6 +32,7 @@ export default function MyCircle({ navigation }) {
   const [selectedEvent, setSelectedEvent] = useState(null);
 
   useEffect(() => {
+    // Description: Optimized fetchData for faster load using parallelization and batching
     const fetchData = async () => {
       if (!user?.uid) return;
       setLoading(true);
@@ -38,138 +40,147 @@ export default function MyCircle({ navigation }) {
       try {
         const now = new Date();
 
-        // ✅ Enhance helper
-        const enhanceWithHostData = async (events) =>
-          Promise.all(
-            events.map(async (event) => {
-              if (!event.ownerId)
-                return {
-                  ...event,
-                  hostPhoto: null,
-                  hostRating: 0,
-                  hostName: 'Unknown Host',
-                };
-
-              try {
-                const snap = await getDoc(doc(db, 'users', event.ownerId));
-                if (snap.exists()) {
-                  const data = snap.data();
-                  return {
-                    ...event,
-                    hostPhoto: data.profileImage || data.avatarURL || null,
-                    hostRating: data.rating || 0,
-                    hostName:
-                      data.displayName ||
-                      data.username ||
-                      data.name ||
-                      data.fullName ||
-                      `${data.firstName || ''} ${data.lastName || ''}`.trim() ||
-                      'Unknown Host',
-                  };
-                }
-              } catch (err) {
-                console.error('Error enhancing event host:', err);
-              }
-
-              return {
-                ...event,
-                hostPhoto: null,
-                hostRating: 0,
-                hostName: 'Unknown Host',
-              };
-            })
+        // Helper: Enhance event with host data
+        const enhanceWithHostData = async (events) => {
+          if (!events.length) return [];
+          // Batch fetch all unique ownerIds
+          const ownerIds = [
+            ...new Set(events.map((e) => e.ownerId).filter(Boolean)),
+          ];
+          const ownerSnaps = await Promise.all(
+            ownerIds.map((id) => getDoc(doc(db, 'users', id)))
           );
+          const ownerMap = {};
+          ownerSnaps.forEach((snap, i) => {
+            if (snap.exists()) {
+              ownerMap[ownerIds[i]] = snap.data();
+            }
+          });
+          return events.map((event) => {
+            const data = ownerMap[event.ownerId] || {};
+            return {
+              ...event,
+              hostPhoto: data.profileImage || data.avatarURL || null,
+              hostRating: data.rating || 0,
+              hostName:
+                data.displayName ||
+                data.username ||
+                data.name ||
+                data.fullName ||
+                `${data.firstName || ''} ${data.lastName || ''}`.trim() ||
+                'Unknown Host',
+            };
+          });
+        };
 
-        // ✅ Hosting Events
-        const hostingSnapshot = await getDocs(
-          query(collection(db, 'events'), where('ownerId', '==', user.uid))
-        );
+        // Batch queries for events and friends
+        let hostingSnapshot, attendingSnapshot, friendsSnapshot;
+        [hostingSnapshot, attendingSnapshot] = await Promise.all([
+          getDocs(
+            query(collection(db, 'events'), where('ownerId', '==', user.uid))
+          ),
+          getDocs(
+            query(
+              collection(db, 'events'),
+              where('attendees', 'array-contains', user.uid)
+            )
+          ),
+        ]);
+        // Only query friends if following is a non-empty array
+        if (Array.isArray(user.following) && user.following.length > 0) {
+          friendsSnapshot = await getDocs(
+            query(
+              collection(db, 'users'),
+              where('__name__', 'in', user.following)
+            )
+          );
+        } else {
+          friendsSnapshot = { docs: [] };
+        }
+
+        // Upcoming events
         let hosting = hostingSnapshot.docs
           .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((e) => e.isDeleted !== true)
           .filter((e) => e.date?.toDate() > now);
-        hosting = await enhanceWithHostData(hosting);
-        setHostingEvents(hosting);
-
-        // ✅ Attending Events
-        const attendingSnapshot = await getDocs(
-          query(
-            collection(db, 'events'),
-            where('attendees', 'array-contains', user.uid)
-          )
-        );
         let attending = attendingSnapshot.docs
           .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((e) => e.isDeleted !== true)
           .filter((e) => e.date?.toDate() > now);
-        attending = await enhanceWithHostData(attending);
-        setAttendingEvents(attending);
+        // Enhance events in parallel
+        const [hostingEnhanced, attendingEnhanced] = await Promise.all([
+          enhanceWithHostData(hosting),
+          enhanceWithHostData(attending),
+        ]);
+        setHostingEvents(hostingEnhanced);
+        setAttendingEvents(attendingEnhanced);
 
-        // ✅ Friends & Friend Activities
-        if (user.following?.length) {
-          let allFriends = [];
-          allFriends = allFriends.map((friend) => ({
-            ...friend,
-            displayName:
-              friend.displayName ||
-              friend.name ||
-              friend.fullName ||
-              `${friend.firstName || ''} ${friend.lastName || ''}`.trim() ||
-              friend.username ||
-              'Friend',
-          }));
-          for (let i = 0; i < user.following.length; i += 10) {
-            const chunk = user.following.slice(i, i + 10);
-            const q = query(
-              collection(db, 'users'),
-              where('__name__', 'in', chunk)
-            );
-            const snapshot = await getDocs(q);
-            allFriends = allFriends.concat(
-              snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
-            );
+        // Friends
+        let allFriends = friendsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        allFriends = allFriends.map((friend) => ({
+          ...friend,
+          displayName:
+            friend.displayName ||
+            friend.name ||
+            friend.fullName ||
+            `${friend.firstName || ''} ${friend.lastName || ''}`.trim() ||
+            friend.username ||
+            'Friend',
+        }));
+        setFriends(allFriends);
+
+        // Friend Activities: batch all event fetches in parallel
+        const friendEventIds = [];
+        allFriends.forEach((friend) => {
+          (friend.createdEvents || []).forEach((id) =>
+            friendEventIds.push({ id, type: 'hosting', friend })
+          );
+          (friend.attendedEvents || []).forEach((id) =>
+            friendEventIds.push({ id, type: 'attending', friend })
+          );
+        });
+        // Remove duplicate event ids
+        const uniqueEventIds = [...new Set(friendEventIds.map((e) => e.id))];
+        // Fetch all events in parallel
+        const eventSnaps = await Promise.all(
+          uniqueEventIds.map((id) => getDoc(doc(db, 'events', id)))
+        );
+        // Map eventId to event data
+        const eventMap = {};
+        eventSnaps.forEach((snap, i) => {
+          if (snap.exists()) {
+            eventMap[uniqueEventIds[i]] = { id: snap.id, ...snap.data() };
           }
-          setFriends(allFriends);
-
-          let friendFeed = [];
-          for (const friend of allFriends) {
-            const createdEvents = friend.createdEvents || [];
-            const attendedEvents = friend.attendedEvents || [];
-
-            const fetchAndPushEvent = async (id, type) => {
-              const eventSnap = await getDoc(doc(db, 'events', id));
-              if (eventSnap.exists()) {
-                const data = eventSnap.data();
-                if (data.date?.toDate() > now) {
-                  const [enhanced] = await enhanceWithHostData([
-                    { id: eventSnap.id, ...data },
-                  ]);
-                  friendFeed.push({
-                    type,
-                    friend,
-                    event: enhanced,
-                    date: data.date?.toDate(),
-                  });
-                }
-              }
-            };
-
-            for (const id of createdEvents) {
-              await fetchAndPushEvent(id, 'hosting');
-            }
-            for (const id of attendedEvents) {
-              await fetchAndPushEvent(id, 'attending');
-            }
-          }
-
-          friendFeed.sort((a, b) => a.date - b.date);
-          setFriendActivities(friendFeed);
-        }
+        });
+        // Filter only upcoming events and enhance
+        const validFriendEvents = friendEventIds
+          .map(({ id, type, friend }) => {
+            const event = eventMap[id];
+            if (!event || !event.date?.toDate || event.date.toDate() <= now)
+              return null;
+            return { type, friend, event, date: event.date.toDate() };
+          })
+          .filter(Boolean);
+        // Enhance all friend events with host data in one batch
+        const enhancedFriendEvents = await enhanceWithHostData(
+          validFriendEvents.map((e) => e.event)
+        );
+        // Merge back enhanced data
+        const friendFeed = validFriendEvents.map((item, idx) => ({
+          ...item,
+          event: enhancedFriendEvents[idx],
+        }));
+        friendFeed.sort((a, b) => a.date - b.date);
+        setFriendActivities(friendFeed);
       } catch (err) {
         console.error('Error loading MyCircle data:', err);
       } finally {
         setLoading(false);
       }
     };
-
     fetchData();
   }, [user?.uid, user?.following]);
 
@@ -257,9 +268,9 @@ export default function MyCircle({ navigation }) {
         </View>
 
         {/* Upcoming Events */}
-        {(hostingEvents.length > 0 || attendingEvents.length > 0) && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📅 Your Upcoming Events</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📅 Your Upcoming Events</Text>
+          {hostingEvents.length > 0 || attendingEvents.length > 0 ? (
             <FlatList
               horizontal
               data={[...hostingEvents, ...attendingEvents]}
@@ -267,8 +278,12 @@ export default function MyCircle({ navigation }) {
               keyExtractor={(item) => item.id}
               showsHorizontalScrollIndicator={false}
             />
-          </View>
-        )}
+          ) : (
+            <Text style={styles.emptyState}>
+              Attend or host meetups to see them here.
+            </Text>
+          )}
+        </View>
 
         {/* Friend Activities */}
         <View style={styles.section}>
@@ -282,20 +297,20 @@ export default function MyCircle({ navigation }) {
             />
           ) : (
             <Text style={styles.emptyState}>
-              No upcoming friend activities.
+              Add friends to see what they're up to.
             </Text>
           )}
         </View>
 
         {/* Friends Quick Scroll */}
-        {friends.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.friendsHeader}>
-              <Text style={styles.sectionTitle}>Friends</Text>
-              <TouchableOpacity>
-                <Text style={styles.seeAll}>+ See All</Text>
-              </TouchableOpacity>
-            </View>
+        <View style={styles.section}>
+          <View style={styles.friendsHeader}>
+            <Text style={styles.sectionTitle}>Friends</Text>
+            <TouchableOpacity>
+              <Text style={styles.seeAll}>+ See All</Text>
+            </TouchableOpacity>
+          </View>
+          {friends.length > 0 ? (
             <FlatList
               horizontal
               data={friends}
@@ -314,12 +329,19 @@ export default function MyCircle({ navigation }) {
                     }}
                     style={styles.friendQuickAvatar}
                   />
+                  <Text style={styles.friendNameText}>
+                    {item.firstName || 'Friend'}
+                  </Text>
                 </TouchableOpacity>
               )}
               showsHorizontalScrollIndicator={false}
             />
-          </View>
-        )}
+          ) : (
+            <Text style={styles.emptyState}>
+              Make connections to see your friends here.
+            </Text>
+          )}
+        </View>
       </ScrollView>
 
       {selectedEvent && (
@@ -461,5 +483,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 2,
     borderColor: '#4da6ff',
+  },
+  friendNameText: {
+    marginTop: 4,
+    textAlign: 'center',
+    color: '#222',
+    fontWeight: '500',
   },
 });

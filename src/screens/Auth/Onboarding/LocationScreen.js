@@ -1,103 +1,74 @@
-// src/screens/Auth/Onboarding/LocationScreen.js
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  Button,
-  StyleSheet,
-  ActivityIndicator,
-  TouchableOpacity,
-} from 'react-native';
+// Description: Onboarding screen to request location permission and save user location to Firestore
+import React, { useState } from 'react';
+import { View, Text, Button, ActivityIndicator, Alert } from 'react-native';
 import * as Location from 'expo-location';
-import { useNavigation } from '@react-navigation/native';
-import { resetRoot } from '../../../navigation/RootNavigation';
-import { useAuth } from '../../../context/AuthContext';
+import { useUserStore } from '../../../store/userStore';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 
-export default function LocationScreen() {
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const navigation = useNavigation();
+export default function LocationScreen({ navigation }) {
+  const [loading, setLoading] = useState(false);
+  const user = useUserStore((state) => state.user);
 
-  useEffect(() => {
-    if (user.location?.latitude != null && user.location?.longitude != null) {
-      // Navigate to MainTabs to include bottom tab navigation
-      resetRoot([{ name: 'MainTabs' }]);
-      return;
-    }
-    (async () => {
-      console.log('Requesting location permission...');
+  const handleGetLocation = async () => {
+    setLoading(true);
+    try {
+      // Request location permission
       let { status } = await Location.requestForegroundPermissionsAsync();
-      console.log('Permission status:', status);
       if (status !== 'granted') {
-        setError('Location permission denied');
+        Alert.alert(
+          'Permission Denied',
+          'Location permission is required to continue.'
+        );
         setLoading(false);
         return;
       }
-      console.log('Getting current position...');
-      try {
-        const { coords } = await Location.getCurrentPositionAsync({});
-        await updateDoc(doc(db, 'users', user.uid), {
-          location: {
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-          },
-        });
-        setLoading(false);
-        navigation.replace('InterestsScreen'); // Navigate to InterestsScreen
-      } catch (error) {
-        console.error('Error getting location:', error);
-        setError('Error getting location');
-        setLoading(false);
-      }
-    })();
-  }, []);
+      // Get current location
+      let loc = await Location.getCurrentPositionAsync({});
+      const coords = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      };
+      // Save to Firestore
+      await updateDoc(doc(db, 'users', user.uid), {
+        location: coords,
+      });
+      // Update Zustand user state
+      useUserStore.getState().setUser({ ...user, location: coords });
+      // Navigate to next onboarding screen
+      navigation.replace('InterestsScreen');
+    } catch (err) {
+      Alert.alert('Location Error', err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  if (loading) return <ActivityIndicator style={{ flex: 1 }} />;
   return (
-    <View style={styles.container}>
-      {/* Go Back Button */}
-      <TouchableOpacity
-        onPress={() => navigation.goBack()}
-        style={styles.goBackButton}
-      >
-        <Text style={styles.goBackText}>Go Back</Text>
-      </TouchableOpacity>
-
+    <View
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
+      }}
+    >
+      <Text style={{ fontSize: 22, fontWeight: 'bold', marginBottom: 16 }}>
+        Share Your Location
+      </Text>
+      <Text style={{ fontSize: 16, color: '#555', marginBottom: 32 }}>
+        To help you discover local events and friends, we need your location.
+        Your data is private and only used for Social Circle features.
+      </Text>
       {loading ? (
-        <ActivityIndicator style={{ flex: 1 }} />
+        <ActivityIndicator size='large' color='#ff6b6b' />
       ) : (
-        <Text>{error || 'Unable to get location'}</Text>
+        <Button
+          title='Share My Location'
+          onPress={handleGetLocation}
+          color='#ff6b6b'
+        />
       )}
-      <Button
-        title='Try Again'
-        onPress={() => {
-          setError(null);
-          setLoading(true);
-        }}
-      />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  goBackButton: {
-    marginBottom: 16,
-    padding: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-  },
-  goBackText: {
-    color: '#007AFF',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-});

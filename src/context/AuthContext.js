@@ -18,7 +18,9 @@ export function AuthProvider({ children }) {
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       // ✅ Stop any previous Firestore listener before attaching a new one
       if (unsubscribeDoc) {
-        unsubscribeDoc();
+        try {
+          unsubscribeDoc();
+        } catch {}
         unsubscribeDoc = null;
       }
 
@@ -42,17 +44,35 @@ export function AuthProvider({ children }) {
           setLoading(false);
         },
         (err) => {
+          if (err?.code === 'permission-denied') {
+            setUser({ uid: firebaseUser.uid, email: firebaseUser.email });
+            setLoading(false);
+            try {
+              unsubscribeDoc && unsubscribeDoc();
+            } catch {}
+            return;
+          }
           console.error('Failed to read user profile', err);
           setUser({ uid: firebaseUser.uid, email: firebaseUser.email });
           setLoading(false);
         }
       );
+
+      // Track globally so logout can proactively stop it
+      try {
+        if (!global.unsubscribeAllListeners)
+          global.unsubscribeAllListeners = [];
+        global.unsubscribeAllListeners.push(unsubscribeDoc);
+      } catch {}
     });
 
     // ✅ Cleanup when the component unmounts
     return () => {
       unsubscribeAuth();
-      if (unsubscribeDoc) unsubscribeDoc();
+      if (unsubscribeDoc)
+        try {
+          unsubscribeDoc();
+        } catch {}
     };
   }, []);
 

@@ -23,8 +23,9 @@ import {
   query,
   where,
   deleteDoc,
+  addDoc,
 } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -83,10 +84,19 @@ export const updateEventCount = async (uid) => {
       ? userData.attendedEvents.length
       : userData.attendedEvents || 0;
 
-    // Update the eventCount field
-    await updateDoc(userDoc, {
-      eventCount: createdEvents + attendedEvents,
-    });
+    // Normalize deviceToken for rules compliance on update
+    const currentToken = userData.deviceToken;
+    const safeToken =
+      typeof currentToken === 'string' &&
+      /^ExponentPushToken/.test(currentToken)
+        ? currentToken
+        : null;
+
+    // Update the eventCount field (and deviceToken if needed) to satisfy rules
+    const payload = { eventCount: createdEvents + attendedEvents };
+    if (currentToken !== safeToken) payload.deviceToken = safeToken;
+
+    await updateDoc(userDoc, payload);
   }
 };
 
@@ -227,22 +237,60 @@ export const updateUserRating = async (uid, raterUid, rating) => {
   }
 };
 
-// Delete an event (post)
+// Delete an event (post) - call server-side callable to perform soft-delete with proper permissions
 export const deleteEvent = async (eventId, userId) => {
+  // Guard: ensure caller is signed in so callable receives auth context
+  if (!auth.currentUser) {
+    const err = new Error(
+      'User not authenticated. Please sign in and try again.'
+    );
+    err.code = 'client/unauthenticated';
+    throw err;
+  }
+
   try {
-    // Remove the event document
-    await deleteDoc(doc(db, 'events', eventId));
-
-    // Remove the event reference from the user's createdEvents array
-    await updateDoc(doc(db, 'users', userId), {
-      createdEvents: arrayRemove(eventId),
-    });
-
-    // Optionally: Decrement the user's eventCount
-    await updateEventCount(userId);
+    // Use regional functions instance to match deployment region (us-central1)
+    const functionsRegional = getFunctions(app, 'us-central1');
+    const fn = httpsCallable(functionsRegional, 'deleteEvent');
+    const res = await fn({ eventId });
+    if (res && res.data) return res.data;
+    return { ok: true };
   } catch (error) {
-    console.error('Error deleting event:', error);
-    throw error;
+    console.error(
+      'Callable deleteEvent failed, falling back to client update if allowed:',
+      error.message || error
+    );
+
+    // If the error is explicitly unauthenticated, bubble a clearer error
+    if (
+      error.code === 'functions/unauthenticated' ||
+      error.message?.toLowerCase?.().includes('unauthenticated')
+    ) {
+      const e = new Error(
+        'Delete failed: not authenticated. Please re-login and try again.'
+      );
+      e.code = 'client/unauthenticated';
+      throw e;
+    }
+
+    // Try legacy client-side soft-delete as fallback (may be rejected by rules)
+    try {
+      const eventRef = doc(db, 'events', eventId);
+      await updateDoc(eventRef, {
+        isDeleted: true,
+        deletedAt: new Date(),
+      });
+      if (userId) {
+        await updateDoc(doc(db, 'users', userId), {
+          createdEvents: arrayRemove(eventId),
+        });
+      }
+      await updateEventCount(userId).catch(() => {});
+      return { ok: true, fallback: true };
+    } catch (err) {
+      console.error('Fallback client delete failed:', err.message || err);
+      throw err;
+    }
   }
 };
 
@@ -288,15 +336,12 @@ export async function getUserEventsByIds(eventIds) {
   }
   let allResults = [];
   for (const chunk of chunks) {
-    const q = query(
-      collection(db, 'events'),
-      where('__name__', 'in', chunk),
-      where('isDeleted', '!=', true)
-    );
+    const q = query(collection(db, 'events'), where('__name__', 'in', chunk));
     const snapshot = await getDocs(q);
     allResults = allResults.concat(
       snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
     );
   }
-  return allResults;
+  // Exclude soft-deleted events client-side to avoid requiring a composite index
+  return allResults.filter((e) => e.isDeleted !== true);
 }

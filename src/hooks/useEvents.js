@@ -3,7 +3,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
   onSnapshot,
   Timestamp,
 } from 'firebase/firestore';
@@ -13,21 +12,19 @@ export function useEvents(interests = [], rollingDays = 7) {
   const [events, setEvents] = useState([]);
 
   useEffect(() => {
-    const now = Timestamp.now();
-    const past = Timestamp.fromMillis(
-      now.toMillis() - rollingDays * 24 * 60 * 60 * 1000
-    );
     const eventsRef = collection(db, 'events');
 
     // Fetch all active events, no category filtering in Firestore
     const q = query(eventsRef, where('status', '==', 'active'));
 
-    const unsub = onSnapshot(
+    let unsub = onSnapshot(
       q,
       (snapshot) => {
         const now = Date.now();
         const docs = snapshot.docs
           .map((d) => ({ id: d.id, ...d.data() }))
+          // --- Exclude soft-deleted events ---
+          .filter((event) => event.isDeleted !== true)
           // --- Remove expired events (date + 1 hour) ---
           .filter((event) => {
             let eventTime = null;
@@ -48,11 +45,29 @@ export function useEvents(interests = [], rollingDays = 7) {
         setEvents(docs); // Always set the filtered list of events
       },
       (error) => {
+        if (error?.code === 'permission-denied') {
+          // Likely signed-out or rules tightened; clear results quietly
+          setEvents([]);
+          try {
+            unsub && unsub();
+          } catch {}
+          return;
+        }
         console.error('Firestore onSnapshot error:', error);
       }
     );
 
-    return () => unsub && unsub();
+    // Track globally so logout can proactively stop it
+    try {
+      if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
+      global.unsubscribeAllListeners.push(unsub);
+    } catch {}
+
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+    };
   }, [rollingDays]);
 
   return events;

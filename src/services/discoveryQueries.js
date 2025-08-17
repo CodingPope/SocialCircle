@@ -3,9 +3,6 @@ import {
   getDocs,
   query,
   where,
-  orderBy,
-  limit,
-  startAfter,
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -44,6 +41,8 @@ export async function fetchHotEvents(
           where('geohash', '<=', b[1]),
           where('interest', 'in', interestChunk),
           where('status', '==', 'active'),
+          // Server-side: exclude soft-deleted events when possible
+          where('isDeleted', '==', false),
           where('date', '>=', Timestamp.now())
         );
         promises.push(getDocs(q));
@@ -57,6 +56,14 @@ export async function fetchHotEvents(
       if (result.status === 'fulfilled') {
         for (const doc of result.value.docs) {
           const data = doc.data();
+          // Defensive: always skip soft-deleted docs
+          if (data?.isDeleted === true) continue;
+          if (
+            !data.location ||
+            data.location.latitude == null ||
+            data.location.longitude == null
+          )
+            continue;
           const loc = [data.location.latitude, data.location.longitude];
           const distance = distanceBetween(center, loc) * 1000;
           if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
@@ -102,6 +109,7 @@ export async function fetchNewEvents(
           where('geohash', '<=', b[1]),
           where('interest', '==', selectedInterest),
           where('status', '==', 'active'),
+          where('isDeleted', '==', false),
           where('createdAt', '>=', twentyFourHoursAgo)
         )
       )
@@ -113,6 +121,13 @@ export async function fetchNewEvents(
     for (const snap of snapshots) {
       for (const doc of snap.docs) {
         const data = doc.data();
+        if (data?.isDeleted === true) continue;
+        if (
+          !data.location ||
+          data.location.latitude == null ||
+          data.location.longitude == null
+        )
+          continue;
         const loc = [data.location.latitude, data.location.longitude];
         const distance = distanceBetween(center, loc) * 1000;
         if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
@@ -122,7 +137,7 @@ export async function fetchNewEvents(
     }
 
     const results = Array.from(matchingDocs.values()).sort(
-      (a, b) => b.createdAt.seconds - a.createdAt.seconds
+      (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
     );
     return { events: results.slice(0, pageSize), lastDoc: null };
   } catch (err) {
@@ -160,6 +175,7 @@ export async function fetchThisWeekEvents(
           where('geohash', '<=', b[1]),
           where('interest', '==', selectedInterest),
           where('status', '==', 'active'),
+          where('isDeleted', '==', false),
           where('date', '>=', now),
           where('date', '<=', weekFromNow)
         )
@@ -172,6 +188,13 @@ export async function fetchThisWeekEvents(
     for (const snap of snapshots) {
       for (const doc of snap.docs) {
         const data = doc.data();
+        if (data?.isDeleted === true) continue;
+        if (
+          !data.location ||
+          data.location.latitude == null ||
+          data.location.longitude == null
+        )
+          continue;
         const loc = [data.location.latitude, data.location.longitude];
         const distance = distanceBetween(center, loc) * 1000;
         if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
@@ -181,7 +204,7 @@ export async function fetchThisWeekEvents(
     }
 
     const results = Array.from(matchingDocs.values()).sort(
-      (a, b) => a.date.seconds - b.date.seconds
+      (a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0)
     );
     return { events: results.slice(0, pageSize), lastDoc: null };
   } catch (err) {

@@ -1,39 +1,82 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
-  TextInput,
   Text,
-  ActivityIndicator,
+  TextInput,
   StyleSheet,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   TouchableOpacity,
+  Platform,
+  Animated,
 } from 'react-native';
-import DateTimePickerModal from 'react-native-modal-datetime-picker'; // ✅ Import DateTimePickerModal
+import AnimatedGradientBackground from '../../../components/ui/AnimatedGradientBackground';
+import { Ionicons } from '@expo/vector-icons';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Timestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
-import { useAuth } from '../../../context/AuthContext';
+import { useUserStore } from '../../../store/userStore';
 
 export default function NameDobScreen({ navigation }) {
-  const { user } = useAuth();
+  const user = useUserStore((state) => state.user);
+  // State for name fields
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  // State for name validation errors
+  const [nameError, setNameError] = useState('');
   const [dob, setDob] = useState(new Date());
-  const [isDatePickerVisible, setIsDatePickerVisible] = useState(false); // Toggle for date picker
-  const [loading, setLoading] = useState(false);
+  const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
   const showDatePicker = () => setIsDatePickerVisible(true);
   const hideDatePicker = () => setIsDatePickerVisible(false);
 
-  const handleConfirmDate = (selectedDate) => {
-    setDob(selectedDate);
+  const handleConfirmDate = (date) => {
+    setDob(date);
     hideDatePicker();
   };
 
+  useEffect(() => {
+    // Pulse animation for 2 seconds
+    Animated.sequence([
+      Animated.timing(scaleAnim, {
+        toValue: 1.05,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  // Description: Validates name fields for length and allowed characters
+  const validateNames = () => {
+    const nameRegex = /^[A-Za-z\-' ]{2,30}$/;
+    if (!nameRegex.test(firstName)) {
+      setNameError(
+        'First name must be 2-30 letters, and only letters, hyphens, apostrophes, or spaces.'
+      );
+      return false;
+    }
+    if (!nameRegex.test(lastName)) {
+      setNameError(
+        'Last name must be 2-30 letters, and only letters, hyphens, apostrophes, or spaces.'
+      );
+      return false;
+    }
+    setNameError('');
+    return true;
+  };
+
+  // Description: Handles Next button press, validates names and age
   const onNext = async () => {
     if (!user) return;
+    if (!validateNames()) return;
 
     const today = new Date();
     const age = today.getFullYear() - dob.getFullYear();
@@ -56,7 +99,7 @@ export default function NameDobScreen({ navigation }) {
         lastName,
         dob: Timestamp.fromDate(dob),
       });
-      navigation.replace('Sex'); // Ensure this matches the route name in AppNavigator
+      navigation.reset({ index: 0, routes: [{ name: 'Sex' }] });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -66,124 +109,139 @@ export default function NameDobScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={100}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Go Back Button */}
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.goBackButton}
-        >
-          <Text style={styles.goBackText}>Go Back</Text>
-        </TouchableOpacity>
+      <AnimatedGradientBackground style={styles.gradientContainer}>
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <Text style={styles.header}>Tell us about you</Text>
+          {/* Description: First name input with maxLength and validation */}
+          <TextInput
+            style={styles.input}
+            placeholder='First name'
+            placeholderTextColor='#555'
+            value={firstName}
+            onChangeText={(text) => {
+              setFirstName(text);
+              if (nameError) validateNames();
+            }}
+            maxLength={30}
+            autoCapitalize='words'
+            textContentType='givenName'
+          />
+          {/* Description: Last name input with maxLength and validation */}
+          <TextInput
+            style={styles.input}
+            placeholder='Last name'
+            placeholderTextColor='#555'
+            value={lastName}
+            onChangeText={(text) => {
+              setLastName(text);
+              if (nameError) validateNames();
+            }}
+            maxLength={30}
+            autoCapitalize='words'
+            textContentType='familyName'
+          />
 
-        <Text style={styles.title}>Tell us about you</Text>
+          <TouchableOpacity style={styles.input} onPress={showDatePicker}>
+            <View style={styles.dateRow}>
+              <Ionicons
+                name='calendar-outline'
+                size={20}
+                color='#555'
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.dateText}>{dob.toDateString()}</Text>
+            </View>
+          </TouchableOpacity>
 
-        <TextInput
-          style={styles.input}
-          placeholder='First name'
-          value={firstName}
-          onChangeText={setFirstName}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder='Last name'
-          value={lastName}
-          onChangeText={setLastName}
-        />
+          <DateTimePickerModal
+            isVisible={isDatePickerVisible}
+            mode='date'
+            date={dob}
+            maximumDate={new Date()}
+            minimumDate={
+              new Date(new Date().setFullYear(new Date().getFullYear() - 100))
+            }
+            onConfirm={handleConfirmDate}
+            onCancel={hideDatePicker}
+            themeVariant='light'
+            textColor='#000'
+          />
 
-        <Text style={styles.label}>Date of Birth</Text>
-        <TouchableOpacity
-          style={styles.datePickerButton}
-          onPress={showDatePicker}
-        >
-          <Text style={styles.datePickerText}>{dob.toDateString()}</Text>
-        </TouchableOpacity>
+          {/* Description: Show name validation error */}
+          {nameError ? <Text style={styles.error}>{nameError}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        {/* ✅ Replace with DateTimePickerModal */}
-        <DateTimePickerModal
-          isVisible={isDatePickerVisible}
-          mode='date'
-          date={dob}
-          maximumDate={new Date()}
-          minimumDate={
-            new Date(new Date().setFullYear(new Date().getFullYear() - 100))
-          }
-          onConfirm={handleConfirmDate}
-          onCancel={hideDatePicker}
-          themeVariant='light' // Explicitly set theme to light
-          textColor='#000' // Ensure text is visible
-        />
-
-        {loading ? (
-          <ActivityIndicator />
-        ) : (
-          <Text style={styles.nextButton} onPress={onNext}>
-            Next
-          </Text>
-        )}
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
+          <Animated.View
+            style={{ transform: [{ scale: scaleAnim }], width: '100%' }}
+          >
+            <TouchableOpacity
+              style={styles.nextButton}
+              onPress={onNext}
+              disabled={loading}
+            >
+              <Text style={styles.nextText}>
+                {loading ? 'Loading...' : 'Next'}
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </ScrollView>
+      </AnimatedGradientBackground>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  gradientContainer: {
+    flex: 1,
+  },
   scrollContainer: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
   },
-  title: { fontSize: 24, textAlign: 'center', marginBottom: 16 },
+
+  header: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1E1E2F',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+
   input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    marginVertical: 8,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#f9f9f9',
-  },
-  label: {
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    borderRadius: 16,
+    padding: 16,
     fontSize: 16,
-    marginVertical: 8,
-    color: '#333',
-  },
-  datePickerButton: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#f9f9f9',
     marginBottom: 16,
   },
-  datePickerText: {
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dateText: {
     fontSize: 16,
     color: '#333',
-    textAlign: 'center',
   },
   nextButton: {
-    color: 'white',
-    fontSize: 18,
-    marginVertical: 12,
-    textAlign: 'center',
-    padding: 12,
-    borderRadius: 8,
     backgroundColor: '#007AFF',
-    overflow: 'hidden',
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
   },
-  error: { color: 'red', textAlign: 'center', marginTop: 10 },
-  goBackButton: {
-    marginBottom: 16,
-    padding: 10,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
+  nextText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
   },
-  goBackText: {
-    color: '#007AFF',
-    fontSize: 16,
+  error: {
+    color: 'red',
+    marginBottom: 12,
     textAlign: 'center',
   },
 });

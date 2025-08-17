@@ -10,35 +10,98 @@ import {
 } from 'react-native';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import categoriesData from '../utils/categoriesData.json';
 
 const InterestSelector = ({
-  selectedInterests,
-  toggleInterest,
-  searchTerm,
-  setSearchTerm,
+  selectedInterests = [],
+  toggleInterest = () => {},
+  searchTerm, // optional controlled prop
+  setSearchTerm, // optional controlled setter
 }) => {
+  // Local fallback search state when parent does not control search
+  const [localSearch, setLocalSearch] = useState('');
+  const effectiveSearch =
+    typeof searchTerm === 'string' ? searchTerm : localSearch;
+  const setEffectiveSearch =
+    typeof setSearchTerm === 'function' ? setSearchTerm : setLocalSearch;
+
   const [activities, setActivities] = useState([]);
   const [filteredActivities, setFilteredActivities] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchActivities = async () => {
+      setLoading(true);
       try {
         const allActivities = [];
-        const categoriesSnapshot = await getDocs(collection(db, 'categories'));
-        for (const categoryDoc of categoriesSnapshot.docs) {
-          const categoryData = categoryDoc.data();
-          categoryData.interests.forEach((interest) => {
-            allActivities.push(interest.name);
-          });
+        let usedSource = 'unknown';
+
+        // Try Firestore first
+        try {
+          const categoriesSnapshot = await getDocs(
+            collection(db, 'categories')
+          );
+          if (
+            categoriesSnapshot &&
+            categoriesSnapshot.docs &&
+            categoriesSnapshot.docs.length
+          ) {
+            usedSource = 'firestore';
+            for (const categoryDoc of categoriesSnapshot.docs) {
+              const categoryData = categoryDoc.data() || {};
+              const interests = categoryData.interests || [];
+              if (Array.isArray(interests)) {
+                interests.forEach((interest) => {
+                  // interest may be an object or a string
+                  if (!interest) return;
+                  if (typeof interest === 'string')
+                    allActivities.push(interest);
+                  else if (typeof interest.name === 'string')
+                    allActivities.push(interest.name);
+                });
+              }
+            }
+          } else {
+            // No docs in Firestore -> fallback to local JSON
+            throw new Error('No categories in Firestore');
+          }
+        } catch (err) {
+          // Fallback: use bundled categoriesData.json
+          try {
+            if (Array.isArray(categoriesData)) {
+              usedSource = 'bundled_json';
+              categoriesData.forEach((cat) => {
+                const interests = cat?.interests || [];
+                if (Array.isArray(interests)) {
+                  interests.forEach((interest) => {
+                    if (!interest) return;
+                    if (typeof interest === 'string')
+                      allActivities.push(interest);
+                    else if (typeof interest.name === 'string')
+                      allActivities.push(interest.name);
+                  });
+                }
+              });
+            }
+          } catch (fallbackErr) {
+            console.error('Fallback categories parse error', fallbackErr);
+          }
         }
-        const sorted = [...new Set(allActivities)].sort((a, b) =>
-          a.localeCompare(b, 'en', { sensitivity: 'base' })
-        );
+
+        const sorted = [
+          ...new Set(
+            allActivities.map((a) => (a || '').trim()).filter(Boolean)
+          ),
+        ].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
         setActivities(sorted);
         setFilteredActivities(sorted);
+        console.debug(
+          `[InterestSelector] loaded ${sorted.length} activities (source=${usedSource})`
+        );
       } catch (error) {
         console.error('Error fetching activities:', error);
+        setActivities([]);
+        setFilteredActivities([]);
       } finally {
         setLoading(false);
       }
@@ -48,13 +111,29 @@ const InterestSelector = ({
 
   useEffect(() => {
     const delay = setTimeout(() => {
+      const term = (effectiveSearch || '').toLowerCase();
       const filtered = activities.filter((activity) =>
-        activity.toLowerCase().includes(searchTerm.toLowerCase())
+        activity.toLowerCase().includes(term)
       );
-      setFilteredActivities(filtered);
-    }, 300);
+
+      // Reorder: selected interests should appear first (case-insensitive)
+      const selectedSet = new Set(
+        (selectedInterests || [])
+          .map((s) => (s || '').toString().trim().toLowerCase())
+          .filter(Boolean)
+      );
+      const reordered = filtered.slice().sort((a, b) => {
+        const aSel = selectedSet.has((a || '').toLowerCase());
+        const bSel = selectedSet.has((b || '').toLowerCase());
+        if (aSel === bSel)
+          return a.localeCompare(b, 'en', { sensitivity: 'base' });
+        return aSel ? -1 : 1;
+      });
+
+      setFilteredActivities(reordered);
+    }, 250);
     return () => clearTimeout(delay);
-  }, [searchTerm, activities]);
+  }, [effectiveSearch, activities, selectedInterests]);
 
   return (
     <View>
@@ -62,14 +141,14 @@ const InterestSelector = ({
         <TextInput
           style={styles.searchBox}
           placeholder='Search interests...'
-          value={searchTerm}
-          onChangeText={setSearchTerm}
-          placeholderTextColor='grey' // Updated to a darker color
+          value={effectiveSearch}
+          onChangeText={setEffectiveSearch}
+          placeholderTextColor='grey'
         />
-        {searchTerm.length > 0 && (
+        {effectiveSearch.length > 0 && (
           <TouchableOpacity
             style={styles.clearButton}
-            onPress={() => setSearchTerm('')}
+            onPress={() => setEffectiveSearch('')}
           >
             <Text style={styles.clearButtonText}>X</Text>
           </TouchableOpacity>

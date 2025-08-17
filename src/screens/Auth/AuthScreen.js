@@ -27,12 +27,35 @@ import Animated, {
   interpolateColor,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useUserStore } from '../../store/userStore';
+import { registerForPushTokenAsync } from '../../lib/push';
+import {
+  updateDoc,
+  doc as fsDoc,
+  serverTimestamp as fsServerTimestamp,
+} from 'firebase/firestore';
 
 export default function AuthScreen({ navigation }) {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const setUser = useUserStore((state) => state.setUser);
+  const setProfileComplete = useUserStore((state) => state.setProfileComplete);
+
+  const isProfileComplete = (userData) => {
+    return (
+      userData &&
+      userData.firstName &&
+      userData.lastName &&
+      userData.dob &&
+      userData.sex &&
+      Array.isArray(userData.interests) &&
+      userData.interests.length > 0 &&
+      userData.location?.latitude != null &&
+      userData.location?.longitude != null
+    );
+  };
 
   // Google Auth (disabled for now but kept in)
   const [googleRequest, googleResponse, googlePromptAsync] =
@@ -41,23 +64,41 @@ export default function AuthScreen({ navigation }) {
     });
 
   useEffect(() => {
+    // Description: Handle Google sign-in and create user with full default schema if new
     if (googleResponse?.type === 'success') {
       const { id_token } = googleResponse.params;
       const credential = GoogleAuthProvider.credential(id_token);
       signInWithCredential(auth, credential)
-        .then((result) => {
+        .then(async (result) => {
           if (result.additionalUserInfo?.isNewUser) {
-            setDoc(doc(db, 'users', result.user.uid), {
+            // Use createUser utility for full schema
+            const { createUser } = require('../../services/userService');
+            await createUser(result.user.uid, {
               email: result.user.email,
-              createdAt: serverTimestamp(),
-              friends: [],
-              interests: [],
             });
           }
         })
         .catch((err) => Alert.alert('Google Sign Up Error', err.message));
     }
   }, [googleResponse]);
+
+  async function initPushForUser(uid) {
+    try {
+      const token = await registerForPushTokenAsync();
+      if (!token) return; // user denied / error
+      await updateDoc(fsDoc(db, 'users', uid), {
+        deviceToken: token,
+        pushOptIn: true,
+        updatedAt: fsServerTimestamp(),
+      });
+      // keep Zustand mirror in sync
+      const setUserLocal = useUserStore.getState().setUser;
+      const userLocal = useUserStore.getState().user || {};
+      setUserLocal({ ...userLocal, deviceToken: token, pushOptIn: true });
+    } catch (e) {
+      console.warn('[push] init token failed:', e?.message || e);
+    }
+  }
 
   const handleSubmit = async () => {
     if (!email || !password) {
@@ -67,25 +108,223 @@ export default function AuthScreen({ navigation }) {
     setLoading(true);
     try {
       if (mode === 'login') {
+        // ...existing login logic...
         const result = await signInWithEmailAndPassword(auth, email, password);
         const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-        if (userDoc.exists()) {
-          navigation.replace('Map'); // Navigate to MapScreen for existing users
-        } else {
-          navigation.replace('NameDobScreen'); // Navigate to onboarding for new users
+        const userData = userDoc.data();
+        setUser({ uid: result.user.uid, ...userData });
+        const complete = isProfileComplete(userData);
+        setProfileComplete(complete);
+        await initPushForUser(result.user.uid);
+      } else if (mode === 'signup') {
+        console.log('[AuthScreen] Signup flow started for:', email);
+        // --- Best Practice: Auth Reactivation Flow ---
+        // 1. Try to sign in with the email/password
+        try {
+          const result = await signInWithEmailAndPassword(
+            auth,
+            email,
+            password
+          );
+          // If sign-in succeeds, user exists and is active
+          console.log(
+            '[AuthScreen] User exists and is active:',
+            result.user.uid
+          );
+          Alert.alert(
+            'Account Exists',
+            'An account with this email already exists. Please log in.'
+          );
+          setLoading(false);
+          return;
+        } catch (signInErr) {
+          console.log(
+            '[AuthScreen] signInWithEmailAndPassword error:',
+            signInErr.code,
+            signInErr.message
+          );
+          if (signInErr.code === 'auth/user-disabled') {
+            // User exists but is disabled (soft-deleted)
+            const {
+              findSoftDeletedUserByEmail,
+              reactivateUser,
+            } = require('../../services/userService');
+            const softDeleted = await findSoftDeletedUserByEmail(email);
+            console.log('[AuthScreen] Soft-deleted user found:', softDeleted);
+            if (softDeleted) {
+              Alert.alert(
+                'Reactivate Account',
+                'An account with this email was previously deleted. Would you like to reactivate it and restore your previous data?',
+                [
+                  {
+                    text: 'Cancel',
+                    style: 'cancel',
+                    onPress: () => setLoading(false),
+                  },
+                  {
+                    text: 'Reactivate',
+                    style: 'default',
+                    onPress: async () => {
+                      try {
+                        console.log(
+                          '[AuthScreen] Reactivating user:',
+                          softDeleted.id
+                        );
+                        await reactivateUser(softDeleted.id, {});
+                        // Poll for Auth user to be enabled
+                        let enabled = false;
+                        let attempts = 0;
+                        const maxAttempts = 8; // ~8 seconds
+                        while (!enabled && attempts < maxAttempts) {
+                          try {
+                            await new Promise((res) => setTimeout(res, 1000));
+                            // Try to sign in again
+                            await signInWithEmailAndPassword(
+                              auth,
+                              email,
+                              password
+                            );
+                            enabled = true;
+                          } catch (err) {
+                            if (err.code === 'auth/user-disabled') {
+                              // Still disabled, keep polling
+                              attempts++;
+                              console.log(
+                                '[AuthScreen] Waiting for Auth user to be enabled... attempt',
+                                attempts
+                              );
+                            } else {
+                              // Some other error, break and show error
+                              throw err;
+                            }
+                          }
+                        }
+                        if (enabled) {
+                          Alert.alert(
+                            'Account Reactivated',
+                            'Your account has been reactivated. Logging you in...'
+                          );
+                          // Fetch user profile and proceed
+                          const userDoc = await getDoc(
+                            doc(db, 'users', softDeleted.id)
+                          );
+                          const userData = userDoc.data();
+                          setUser({ uid: softDeleted.id, ...userData });
+                          const complete = isProfileComplete(userData);
+                          setProfileComplete(complete);
+                          await initPushForUser(softDeleted.id);
+                        } else {
+                          Alert.alert(
+                            'Reactivation Delayed',
+                            'Your account is reactivated, but login is not yet available. Please try again in a few seconds.'
+                          );
+                        }
+                        setLoading(false);
+                      } catch (e) {
+                        console.log(
+                          '[AuthScreen] Reactivation failed:',
+                          e.message
+                        );
+                        Alert.alert('Reactivation Failed', e.message);
+                        setLoading(false);
+                      }
+                    },
+                  },
+                ]
+              );
+              return;
+            }
+          } else if (signInErr.code === 'auth/user-not-found') {
+            // User does not exist, proceed with normal signup
+            console.log('[AuthScreen] No user found, proceeding with signup.');
+            const result = await createUserWithEmailAndPassword(
+              auth,
+              email,
+              password
+            );
+            const userDocRef = doc(db, 'users', result.user.uid);
+            const userDocSnap = await getDoc(userDocRef);
+            if (!userDocSnap.exists()) {
+              try {
+                console.log(
+                  '[AuthScreen] Creating Firestore user doc for:',
+                  result.user.uid
+                );
+                await setDoc(userDocRef, {
+                  email: result.user.email,
+                  createdAt: serverTimestamp(),
+                  friends: [],
+                  interests: [],
+                  firstName: '',
+                  lastName: '',
+                  dob: null,
+                  sex: '',
+                  location: { latitude: null, longitude: null },
+                  bio: '',
+                  profileImage: '',
+                  status: 'active',
+                  verified: false,
+                  attendedEvents: [],
+                  createdEvents: [],
+                  followerCount: 0,
+                  followingCount: 0,
+                  ratings: {},
+                  savedCount: 0,
+                  referralCode: '',
+                  referredBy: '',
+                  rating: 0,
+                  ratingCount: 0,
+                  eventCount: 0,
+                  followCount: 0,
+                  following: [],
+                  followingCount: 0,
+                  lastActive: serverTimestamp(),
+                  deviceToken: '',
+                  savedCount: 0,
+                  sex: '',
+                  status: 'active',
+                  isDeleted: false,
+                  deletedAt: null,
+                  // Add any other fields as needed from the image
+                });
+                const { collection } = require('firebase/firestore');
+                const profileviewsRef = collection(userDocRef, 'profileviews');
+                await setDoc(doc(profileviewsRef, 'initialSeed'), {
+                  timestamp: serverTimestamp(),
+                  viewerId: 'system',
+                });
+              } catch (err) {
+                console.log(
+                  '[AuthScreen] Error creating Firestore user doc:',
+                  err.message
+                );
+                Alert.alert(
+                  'Account Creation Error',
+                  'Could not create user profile. Please try again.'
+                );
+                setLoading(false);
+                return;
+              }
+            }
+            const userData = (await getDoc(userDocRef)).data();
+            setUser({ uid: result.user.uid, ...userData });
+            setProfileComplete(false);
+            await initPushForUser(result.user.uid);
+          } else if (signInErr.code === 'auth/wrong-password') {
+            console.log('[AuthScreen] Wrong password for existing user.');
+            Alert.alert(
+              'Account Exists',
+              'An account with this email already exists. Please log in.'
+            );
+            setLoading(false);
+            return;
+          } else {
+            console.log('[AuthScreen] Signup failed:', signInErr.message);
+            Alert.alert('Signup failed', signInErr.message);
+            setLoading(false);
+            return;
+          }
         }
-      } else {
-        const result = await createUserWithEmailAndPassword(
-          auth,
-          email,
-          password
-        );
-        await setDoc(doc(db, 'users', result.user.uid), {
-          createdAt: serverTimestamp(),
-          friends: [],
-          interests: [],
-        });
-        navigation.replace('NameDobScreen'); // Navigate to onboarding for new users
       }
     } catch (err) {
       Alert.alert(

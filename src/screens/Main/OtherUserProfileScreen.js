@@ -21,10 +21,20 @@ import {
   updateUserData,
   updateUserRating,
   db,
+  deleteEvent,
+  sendNotification,
 } from '../../firebase/config';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { useAuth } from '../../context/AuthContext';
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  doc,
+  getDoc,
+} from 'firebase/firestore';
+import { useUserStore } from '../../store/userStore';
 import PopupMenu from '../../components/PopupMenu'; // Import the PopupMenu component
+import PostCard from '../../components/PostCard'; // Import the PostCard component
 
 function mergeUniqueEvents(...eventArrays) {
   const map = new Map();
@@ -49,7 +59,9 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     attended: [],
   });
   const [loadingEvents, setLoadingEvents] = useState(true);
-  const { user: currentUser } = useAuth();
+  const [hostMap, setHostMap] = useState({}); // Map of ownerId -> user info
+  // Description: Get current user from Zustand userStore
+  const currentUser = useUserStore((state) => state.user);
   const [isFollowing, setIsFollowing] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [visibleCount, setVisibleCount] = useState(10);
@@ -70,10 +82,11 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   }, [userId, currentUser]);
 
   useEffect(() => {
-    async function fetchUserEvents() {
+    async function fetchUserEventsAndHosts() {
       setLoadingEvents(true);
       if (!userId) {
         setUserEvents({ created: [], attending: [], attended: [] });
+        setHostMap({});
         setLoadingEvents(false);
         return;
       }
@@ -94,18 +107,71 @@ export default function OtherUserProfileScreen({ route, navigation }) {
             snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
           );
         }
-        return results;
+        // Exclude soft-deleted
+        return results.filter((e) => e.isDeleted !== true);
       };
 
-      const [created, attending, attended] = await Promise.all([
+      // Fetch by IDs (legacy arrays on user doc)
+      const [createdIds, attendingIds, attendedIds] = await Promise.all([
         fetchEventsByIds(userData.createdEvents || []),
         fetchEventsByIds(userData.attendingEvents || []),
         fetchEventsByIds(userData.attendedEvents || []),
       ]);
+
+      const eventsRef = collection(db, 'events');
+      const [createdQSnap, attendingQSnap] = await Promise.all([
+        getDocs(
+          query(
+            eventsRef,
+            where('ownerId', '==', userId),
+            where('isDeleted', '==', false)
+          )
+        ),
+        getDocs(
+          query(
+            eventsRef,
+            where('attendees', 'array-contains', userId),
+            where('isDeleted', '==', false)
+          )
+        ),
+      ]);
+
+      const createdByQuery = createdQSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((e) => e.isDeleted !== true);
+      const attendingByQuery = attendingQSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((e) => e.isDeleted !== true);
+
+      // Merge uniquely
+      const created = mergeUniqueEvents(createdIds, createdByQuery);
+      const attending = mergeUniqueEvents(attendingIds, attendingByQuery);
+      const attended = mergeUniqueEvents(attendedIds);
+
       setUserEvents({ created, attending, attended });
+
+      // --- Batch fetch all unique ownerIds for host info ---
+      const allEvents = [...created, ...attending, ...attended];
+      const ownerIds = [
+        ...new Set(allEvents.map((e) => e.ownerId).filter(Boolean)),
+      ];
+      const hostMapTemp = {};
+      if (ownerIds.length) {
+        // Batch in chunks of 10 (Firestore limitation)
+        for (let i = 0; i < ownerIds.length; i += 10) {
+          const chunk = ownerIds.slice(i, i + 10);
+          const usersRef = collection(db, 'users');
+          const q = query(usersRef, where('__name__', 'in', chunk));
+          const snap = await getDocs(q);
+          snap.docs.forEach((docSnap) => {
+            hostMapTemp[docSnap.id] = docSnap.data();
+          });
+        }
+      }
+      setHostMap(hostMapTemp);
       setLoadingEvents(false);
     }
-    fetchUserEvents();
+    fetchUserEventsAndHosts();
   }, [userId]);
 
   useEffect(() => {
@@ -175,7 +241,39 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     userEvents.attending,
     userEvents.attended
   );
-  const visibleEvents = allEvents.slice(0, visibleCount);
+
+  // Helper: compute event end time; prefer endAt; fallback to date+1h
+  const getEventEndMs = (ev) => {
+    if (!ev) return null;
+    let endMs = null;
+    if (ev.endAt) {
+      if (ev.endAt.toDate) endMs = ev.endAt.toDate().getTime();
+      else if (typeof ev.endAt.seconds === 'number')
+        endMs = ev.endAt.seconds * 1000;
+    } else if (ev.date) {
+      if (ev.date.toDate) endMs = ev.date.toDate().getTime();
+      else if (typeof ev.date.seconds === 'number')
+        endMs = ev.date.seconds * 1000;
+      else if (ev.date instanceof Date) endMs = ev.date.getTime();
+      if (endMs) endMs += 60 * 60 * 1000; // assume 1h duration if only start date is present
+    }
+    return endMs;
+  };
+
+  // Filter: hide ended events unless current user was a member (host or attendee)
+  const filteredEvents = allEvents.filter((ev) => {
+    const endMs = getEventEndMs(ev);
+    if (!endMs) return true; // keep if no time info
+    const ended = Date.now() >= endMs;
+    if (!ended) return true; // future or ongoing => keep
+    const uid = currentUser?.uid;
+    const isMember =
+      (ev.ownerId && ev.ownerId === uid) ||
+      (Array.isArray(ev.attendees) && ev.attendees.includes(uid));
+    return isMember; // only keep ended events if viewer is host/attendee
+  });
+
+  const visibleEvents = filteredEvents.slice(0, visibleCount);
 
   const handleFollow = async () => {
     if (!currentUser || !user) return;
@@ -188,6 +286,22 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       });
       await updateUserData(userId, {
         followerCount: (user.followerCount || 0) + 1,
+      });
+      // Send notification to the user being followed
+      await sendNotification('friend_request', userId, {
+        fromUserId: currentUser.uid,
+        fromUserName:
+          `${currentUser.firstName || ''} ${
+            currentUser.lastName || ''
+          }`.trim() ||
+          currentUser.displayName ||
+          'Someone',
+        message: `${
+          currentUser.firstName || currentUser.displayName || 'Someone'
+        } added you as a friend! Tap to view their profile.`,
+        linkType: 'profile',
+        linkId: currentUser.uid,
+        read: false,
       });
       setIsFollowing(true);
     } catch (err) {
@@ -230,9 +344,16 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     setMenuVisible(false);
   };
 
-  const handleDeleteEvent = () => {
-    Alert.alert('Delete Event functionality coming soon.');
-    setMenuVisible(false);
+  const handleDeleteEvent = async (eventId) => {
+    try {
+      await deleteEvent(eventId, user.uid);
+      Alert.alert('Success', 'The event has been deleted.');
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      Alert.alert('Error', 'Failed to delete the event. Please try again.');
+    } finally {
+      setMenuVisible(false);
+    }
   };
 
   const handleRateUser = async (rating) => {
@@ -428,59 +549,79 @@ export default function OtherUserProfileScreen({ route, navigation }) {
           </Text>
         ) : (
           visibleEvents.map((event) => {
-            const now = new Date();
-            const isPastEvent = event.date?.seconds
-              ? new Date(event.date.seconds * 1000) < now
-              : false;
+            // Description: Always show the actual event creator's info (name, image, rating)
+            const ownerId = event.ownerId;
+            const host = ownerId && hostMap[ownerId] ? hostMap[ownerId] : null;
+            const hostName =
+              host?.displayName ||
+              host?.username ||
+              host?.name ||
+              host?.fullName ||
+              `${host?.firstName || ''} ${host?.lastName || ''}`.trim() ||
+              event.hostName ||
+              (ownerId === userId
+                ? `${user.firstName} ${user.lastName}`
+                : 'Unknown Host');
+            const hostPhoto =
+              host?.profileImage ||
+              host?.avatarURL ||
+              event.hostPhoto ||
+              (ownerId === userId ? user.profileImage || user.avatarURL : null);
+            const hostRating =
+              typeof host?.rating === 'number'
+                ? host.rating
+                : event.hostRating || (ownerId === userId ? user.rating : 0);
 
-            const role = isPastEvent
-              ? user.createdEvents?.includes(event.id)
-                ? 'Hosted'
-                : 'Attended'
-              : user.createdEvents?.includes(event.id)
-              ? 'Hosting'
-              : 'Attending';
+            const eventWithHost = {
+              ...event,
+              hostName,
+              hostPhoto,
+              hostRating,
+              ownerId,
+            };
 
-            const eventDate = event.date?.seconds
-              ? new Date(event.date.seconds * 1000).toLocaleDateString()
-              : 'Date not available';
+            // Navigation handler: allow direct navigation if invoked from RSVP success
+            const handleEventPress = (...args) => {
+              if (eventWithHost.isDeleted) return;
+              const uid = currentUser?.uid;
+              const dest = args?.[1]; // PostCard passes 'EventChatScreen' when RSVP flow succeeds
+
+              if (dest === 'EventChatScreen') {
+                // RSVP succeeded -> go to chat
+                navigation.navigate('EventChat', {
+                  eventId: eventWithHost.id,
+                  locationName:
+                    eventWithHost.locationName || event.locationName || null,
+                });
+                return;
+              }
+
+              // Simple card tap: only members can open chat
+              const isMember =
+                (eventWithHost.ownerId && eventWithHost.ownerId === uid) ||
+                (Array.isArray(event.attendees) &&
+                  event.attendees.includes(uid));
+              if (!isMember) {
+                Alert.alert(
+                  'No Access',
+                  'You must be the host or an attendee to view this chat.'
+                );
+                return;
+              }
+              navigation.navigate('EventChat', {
+                eventId: eventWithHost.id,
+                locationName:
+                  eventWithHost.locationName || event.locationName || null,
+              });
+            };
 
             return (
-              <View key={event.id} style={styles.eventCard}>
-                {event.imageUrl && (
-                  <Image
-                    source={{ uri: event.imageUrl }}
-                    style={styles.eventImage}
-                  />
-                )}
-                <View style={styles.eventInfo}>
-                  <Text style={styles.eventTitle}>{event.title}</Text>
-                  <View style={styles.pillRow}>
-                    <View style={styles.pill}>
-                      <Text style={styles.pillText}>{role}</Text>
-                    </View>
-                    <View style={styles.pill}>
-                      <Text style={styles.pillText}>{eventDate}</Text>
-                    </View>
-                    <View style={[styles.pill, { backgroundColor: '#E8F5E9' }]}>
-                      <Text style={[styles.pillText, { color: '#388E3C' }]}>
-                        {event.attendees?.length || 0} Attending
-                      </Text>
-                    </View>
-                  </View>
-                  {event.location?.address && (
-                    <Text style={styles.eventLocation}>
-                      {event.location.address}
-                    </Text>
-                  )}
-                  <TouchableOpacity
-                    style={styles.shareButton}
-                    onPress={() => onShare(event)}
-                  >
-                    <Text style={styles.shareButtonText}>Share</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
+              <PostCard
+                key={event.id}
+                event={eventWithHost}
+                onPress={handleEventPress}
+                onJoinPress={() => {}}
+              />
             );
           })
         )}

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
+import { Animated, Dimensions, PanResponder } from 'react-native';
 import {
   SafeAreaView,
   View,
@@ -7,7 +8,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Share,
-  Modal,
   Alert,
   TextInput,
   ScrollView,
@@ -27,7 +27,7 @@ import {
   uploadProfileImage,
   db,
 } from '../../firebase/config';
-import { useAuth } from '../../context/AuthContext';
+import { useUserStore } from '../../store/userStore';
 import { useMyEvents } from '../../hooks/useMyEvents';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -41,7 +41,8 @@ import {
   arrayRemove,
 } from 'firebase/firestore';
 import PostCard from '../../components/PostCard';
-import PopupMenu from '../../components/PopupMenu'; // Import the PopupMenu component
+// import PopupMenu from '../../components/PopupMenu'; // No longer used, avoid legacy Modal usage
+import ActionModals from '../../components/profile/ActionModals'; // Import ActionModals for share, report, sign out
 import { GOOGLE_MAPS_API_KEY } from '@env';
 
 // Helper: Merge unique events and sort by startAt descending
@@ -60,9 +61,95 @@ function mergeUniqueEvents(...eventArrays) {
 }
 
 export default function ProfileScreen({ navigation }) {
-  const { user } = useAuth();
+  // Description: Get current user from Zustand userStore
+  const user = useUserStore((state) => state.user);
   const myEvents = useMyEvents(user?.uid || '');
   const now = new Date();
+
+  // --- Notification badge state ---
+  const [unreadCount, setUnreadCount] = useState(0);
+  useEffect(() => {
+    if (!user?.uid) return;
+    // Listen for unread notifications (exclude soft-deleted)
+    const fs = require('firebase/firestore');
+    const cfg = require('../../firebase/config');
+    const q = fs.query(
+      fs.collection(cfg.db, 'notifications'),
+      fs.where('recipientId', '==', user.uid),
+      fs.where('read', '==', false)
+    );
+
+    let unsub = fs.onSnapshot(
+      q,
+      (snapshot) => {
+        const activeUnread = snapshot.docs.filter((d) => !d.data().isDeleted);
+        setUnreadCount(activeUnread.length);
+      },
+      (error) => {
+        // Avoid unhandled errors when auth state changes and rules deny access
+        if (error?.code === 'permission-denied') {
+          setUnreadCount(0);
+          try {
+            unsub && unsub();
+          } catch {}
+          return;
+        }
+        console.warn('Notifications listener error:', error?.message || error);
+      }
+    );
+
+    // Register globally so logout can proactively clean it up before signOut()
+    try {
+      if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
+      global.unsubscribeAllListeners.push(unsub);
+    } catch {}
+
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+    };
+  }, [user?.uid]);
+
+  // --- Soft Delete Handler (with double confirmation) ---
+  const handleDeleteAccount = async () => {
+    if (!user?.uid) return;
+    Alert.alert(
+      'Delete Account',
+      'This will permanently remove your profile and you will not be able to join or host events. Are you sure you want to continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Soft delete user in Firestore
+              await updateDoc(doc(db, 'users', user.uid), {
+                isDeleted: true,
+                deletedAt: new Date(),
+                displayName: 'Deleted User',
+                profileImage: null,
+                bio: '',
+              });
+              // Sign out
+              await logout();
+              setUser(null);
+              // AppNavigator will render AuthStack when user is null
+              setTimeout(() => {
+                Alert.alert(
+                  'Profile Deleted',
+                  'Your profile has been deleted. You have been signed out.'
+                );
+              }, 600);
+            } catch (err) {
+              Alert.alert('Error', 'Failed to delete account.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // --- State ---
   const [showFullBio, setShowFullBio] = useState(false);
@@ -84,10 +171,104 @@ export default function ProfileScreen({ navigation }) {
   const [groupEvents, setGroupEvents] = useState([]);
   const EVENTS_PAGE_SIZE = 10;
   const [visibleCount, setVisibleCount] = useState(EVENTS_PAGE_SIZE);
+  // Modal for event actions (delete/report)
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [sidebarAnim] = useState(
+    new Animated.Value(Dimensions.get('window').width)
+  );
+  const sidebarPan = useRef();
+
+  // PanResponder for swipe-to-close gesture
+  sidebarPan.current =
+    sidebarPan.current ||
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Only respond to horizontal swipes (rightward)
+        return (
+          Math.abs(gestureState.dx) > 10 &&
+          Math.abs(gestureState.dy) < 20 &&
+          gestureState.dx > 0
+        );
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        // Move sidebarAnim with finger, but not past the screen width
+        if (gestureState.dx > 0) {
+          sidebarAnim.setValue(
+            Math.min(gestureState.dx, Dimensions.get('window').width)
+          );
+        }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        // If swiped more than 1/3 of sidebar width, close; else snap back
+        const sidebarWidth = Dimensions.get('window').width * 0.9;
+        if (gestureState.dx > sidebarWidth / 3) {
+          Animated.timing(sidebarAnim, {
+            toValue: Dimensions.get('window').width,
+            duration: 200,
+            useNativeDriver: true,
+          }).start();
+        } else {
+          Animated.timing(sidebarAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    });
+  // Sidebar open/close animation
+  const openSidebar = () => {
+    setSidebarVisible(true);
+    Animated.timing(sidebarAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  // Fix: Avoid calling setSidebarVisible in animation callback (causes useInsertionEffect error)
+  const closeSidebar = () => {
+    Animated.timing(sidebarAnim, {
+      toValue: Dimensions.get('window').width,
+      duration: 250,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  // Effect: Hide sidebar after animation completes
+  useEffect(() => {
+    if (!sidebarVisible) return;
+    // Listen for sidebarAnim value to reach the closed position
+    const id = sidebarAnim.addListener(({ value }) => {
+      if (value >= Dimensions.get('window').width - 1) {
+        setSidebarVisible(false);
+        sidebarAnim.removeListener(id);
+      }
+    });
+    return () => sidebarAnim.removeListener(id);
+  }, [sidebarVisible, sidebarAnim]);
   const [enhancedEvents, setEnhancedEvents] = useState([]);
+  const [modals, setModals] = useState({
+    share: false,
+    report: false,
+    signOut: false,
+  });
+
+  // --- Logout handler ---
+  const setUser = useUserStore((state) => state.setUser);
+  const logout = useUserStore((state) => state.logout);
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      setUser(null);
+      // AppNavigator will switch to AuthStack when user becomes null
+    } catch (err) {
+      Alert.alert('Logout Error', err.message);
+    }
+  };
 
   // --- Derived ---
   const fullName = `${user.firstName} ${user.lastName}`;
@@ -115,14 +296,76 @@ export default function ProfileScreen({ navigation }) {
   const onRefresh = useCallback(async () => {
     if (!user?.uid) return;
     setRefreshing(true);
-    const data = await getUserData(user.uid);
-    setBio(data.bio || '');
-    setProfileImage(data.profileImage || null);
-    setRating(data.rating || 0);
-    setRatingCount(data.ratingCount || 0);
-    setVerified(data.verified || false);
-    setRefreshing(false);
-  }, [user?.uid]);
+
+    try {
+      // Refresh user data
+      const data = await getUserData(user.uid);
+      setBio(data.bio || '');
+      setProfileImage(data.profileImage || null);
+      setRating(data.rating || 0);
+      setRatingCount(data.ratingCount || 0);
+      setVerified(data.verified || false);
+
+      // Refresh follow count
+      const followerCount =
+        typeof data.followerCount === 'number'
+          ? data.followerCount
+          : Array.isArray(data.followers)
+          ? data.followers.length
+          : 0;
+
+      // Refresh user events
+      const fetchEventsByIds = async (ids) => {
+        if (!ids.length) return [];
+        // Use helper from firebase config if exposed
+        try {
+          const { getUserEventsByIds } = require('../../firebase/config');
+          if (typeof getUserEventsByIds === 'function') {
+            const res = await getUserEventsByIds(ids);
+            return res.filter((e) => e.isDeleted !== true);
+          }
+        } catch (e) {
+          // ignore and fallback to manual batching
+        }
+
+        try {
+          const eventsRef = collection(db, 'events');
+          const chunks = [];
+          for (let i = 0; i < ids.length; i += 30)
+            chunks.push(ids.slice(i, i + 30));
+          let results = [];
+          for (const chunk of chunks) {
+            const q = query(eventsRef, where('__name__', 'in', chunk));
+            const snapshot = await getDocs(q);
+            results = results.concat(
+              snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+            );
+          }
+          // Exclude soft-deleted
+          return results.filter((e) => e.isDeleted !== true);
+        } catch {
+          return myEvents.filter(
+            (ev) => ids.includes(ev.id) && ev.isDeleted !== true
+          );
+        }
+      };
+
+      const [created, attending, attended] = await Promise.all([
+        fetchEventsByIds(data.createdEvents || []),
+        fetchEventsByIds(data.attendingEvents || []),
+        fetchEventsByIds(data.attendedEvents || []),
+      ]);
+
+      setUserEvents({ created, attending, attended });
+      setEnhancedEvents(
+        mergeUniqueEvents(created, attending, attended, groupEvents)
+      );
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user?.uid, myEvents, groupEvents]);
 
   useEffect(() => {
     let isMounted = true;
@@ -155,6 +398,17 @@ export default function ProfileScreen({ navigation }) {
       const userData = await getUserData(user.uid);
       const fetchEventsByIds = async (ids) => {
         if (!ids.length) return [];
+        // Use helper from firebase config if exposed
+        try {
+          const { getUserEventsByIds } = require('../../firebase/config');
+          if (typeof getUserEventsByIds === 'function') {
+            const res = await getUserEventsByIds(ids);
+            return res.filter((e) => e.isDeleted !== true);
+          }
+        } catch (e) {
+          // ignore and fallback to manual batching
+        }
+
         try {
           const eventsRef = collection(db, 'events');
           const chunks = [];
@@ -168,16 +422,49 @@ export default function ProfileScreen({ navigation }) {
               snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
             );
           }
-          return results;
+          // Exclude soft-deleted
+          return results.filter((e) => e.isDeleted !== true);
         } catch {
-          return myEvents.filter((ev) => ids.includes(ev.id));
+          return myEvents.filter(
+            (ev) => ids.includes(ev.id) && ev.isDeleted !== true
+          );
         }
       };
-      const [created, attending, attended] = await Promise.all([
+      const [createdIds, attendingIds, attendedIds] = await Promise.all([
         fetchEventsByIds(userData.createdEvents || []),
         fetchEventsByIds(userData.attendingEvents || []),
         fetchEventsByIds(userData.attendedEvents || []),
       ]);
+
+      // Query-based fallbacks to ensure host/attendee events still populate
+      const eventsRef = collection(db, 'events');
+      const [createdQSnap, attendingQSnap] = await Promise.all([
+        getDocs(
+          query(
+            eventsRef,
+            where('ownerId', '==', user.uid),
+            where('isDeleted', '==', false)
+          )
+        ),
+        getDocs(
+          query(
+            eventsRef,
+            where('attendees', 'array-contains', user.uid),
+            where('isDeleted', '==', false)
+          )
+        ),
+      ]);
+      const createdByQuery = createdQSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((e) => e.isDeleted !== true);
+      const attendingByQuery = attendingQSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((e) => e.isDeleted !== true);
+
+      const created = mergeUniqueEvents(createdIds, createdByQuery);
+      const attending = mergeUniqueEvents(attendingIds, attendingByQuery);
+      const attended = mergeUniqueEvents(attendedIds);
+
       if (isMounted) setUserEvents({ created, attending, attended });
       if (isMounted) setLoadingEvents(false);
     }
@@ -292,18 +579,6 @@ export default function ProfileScreen({ navigation }) {
     return 'Location not specified';
   };
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'AuthStack' }],
-      });
-    } catch (err) {
-      Alert.alert('Logout failed', err.message);
-    }
-  };
-
   const handleImageUpload = async () => {
     try {
       const permissionResult =
@@ -349,47 +624,6 @@ export default function ProfileScreen({ navigation }) {
     setModalVisible(true);
   };
 
-  const handleDeleteEvent = async () => {
-    if (!selectedEvent?.id) return;
-
-    try {
-      const eventRef = doc(db, 'events', selectedEvent.id);
-
-      // Mark the event as deleted
-      await updateDoc(eventRef, {
-        isDeleted: true,
-        deletedAt: new Date(),
-      });
-
-      // Clean up references from associated users
-      const attendees = selectedEvent.attendees || [];
-      for (const userId of attendees) {
-        const userRef = doc(db, 'users', userId);
-        await updateDoc(userRef, {
-          attendedEvents: arrayRemove(selectedEvent.id),
-        });
-      }
-
-      // Remove the event from the creator's createdEvents list
-      const creatorRef = doc(db, 'users', selectedEvent.ownerId);
-      await updateDoc(creatorRef, {
-        createdEvents: arrayRemove(selectedEvent.id),
-      });
-
-      // Update the local state to reflect the deletion
-      setEnhancedEvents((prevEvents) =>
-        prevEvents.filter((event) => event.id !== selectedEvent.id)
-      );
-
-      Alert.alert('Success', 'The event has been deleted.');
-    } catch (error) {
-      console.error('Error deleting event:', error);
-      Alert.alert('Error', 'Failed to delete the event. Please try again.');
-    } finally {
-      setModalVisible(false);
-    }
-  };
-
   const handleReportEvent = () => {
     Alert.alert('Report Event functionality coming soon.');
     setModalVisible(false);
@@ -402,25 +636,60 @@ export default function ProfileScreen({ navigation }) {
         setIsEditing(true);
         break;
       case 'Manage Interests':
-        navigation.navigate('ManageInterestsScreen'); // Updated navigation
+        navigation.navigate('ManageInterestsScreen');
         break;
       case 'Logout':
         handleLogout();
+        break;
+      case 'Delete Account':
+        handleDeleteAccount();
         break;
       default:
         break;
     }
   };
 
-  const handleEventClick = async (eventId) => {
+  const handleEventClick = async (eventId, opts = {}) => {
     try {
       const eventRef = doc(db, 'events', eventId);
       const eventSnapshot = await getDoc(eventRef);
-      if (eventSnapshot.exists()) {
-        navigation.navigate('EventChat', { eventId });
-      } else {
+      if (!eventSnapshot.exists()) {
         Alert.alert('Event not found', 'This event no longer exists.');
+        return;
       }
+      const eventData = eventSnapshot.data();
+
+      if (eventData.isDeleted === true) {
+        Alert.alert(
+          'Event archived',
+          'This event has been archived and is no longer interactive.'
+        );
+        return;
+      }
+
+      // Determine membership
+      const uid = user?.uid;
+      const isMember =
+        eventData.ownerId === uid ||
+        (Array.isArray(eventData.attendees) &&
+          eventData.attendees.includes(uid));
+
+      // If explicitly coming from RSVP success, go straight to chat
+      if (opts?.source === 'EventChatScreen') {
+        navigation.navigate('EventChat', { eventId });
+        return;
+      }
+
+      // On normal taps: require membership to enter chat
+      if (!isMember) {
+        Alert.alert(
+          'No Access',
+          'You must be the host or an attendee to view this chat.'
+        );
+        return;
+      }
+
+      navigation.navigate('EventChat', { eventId });
     } catch (error) {
       Alert.alert('Error', 'Failed to navigate to the event chat.');
     }
@@ -428,40 +697,111 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Sidebar Menu */}
-      <Modal
-        visible={sidebarVisible}
-        animationType='slide'
-        transparent
-        onRequestClose={() => setSidebarVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.sidebarOverlay}
-          activeOpacity={1}
-          onPressOut={() => setSidebarVisible(false)}
-        >
-          <View style={styles.sidebarContent}>
-            {['Edit Profile', 'Manage Interests', 'Logout'].map((option) => (
-              <TouchableOpacity
-                key={option}
-                style={styles.sidebarOption}
-                onPress={() => handleMenuOptionClick(option)}
-              >
-                <Text style={styles.sidebarOptionText}>{option}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      {/* Sidebar Menu (Animated right-to-left slide-in) */}
+      {sidebarVisible && (
+        <View style={styles.sidebarAbsoluteOverlay}>
+          <TouchableOpacity
+            style={styles.sidebarBackdrop}
+            activeOpacity={1}
+            onPress={closeSidebar}
+            accessibilityLabel='Close sidebar overlay'
+          />
+          <Animated.View
+            style={[
+              styles.sidebarAnimated,
+              { transform: [{ translateX: sidebarAnim }] },
+            ]}
+            {...sidebarPan.current.panHandlers}
+          >
+            <SafeAreaView style={styles.sidebarSafeArea}>
+              {/* HEADER */}
+              <View style={styles.sidebarHeader}>
+                <TouchableOpacity
+                  style={styles.sidebarHeaderBack}
+                  onPress={closeSidebar}
+                  accessibilityLabel='Close sidebar'
+                >
+                  <Ionicons name='arrow-back' size={26} color='#333' />
+                </TouchableOpacity>
+                <Text style={styles.sidebarHeaderTitle}>Settings</Text>
+              </View>
 
-      {/* Settings / Ellipsis Modal */}
-      <PopupMenu
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        isOwner={selectedEvent?.ownerId === user?.uid}
-        onReport={handleReportEvent}
-        onDelete={handleDeleteEvent}
-      />
+              {/* BODY */}
+              <View style={styles.sidebarContentWrapper}>
+                {/* Top Options */}
+                <View style={styles.sidebarTopSection}>
+                  {['Edit Profile', 'Manage Interests', 'Logout'].map(
+                    (option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={styles.sidebarOption}
+                        onPress={() => {
+                          closeSidebar();
+                          setTimeout(() => handleMenuOptionClick(option), 200);
+                        }}
+                      >
+                        <Text style={styles.sidebarOptionText}>{option}</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
+                <View style={{ flex: 1 }} />
+                {/* Bottom Delete - moved to bottom */}
+                <View style={styles.sidebarBottomSection}>
+                  <TouchableOpacity
+                    style={[styles.sidebarOption, styles.sidebarDeleteOption]}
+                    onPress={() => {
+                      closeSidebar();
+                      setTimeout(
+                        () => handleMenuOptionClick('Delete Account'),
+                        200
+                      );
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.sidebarOptionText,
+                        styles.sidebarDeleteText,
+                      ]}
+                    >
+                      Delete Account
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </SafeAreaView>
+          </Animated.View>
+        </View>
+      )}
+
+      {/* Event Actions Modal (Delete/Report) */}
+      {modalVisible && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalOptionText}>Event Actions</Text>
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={handleDeleteEvent}
+            >
+              <Text style={[styles.modalOptionText, { color: '#d11a2a' }]}>
+                Delete Event
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={handleReportEvent}
+            >
+              <Text style={styles.modalOptionText}>Report Event</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalOption}
+              onPress={() => setModalVisible(false)}
+            >
+              <Text style={styles.modalOptionText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -480,14 +820,44 @@ export default function ProfileScreen({ navigation }) {
               <TouchableOpacity
                 onPress={() => navigation.navigate('Notifications')}
                 style={{ marginRight: 16 }}
+                accessibilityLabel='Notifications'
               >
-                <MaterialCommunityIcons
-                  name='bell-outline'
-                  size={28}
-                  color='#fff'
-                />
+                <View>
+                  <MaterialCommunityIcons
+                    name='bell-outline'
+                    size={28}
+                    color='#fff'
+                  />
+                  {unreadCount > 0 && (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: -4,
+                        right: -4,
+                        backgroundColor: '#FF3B30',
+                        borderRadius: 8,
+                        minWidth: 16,
+                        height: 16,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        paddingHorizontal: 3,
+                        zIndex: 10,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: '#fff',
+                          fontSize: 10,
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setSidebarVisible(true)}>
+              <TouchableOpacity onPress={openSidebar}>
                 <Ionicons name='menu' size={28} color='#fff' />
               </TouchableOpacity>
             </View>
@@ -498,16 +868,31 @@ export default function ProfileScreen({ navigation }) {
                 source={{ uri: profileImage || avatarURL }}
                 style={styles.profileImage}
               />
+              {isEditing && (
+                <View style={styles.imageOverlay}>
+                  <Text style={styles.overlayText}>Change Photo</Text>
+                </View>
+              )}
             </TouchableOpacity>
-            {verified && (
-              <MaterialIcons
-                name='verified'
-                size={25}
-                style={styles.verifiedBadge}
-              />
-            )}
           </View>
-          <Text style={styles.name}>{fullName}</Text>
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={styles.name}>
+              {fullName}
+              {verified && (
+                <MaterialIcons
+                  name='verified'
+                  size={20}
+                  style={styles.verifiedBadgeAdjusted}
+                />
+              )}
+            </Text>
+          </View>
           <Text style={styles.stat}>
             {ratingCount === 0
               ? '☆☆☆☆☆ (Not yet rated)'
@@ -518,7 +903,6 @@ export default function ProfileScreen({ navigation }) {
           </Text>
           <Text style={styles.since}>User since {userSince}</Text>
         </LinearGradient>
-
         {/* Stats Row */}
         <View style={styles.statsRow}>
           <TouchableOpacity style={styles.statCard}>
@@ -534,7 +918,6 @@ export default function ProfileScreen({ navigation }) {
             <Text style={styles.statLabel}>Badges</Text>
           </View>
         </View>
-
         {/* Bio */}
         <View style={styles.bioContainer}>
           <TextInput
@@ -551,7 +934,6 @@ export default function ProfileScreen({ navigation }) {
             </TouchableOpacity>
           )}
         </View>
-
         {/* Edit & Save Buttons */}
         {isEditing && (
           <View style={styles.buttonRow}>
@@ -564,7 +946,6 @@ export default function ProfileScreen({ navigation }) {
             </TouchableOpacity>
           </View>
         )}
-
         {/* Events Timeline */}
         <View style={styles.timelineHeader}>
           <Text style={styles.timelineTitle}>Your Event Timeline</Text>
@@ -579,7 +960,6 @@ export default function ProfileScreen({ navigation }) {
             const isPastEvent = event.date?.seconds
               ? new Date(event.date.seconds * 1000) < now
               : false;
-
             const role = isPastEvent
               ? user.createdEvents?.includes(event.id)
                 ? 'Hosted'
@@ -587,29 +967,116 @@ export default function ProfileScreen({ navigation }) {
               : user.createdEvents?.includes(event.id)
               ? 'Hosting'
               : 'Attending';
-
             return (
               <PostCard
                 key={event.id}
                 event={{
                   ...event,
                   role,
-                  address: event.address, // Pass address directly
-                  location: event.location, // Pass location for fallback
-                  formattedDate: event.formattedDate, // Ensure date is passed
+                  address: event.address,
+                  location: event.location,
+                  formattedDate: event.formattedDate,
                 }}
-                onPress={(e) => handleEventClick(e.id)}
+                onPress={(e, dest) =>
+                  handleEventClick(e.id, {
+                    source:
+                      dest === 'EventChatScreen'
+                        ? 'EventChatScreen'
+                        : undefined,
+                  })
+                }
                 onEllipsisPress={(e) => handleEllipsisClick(e)}
               />
             );
           })
         )}
       </ScrollView>
+      {/* ActionModals for share, report, sign out */}
+      <ActionModals modals={modals} setModals={setModals} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  sidebarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    position: 'relative',
+  },
+
+  sidebarHeaderBack: {
+    position: 'absolute',
+    left: 0, // Move arrow closer to the left edge
+    top: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+    zIndex: 1,
+  },
+
+  sidebarHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#111',
+  },
+  sidebarContentWrapper: {
+    flex: 1,
+    justifyContent: 'space-between',
+    paddingTop: 10, // ensures buttons don't overlap the back icon
+  },
+
+  sidebarTopSection: {
+    gap: 8,
+  },
+
+  sidebarDeleteOption: {
+    backgroundColor: '#fff0f0',
+    borderColor: '#ffd6d6',
+    borderWidth: 1,
+    borderRadius: 10,
+  },
+
+  sidebarDeleteText: {
+    color: '#d11a2a',
+    fontWeight: '600',
+  },
+  sidebarAbsoluteOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+  },
+  sidebarBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  sidebarAnimated: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: '90%',
+    maxWidth: 300,
+    height: '100%',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderBottomLeftRadius: 24,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 30 : 60,
+    paddingHorizontal: 16,
+    paddingBottom: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: -4, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 12,
+    zIndex: 1000,
+  },
   safe: {
     flex: 1,
     backgroundColor: '#f8f9fa',
@@ -640,6 +1107,11 @@ const styles = StyleSheet.create({
   },
   profileImage: { width: 120, height: 120, borderRadius: 15 },
   verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
+  verifiedBadgeAdjusted: {
+    position: 'absolute',
+    bottom: 0,
+    right: -10,
+  },
   name: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -756,23 +1228,53 @@ const styles = StyleSheet.create({
   },
   sidebarOverlay: {
     flex: 1,
+    flexDirection: 'row',
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
-  sidebarContent: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
+  sidebarSafeArea: {
+    flex: 1,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 40 : 80,
+  },
+  sidebarContentRight: {
+    flex: 1,
+  },
+  sidebarCloseButton: {
+    position: 'absolute',
+    top: Platform.OS === 'android' ? StatusBar.currentHeight + 12 : 20,
+    left: 0,
+    padding: 0,
+    zIndex: 10,
   },
   sidebarOption: {
-    paddingVertical: 15,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: '#f9f9f9',
   },
+
   sidebarOptionText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '500',
     color: '#333',
+  },
+  imageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 15,
+  },
+  overlayText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

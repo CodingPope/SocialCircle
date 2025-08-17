@@ -18,25 +18,34 @@ import {
   collection,
   addDoc,
 } from 'firebase/firestore';
-import { db, updateUserData } from '../firebase/config';
+// Do NOT import addDoc directly here; use sendNotification from config.js which handles notification creation
+import { db, updateUserData, functions } from '../firebase/config';
+import { httpsCallable } from 'firebase/functions';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../context/AuthContext';
+import { useUserStore } from '../store/userStore';
+import { useEventStore } from '../store/eventStore';
 const screenHeight = Dimensions.get('window').height;
 
 export default function EventPopUpCard({ event, onClose, onJoin }) {
   const bottomSheetRef = useRef(null);
-  const { user } = useAuth();
+  // Description: Get current user from Zustand userStore
+  const user = useUserStore((state) => state.user);
   const navigation = useNavigation();
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
-  const snapPoints = useMemo(() => ['80%', '90%', '95%'], []);
+  const snapPoints = useMemo(() => ['50%', '90%', '95%'], []);
 
   useEffect(() => {
+    if (!event || event.isDeleted) {
+      onClose();
+      return;
+    }
+
     if (!event?.location) {
       setAddress('Location not specified');
       return;
@@ -59,7 +68,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
     };
     fetchAddress();
 
-    const ownerId = event.ownerID || event.ownerId;
+    const ownerId = event.ownerId;
     if (!ownerId) return;
     const fetchUser = async () => {
       try {
@@ -72,6 +81,22 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
     };
     fetchUser();
   }, [event]);
+
+  const isSoftDeleted = event?.isDeleted === true;
+  const isExpired = (() => {
+    if (!event) return false;
+    let eventTime = null;
+    if (event.endAt) {
+      if (event.endAt.toDate) eventTime = event.endAt.toDate().getTime();
+      else if (event.endAt.seconds) eventTime = event.endAt.seconds * 1000;
+    } else if (event.date) {
+      if (event.date.toDate) eventTime = event.date.toDate().getTime();
+      else if (event.date.seconds) eventTime = event.date.seconds * 1000;
+      else if (event.date instanceof Date) eventTime = event.date.getTime();
+    }
+    if (!eventTime) return false;
+    return eventTime + 60 * 60 * 1000 <= Date.now();
+  })();
 
   const displayName = userDetails
     ? `${userDetails.firstName || ''} ${userDetails.lastName || ''}`.trim() ||
@@ -95,7 +120,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   // --- Join Event Logic ---
   const attendees = Array.isArray(event.attendees) ? event.attendees : [];
   const requests = Array.isArray(event.requests) ? event.requests : [];
-  const isOwner = event.ownerId === user?.uid || event.ownerID === user?.uid;
+  const isOwner = event.ownerId === user?.uid;
   const isAttendee = attendees.includes(user?.uid);
   const hasRequested = requests.includes(user?.uid);
 
@@ -109,7 +134,16 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
 
   // --- Button Action Handler ---
   const handleActionButton = async () => {
+    if (isSoftDeleted) {
+      alert('This event has been archived and is no longer interactive.');
+      return;
+    }
+    if (isExpired) {
+      alert('This event has ended and is read-only.');
+      return;
+    }
     if (isAttendee || isOwner) {
+      // Use navigation prop for navigation actions
       navigation.navigate('EventChat', {
         eventId: event.id,
         locationName: address,
@@ -130,48 +164,43 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   const handleRequestToJoin = async () => {
     if (!user || !event?.id) return;
     try {
-      const eventRef = doc(db, 'events', event.id);
-      await updateDoc(eventRef, {
-        requests: arrayUnion(user.uid), // Add user ID to event's requests array
-      });
-
-      // Create a notification for the event owner
-      const notificationRef = collection(db, 'notifications');
-      await addDoc(notificationRef, {
-        type: 'rsvp_request', // Notification type
-        eventId: event.id, // Event ID
-        eventTitle: event.title || 'Untitled Event', // Include event title
-        requesterId: user.uid, // User requesting to join
-        recipientId: event.ownerId, // Event owner
-        userName: user.firstName || 'User',
-        message: `${user.firstName || 'User'} requested to join your event.`,
-        createdAt: new Date(), // Timestamp
-      });
-
-      alert('Request sent to the host. Await approval.');
+      const call = httpsCallable(functions, 'requestToJoinEvent');
+      const res = await call({ eventId: event.id });
+      const already = res?.data?.alreadyRequested;
+      alert(
+        already
+          ? 'You have already requested to join. Please wait for approval.'
+          : 'Request sent to the host. Await approval.'
+      );
     } catch (err) {
       console.error('Request to join error:', err);
-      alert('Failed to send request. Please try again.');
+      alert(`Failed to send request. Error: ${err?.message || err}`);
     }
   };
 
+  // Description: Centralized join implementation using eventStore.rsvpEvent
   const handleJoin = async () => {
-    // Description: Handles joining event, checks capacity, updates Firestore, navigates to chat
+    if (isSoftDeleted) {
+      alert('This event has been archived and cannot be joined.');
+      return;
+    }
+    if (isExpired) {
+      alert('This event has ended and cannot be joined.');
+      return;
+    }
     if (!user || !event?.id) return;
-    const isOwner = event.ownerId === user.uid || event.ownerID === user.uid;
-    const attendees = Array.isArray(event.attendees) ? event.attendees : [];
-    const isAttendee = attendees.includes(user.uid);
 
-    // If already an attendee, just go to chat
-    if (isAttendee) {
+    // Local checks
+    const attendees = Array.isArray(event.attendees) ? event.attendees : [];
+    const isOwnerLocal = event.ownerId === user.uid;
+    if (isOwnerLocal || attendees.includes(user.uid)) {
       navigation.navigate('EventChat', {
         eventId: event.id,
-        locationName: address, // Pass address as param
+        locationName: address,
       });
       return;
     }
 
-    // If event is full, show alert
     if (
       typeof event.capacity === 'number' &&
       event.capacity > 0 &&
@@ -181,23 +210,24 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
       return;
     }
 
-    // Add user to attendees in Firestore
     try {
-      const eventRef = doc(db, 'events', event.id);
-      await updateDoc(eventRef, {
-        attendees: arrayUnion(user.uid),
-      });
-      // Add event ID to user's attendedEvents array
-      await updateUserData(user.uid, {
-        attendedEvents: arrayUnion(event.id),
-      });
+      const rsvpFn = useEventStore.getState().rsvpEvent;
+      if (typeof rsvpFn !== 'function') {
+        throw new Error('RSVP function unavailable');
+      }
+
+      // Call centralized RSVP which handles callables, optimistic updates, and chat creation
+      await rsvpFn(event.id, user.uid);
+
+      // Navigate to chat after success
       navigation.navigate('EventChat', {
         eventId: event.id,
-        locationName: address, // Pass address as param
+        locationName: address,
       });
+      return;
     } catch (err) {
-      alert('Failed to join event. Please try again.');
-      console.error('Join event error:', err);
+      console.error('Join event via store failed:', err);
+      alert(friendlyJoinError(err));
     }
   };
 
@@ -308,9 +338,12 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
             <Image source={profileImageSource} style={styles.userImage} />
             <View>
               <Text style={styles.userName}>{displayName}</Text>
+              {/* Description: Unified host rating display to match PostCard (gold star + numeric rating) */}
               <Text style={styles.userRating}>
-                {'★'.repeat(Math.round(userDetails.rating || 0))}
-                {userDetails.ratingCount || 0} reviews
+                {typeof userDetails.rating === 'number' &&
+                userDetails.rating > 0
+                  ? `⭐ ${userDetails.rating.toFixed(1)}`
+                  : 'No Rating'}
               </Text>
             </View>
           </TouchableOpacity>
@@ -405,7 +438,12 @@ const styles = StyleSheet.create({
   },
   userImage: { width: 40, height: 40, borderRadius: 10, marginRight: 8 },
   userName: { fontSize: 16, fontWeight: 'bold' },
-  userRating: { fontSize: 14 },
+  userRating: {
+    fontSize: 14,
+    color: '#FFB300', // Description: Gold color to match PostCard rating star
+    fontWeight: '600',
+    marginTop: 2,
+  },
   actionsContainer: {
     flexDirection: 'column', // Stack buttons vertically
     marginTop: 16,

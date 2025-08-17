@@ -20,7 +20,6 @@ import SegmentedControl from '@react-native-segmented-control/segmented-control'
 import { Ionicons } from '@expo/vector-icons';
 import { geohashForLocation } from 'geofire-common';
 import {
-  getFirestore,
   collection,
   addDoc,
   Timestamp,
@@ -28,20 +27,33 @@ import {
   doc,
   arrayUnion,
   getDocs,
+  getDoc,
 } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useAuth } from '../../context/AuthContext';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage, auth } from '../../firebase/config';
+import { useUserStore } from '../../store/userStore';
 import { updateEventCount } from '../../firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import InterestSelector from '../../components/InterestSelector'; // Import the reusable InterestSelector
+import categoriesData from '../../utils/categoriesData.json';
 
 const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
 
 export default function CreateEventScreen({ location, onCancel, onSuccess }) {
-  const { user } = useAuth();
-  const db = getFirestore();
-  const storage = getStorage();
+  // Description: Get current user from Zustand userStore
+  const user = useUserStore((state) => state.user);
+
+  // Debug: print Firebase runtime info to help diagnose permission errors
+  useEffect(() => {
+    try {
+      console.log('DBG firebase auth.currentUser', auth?.currentUser || null);
+      console.log('DBG user store.user', user || null);
+      console.log('DBG firestore projectId', db?.app?.options?.projectId);
+    } catch (err) {
+      console.warn('DBG firebase info error', err);
+    }
+  }, [user]);
 
   const [imageUri, setImageUri] = useState(null);
   const [imageUrl, setImageUrl] = useState('');
@@ -118,14 +130,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       });
       if (!res.canceled) {
         const uri = res.assets[0].uri;
+        // Description: Defer uploading until after the event document exists (so storage rules that require ownerId match succeed).
         setImageUri(uri);
-        const blob = await (await fetch(uri)).blob();
-        const storageRef = ref(storage, `event-images/${Date.now()}`);
-        const snap = await uploadBytes(storageRef, blob);
-        setImageUrl(await getDownloadURL(snap.ref));
       }
     } catch (e) {
-      Alert.alert('Upload error', e.message);
+      Alert.alert('Image pick error', e.message);
     }
   };
 
@@ -135,8 +144,34 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       return Alert.alert('Title must not exceed 40 characters');
     if (description.trim().length < 10)
       return Alert.alert('Description must be at least 10 characters');
-    if (date - new Date() < 60 * 60 * 1000)
-      return Alert.alert('Event must be at least 1 hour ahead');
+
+    // Ensure user is authenticated and matches local store
+    const currentAuthUser = auth?.currentUser;
+    if (!currentAuthUser || !currentAuthUser.uid) {
+      return Alert.alert('Not authenticated', 'Please sign in and try again.');
+    }
+    if (currentAuthUser.uid !== user?.uid) {
+      console.warn('Auth UID mismatch', currentAuthUser.uid, user?.uid);
+      return Alert.alert(
+        'Authentication error',
+        'Signed-in user mismatch. Please re-login.'
+      );
+    }
+
+    // Description: Ensure event is at least 35 min in the future (client-side buffer) to avoid server-side min window and clock skew
+    const now = new Date();
+    const minDate = new Date(now.getTime() + 35 * 60 * 1000); // 35 minutes buffer
+    const maxDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    if (date < now) {
+      return Alert.alert('Event cannot be in the past');
+    }
+    if (date < minDate) {
+      return Alert.alert('Event must be at least 35 minutes in the future');
+    }
+    if (date > maxDate) {
+      return Alert.alert('Event cannot be more than 7 days in the future');
+    }
+
     if (!manualLocation && !location) return Alert.alert('Address is required');
     if (!selectedInterest) return Alert.alert('Select an interest');
 
@@ -156,10 +191,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
     const extractedCity = manualAddress?.split(',')?.[1]?.trim() || '';
 
+    // Description: Create event without image first. Upload image after we have an event ID so Storage rules (owner check) pass.
     const newEvent = {
       title: title.trim(),
       description: description.trim(),
-      imageUrl: imageUrl || null,
+      imageUrl: null, // upload later and update
       location: eventLocation,
       geohash,
       address: manualAddress,
@@ -178,19 +214,154 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       status: 'active',
       isReported: false,
       attendees: [],
+      isDeleted: false, // New field to mark the event as active
+      deletedAt: null, // New field to store deletion timestamp
     };
 
     setUploading(true);
+
+    let createdEventId = null;
     try {
+      console.log(
+        'DBG creating event, auth.uid:',
+        auth?.currentUser?.uid,
+        'ownerIdSent:',
+        newEvent.ownerId
+      );
       const docRef = await addDoc(collection(db, 'events'), newEvent);
-      await updateDoc(doc(db, 'users', user.uid), {
-        createdEvents: arrayUnion(docRef.id),
-      });
-      onSuccess(eventLocation);
-      await updateEventCount(user.uid);
+      createdEventId = docRef.id;
+
+      // Wait for the event document to be readable by security rules (avoid storage.get() race)
+      const waitForEventDoc = async (id, attempts = 12, delayMs = 750) => {
+        for (let i = 0; i < attempts; i++) {
+          try {
+            const snap = await getDoc(doc(db, 'events', id));
+            if (
+              snap.exists() &&
+              snap.data()?.ownerId === auth?.currentUser?.uid
+            )
+              return true;
+          } catch (err) {
+            // ignore and retry
+          }
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        return false;
+      };
+
+      const ready = await waitForEventDoc(docRef.id);
+      if (!ready) {
+        console.warn(
+          'DBG event doc not readable yet or ownerId mismatch for',
+          docRef.id
+        );
+      }
+
+      // Extra delay to avoid any propagation timing issues before Storage rule get() lookup
+      await new Promise((res) => setTimeout(res, 500));
+
+      // If user selected an image, upload now to owner-scoped path so storage rules allow it
+      if (imageUri) {
+        try {
+          const resp = await fetch(imageUri);
+          const blob = await resp.blob();
+          const contentType = blob.type || 'image/jpeg';
+
+          // Retry upload a few times to avoid transient rule/propagation issues
+          const tryUpload = async () => {
+            const storageRef = ref(
+              storage,
+              `event-images/${docRef.id}/${Date.now()}.jpg`
+            );
+            const snap = await uploadBytes(storageRef, blob, { contentType });
+            return await getDownloadURL(snap.ref);
+          };
+
+          let downloadUrl = null;
+          let lastErr = null;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              downloadUrl = await tryUpload();
+              break;
+            } catch (e) {
+              lastErr = e;
+              console.warn(`Upload attempt ${attempt} failed:`, e?.code || e);
+              await new Promise((r) => setTimeout(r, 500 * attempt));
+            }
+          }
+
+          // Fallback: if Storage rule still denies under event-images, upload under user's profileImages (still public-read per rules)
+          if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
+            try {
+              const altRef = ref(
+                storage,
+                `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
+              );
+              const altSnap = await uploadBytes(altRef, blob, { contentType });
+              downloadUrl = await getDownloadURL(altSnap.ref);
+            } catch (altErr) {
+              console.warn('Fallback upload also failed:', altErr);
+            }
+          }
+
+          if (downloadUrl) {
+            // Update event document with the uploaded image URL
+            await updateDoc(doc(db, 'events', docRef.id), {
+              imageUrl: downloadUrl,
+            });
+            setImageUrl(downloadUrl);
+          } else if (lastErr) {
+            console.warn('Image upload failed:', lastErr);
+            Alert.alert(
+              'Image upload failed',
+              'Your event was created without a photo due to permissions.'
+            );
+          }
+        } catch (uploadErr) {
+          console.warn('Image upload unexpected error:', uploadErr);
+        }
+      }
+
+      // Success: navigate away / close creator BEFORE any non-critical updates
+      try {
+        onSuccess && onSuccess(eventLocation);
+      } catch (navErr) {
+        console.warn('onSuccess handler error:', navErr);
+      }
+
+      // Fire-and-forget: user doc updates should not block success UX
+      (async () => {
+        // Normalize deviceToken to satisfy Firestore rules on update
+        const safeToken =
+          typeof user?.deviceToken === 'string' &&
+          /^ExponentPushToken/.test(user.deviceToken)
+            ? user.deviceToken
+            : null;
+        try {
+          await updateDoc(doc(db, 'users', user.uid), {
+            createdEvents: arrayUnion(docRef.id),
+            // Ensure deviceToken is valid or null to pass rule validation
+            deviceToken: safeToken,
+          });
+        } catch (userUpdateErr) {
+          console.warn(
+            'Non-critical: failed to tag createdEvents on user',
+            userUpdateErr
+          );
+        }
+        try {
+          await updateEventCount(user.uid);
+        } catch (cntErr) {
+          console.warn('Non-critical: updateEventCount failed', cntErr);
+        }
+      })();
     } catch (e) {
-      console.error(e);
-      Alert.alert('Creation failed');
+      console.error('Create event failed', e?.code || '', e?.message || e);
+      // Only surface error for creation step (addDoc). If we got here, addDoc likely failed
+      Alert.alert(
+        'Creation failed',
+        e?.message || 'Missing or insufficient permissions.'
+      );
     } finally {
       setUploading(false);
     }
@@ -208,10 +379,27 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             value: i.name,
           }));
         });
-        setInterestOptions(JSON.parse(JSON.stringify(interests)));
+        if (interests && interests.length) {
+          setInterestOptions(JSON.parse(JSON.stringify(interests)));
+        } else {
+          // If Firestore returns empty, fall back to bundled categories
+          const fallback = (categoriesData || []).flatMap((c) =>
+            (c.interests || []).map((i) => ({ label: i.name, value: i.name }))
+          );
+          setInterestOptions(fallback);
+        }
       } catch (err) {
-        console.error('Error fetching interests:', err);
-        Alert.alert('Failed to load interests');
+        console.warn('Error fetching interests (firestore):', err);
+        // Use bundled categories as a silent fallback to avoid spamming the user
+        const fallback = (categoriesData || []).flatMap((c) =>
+          (c.interests || []).map((i) => ({ label: i.name, value: i.name }))
+        );
+        if (fallback && fallback.length) {
+          setInterestOptions(fallback);
+        } else {
+          // Only surface an alert when we have no fallback data to show
+          Alert.alert('Failed to load interests');
+        }
       }
     };
     fetchInterests();

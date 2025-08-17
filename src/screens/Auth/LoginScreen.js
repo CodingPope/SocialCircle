@@ -31,6 +31,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
+import { useUserStore } from '../../store/userStore';
 // Apple Sign-In handler
 async function handleAppleSignIn() {
   const appleAuthResponse = await AppleAuthentication.signInAsync({
@@ -78,10 +79,26 @@ export default function LoginScreen({ navigation }) {
     }
   }, [googleResponse]);
 
+  // Description: Handles login and navigates to MainTabs (Map tab) on success
+  // Description: Handles login and navigates to MainTabs (default Map tab) on success
+  // Description: Handles login and navigates to MainTabs (Map tab) on success
   const handleLogin = async () => {
     setError('');
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      // On successful login, reset navigation to MainTabs (default tab is Map)
+      navigation.reset({
+        index: 0,
+        routes: [
+          {
+            name: 'MainTabs',
+            state: {
+              routes: [{ name: 'Map' }],
+              index: 0,
+            },
+          },
+        ],
+      });
     } catch (e) {
       setError(e.message);
     }
@@ -90,10 +107,67 @@ export default function LoginScreen({ navigation }) {
   const handleSignUp = async () => {
     setError('');
     try {
+      // Try to sign in first to check if user exists
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        setError('An account with this email already exists. Please log in.');
+        return;
+      } catch (signInErr) {
+        if (signInErr.code === 'auth/user-disabled') {
+          // User exists but is disabled (soft-deleted)
+          Alert.alert(
+            'Reactivate Account',
+            'An account with this email was previously deleted. Would you like to reactivate it?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Reactivate',
+                style: 'default',
+                onPress: async () => {
+                  try {
+                    // Call your reactivation logic here (e.g., cloud function)
+                    // You may need to import and call reactivateUser from userService
+                    const {
+                      findSoftDeletedUserByEmail,
+                      reactivateUser,
+                    } = require('../../services/userService');
+                    const softDeleted = await findSoftDeletedUserByEmail(email);
+                    if (softDeleted) {
+                      await reactivateUser(softDeleted.id, {});
+                      Alert.alert(
+                        'Account Reactivated',
+                        'Your account has been reactivated. Please log in.'
+                      );
+                    } else {
+                      setError('Could not find soft-deleted user.');
+                    }
+                  } catch (e) {
+                    setError('Reactivation failed: ' + e.message);
+                  }
+                },
+              },
+            ]
+          );
+          return;
+        } else if (signInErr.code === 'auth/user-not-found') {
+          // User does not exist, proceed with normal signup
+        } else if (signInErr.code === 'auth/wrong-password') {
+          setError('An account with this email already exists. Please log in.');
+          return;
+        } else if (signInErr.code === 'auth/invalid-email') {
+          setError('Invalid email address.');
+          return;
+        } else {
+          // Other errors, proceed with signup
+        }
+      }
+      // If we reach here, user does not exist, proceed with normal signup
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       await setDoc(doc(db, 'users', cred.user.uid), {
         email,
         createdAt: serverTimestamp(),
+        isDeleted: false, // Soft delete flag
+        deletedAt: null, // Timestamp for deletion
       });
     } catch (e) {
       setError(e.message);

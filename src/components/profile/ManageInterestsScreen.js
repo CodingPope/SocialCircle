@@ -19,11 +19,12 @@ import {
   getDocs,
   getDoc,
 } from 'firebase/firestore';
-import { db } from '../../../firebase/config';
-import { useAuth } from '../../../context/AuthContext';
+import { db } from '../../firebase/config';
+import { useUserStore } from '../../../src/store/userStore';
 
 export default function ManageInterestsScreen({ navigation }) {
-  const { user } = useAuth();
+  // Description: Get current user from Zustand userStore
+  const user = useUserStore((state) => state.user);
   const [categories, setCategories] = useState([]);
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);

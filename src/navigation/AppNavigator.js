@@ -1,31 +1,30 @@
 // src/navigation/AppNavigator.js
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Radar } from 'lucide-react-native';
-import { useAuth } from '../context/AuthContext';
-import EventDetails from '../components/EventDetails';
-import ConfirmationScreen from '../screens/ConfirmationScreen';
 
-// Auth Screens
+// Import screens
 import AuthScreen from '../screens/Auth/AuthScreen';
 import NameDobScreen from '../screens/Auth/Onboarding/NameDobScreen';
 import SexScreen from '../screens/Auth/Onboarding/SexScreen';
 import InterestsScreen from '../screens/Auth/Onboarding/InterestsScreen';
-import LocationScreen from '../screens/Auth/Onboarding/LocationScreen';
-import ManageInterestsScreen from '../screens/Auth/Onboarding/ManageInterestsScreen';
-
-// Main Screens
+import ProfileScreen from '../screens/Main/ProfileScreen';
+import OtherUserProfileScreen from '../screens/Main/OtherUserProfileScreen';
 import MapScreen from '../screens/Main/MapScreen';
 import DiscoveryScreen from '../screens/Main/DiscoveryScreen';
 import MyCircle from '../screens/Main/MyCircle';
-import ProfileScreen from '../screens/Main/ProfileScreen';
-import OtherUserProfileScreen from '../screens/Main/OtherUserProfileScreen';
 import EventChatScreen from '../screens/Chat/EventChatScreen';
 import NotificationScreen from '../screens/Notification/NotificationScreen';
+import EventDetails from '../components/EventDetails';
+import ConfirmationScreen from '../screens/ConfirmationScreen';
+import ManageInterestsScreen from '../components/profile/ManageInterestsScreen';
+
+// Zustand store
+import { useUserStore } from '../store/userStore';
 
 // --- Auth Stack ---
 const AuthStack = createNativeStackNavigator();
@@ -40,15 +39,21 @@ function AuthStackScreen() {
 // --- Onboarding Stack ---
 const OnboardingStack = createNativeStackNavigator();
 function OnboardingStackScreen() {
+  // Description: Add LocationScreen between SexScreen and InterestsScreen
+  const LocationScreen =
+    require('../screens/Auth/Onboarding/LocationScreen').default;
   return (
     <OnboardingStack.Navigator screenOptions={{ headerShown: false }}>
       <OnboardingStack.Screen name='NameDob' component={NameDobScreen} />
       <OnboardingStack.Screen name='Sex' component={SexScreen} />
       <OnboardingStack.Screen
+        name='LocationScreen'
+        component={LocationScreen}
+      />
+      <OnboardingStack.Screen
         name='InterestsScreen'
         component={InterestsScreen}
       />
-      <OnboardingStack.Screen name='Location' component={LocationScreen} />
     </OnboardingStack.Navigator>
   );
 }
@@ -71,7 +76,10 @@ function ProfileStackScreen() {
 const Tab = createBottomTabNavigator();
 function MainTabs() {
   return (
-    <Tab.Navigator screenOptions={{ headerShown: false }}>
+    <Tab.Navigator
+      initialRouteName='Map'
+      screenOptions={{ headerShown: false }}
+    >
       <Tab.Screen
         name='Map'
         component={MapScreen}
@@ -99,7 +107,10 @@ function MainTabs() {
         component={MyCircle}
         options={{
           title: 'My Circle',
-          tabBarIcon: ({ color, size }) => <Radar color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => (
+            // Description: Lucide Radar icon for MyCircle tab
+            <Radar color={color} size={size} accessibilityLabel='Radar Icon' />
+          ),
         }}
       />
       <Tab.Screen
@@ -126,11 +137,6 @@ function RootStackScreen() {
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       <RootStack.Screen name='MainTabs' component={MainTabs} />
-      <RootStack.Screen
-        name='Map'
-        component={MapScreen} // Ensure MapScreen is registered here
-        options={{ headerShown: false, title: 'Map' }}
-      />
       <RootStack.Screen
         name='EventChat'
         component={EventChatScreen}
@@ -170,19 +176,20 @@ function RootStackScreen() {
   );
 }
 
-// --- App Navigator ---
-export default function AppNavigator({ user, profileComplete }) {
-  const { loading } = useAuth();
+// --- AppNavigator ---
 
-  if (loading) {
-    return <ActivityIndicator style={{ flex: 1 }} />;
+// Description: AppNavigator now reads user and profileComplete directly from Zustand store
+function AppNavigator() {
+  const user = useUserStore((state) => state.user);
+  const profileComplete = useUserStore((state) => state.profileComplete);
+
+  if (!user) {
+    return <AuthStackScreen />;
   }
-
-  return !user ? (
-    <AuthStackScreen />
-  ) : !profileComplete ? (
-    <OnboardingStackScreen />
-  ) : (
-    <RootStackScreen />
-  );
+  if (!profileComplete) {
+    return <OnboardingStackScreen />;
+  }
+  return <RootStackScreen />;
 }
+
+export default AppNavigator;

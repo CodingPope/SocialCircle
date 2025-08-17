@@ -13,17 +13,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
-import { useAuth } from '../../../context/AuthContext';
+import { useUserStore } from '../../../store/userStore';
+import AnimatedGradientBackground from '../../../components/ui/AnimatedGradientBackground';
 
 function InterestsScreen({ navigation }) {
-  const { user } = useAuth();
+  const user = useUserStore((state) => state.user);
   const [categories, setCategories] = useState([]);
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
-  const [filterText, setFilterText] = useState(''); // State for filtering activities
+  const [filterText, setFilterText] = useState('');
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -35,7 +36,6 @@ function InterestsScreen({ navigation }) {
           interests: categoryDoc.data().interests || [],
         }));
 
-        // Add "All" category
         const allInterests = fetchedCategories.flatMap((cat) => cat.interests);
         fetchedCategories.unshift({
           id: 'all',
@@ -51,7 +51,6 @@ function InterestsScreen({ navigation }) {
         setError('Failed to load categories.');
       }
     };
-
     fetchCategories();
   }, []);
 
@@ -65,28 +64,28 @@ function InterestsScreen({ navigation }) {
   };
 
   const toggle = (itemId) => {
-    setSelected((prev) => {
-      if (prev.includes(itemId)) {
-        // Remove the item if already selected
-        return prev.filter((id) => id !== itemId);
-      } else {
-        // Add the item to the selected list
-        return [...prev, itemId];
-      }
-    });
+    setSelected((prev) =>
+      prev.includes(itemId)
+        ? prev.filter((id) => id !== itemId)
+        : [...prev, itemId]
+    );
   };
 
   const onNext = async () => {
     setLoading(true);
     try {
+      if (selected.length === 0) {
+        setError('Please select at least 1 interest to continue.');
+        setLoading(false);
+        return;
+      }
       if (selected.length > 30) {
         setError('You can select up to 30 interests only.');
         setLoading(false);
         return;
       }
-
       await updateDoc(doc(db, 'users', user.uid), { interests: selected });
-      navigation.navigate('Map'); // Navigate to MapScreen
+      useUserStore.getState().setProfileComplete(true);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -98,7 +97,7 @@ function InterestsScreen({ navigation }) {
     activeCategory === 'all'
       ? Array.from(
           new Map(
-            categories.flatMap((cat) => cat.interests).map((a) => [a.name, a]) // Deduplicate by `name`
+            categories.flatMap((cat) => cat.interests).map((a) => [a.name, a])
           ).values()
         )
       : categories.find((cat) => cat.id === activeCategory)?.interests || [];
@@ -108,24 +107,27 @@ function InterestsScreen({ navigation }) {
   );
 
   return (
-    <SafeAreaView style={styles.safe}>
-      {/* Header */}
-      <View style={styles.header}>
-        {/* Go Back Button */}
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.goBackButton}
-        >
-          <Ionicons name='arrow-back' size={24} color='#333' />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Choose Your Interests</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <AnimatedGradientBackground style={styles.safe}>
+      <SafeAreaView style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.contentContainer}>
+          <View style={styles.header}>
+            <TouchableOpacity
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                } else {
+                  navigation.navigate('SexScreen');
+                }
+              }}
+              style={styles.goBackButton}
+            >
+              <Ionicons name='arrow-back' size={24} color='#fff' />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Choose Your Interests</Text>
+            <View style={{ width: 24 }} />
+          </View>
 
-      {/* ✅ Category Label */}
-      <Text style={styles.sectionLabel}>Select a Category</Text>
-      <View style={styles.categoriesContainer}>
-        {categories.length > 0 && (
+          <Text style={styles.sectionLabel}>Select a Category</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -141,7 +143,7 @@ function InterestsScreen({ navigation }) {
                     )
                     .map((cat) => (
                       <TouchableOpacity
-                        key={cat.id} // Ensure unique key for each category
+                        key={cat.id}
                         style={[
                           styles.categoryChip,
                           activeCategory === cat.id &&
@@ -149,7 +151,7 @@ function InterestsScreen({ navigation }) {
                         ]}
                         onPress={() => {
                           setActiveCategory(cat.id);
-                          if (cat.id !== 'all') setFilterText(''); // Clear filter when switching from "All"
+                          if (cat.id !== 'all') setFilterText('');
                           fadeIn();
                         }}
                       >
@@ -168,175 +170,159 @@ function InterestsScreen({ navigation }) {
               ))}
             </View>
           </ScrollView>
-        )}
-      </View>
-      {/* ✅ Activities Label */}
-      <Text style={styles.sectionLabel}>
-        {activeCategory === 'all'
-          ? 'Filter All Activities'
-          : `Choose Activities in ${
-              categories.find((c) => c.id === activeCategory)?.name || ''
-            }`}
-      </Text>
 
-      {/* ✅ Filter Textbox */}
-      {activeCategory === 'all' && (
-        <TextInput
-          style={styles.filterInput}
-          placeholder='Search activities...'
-          value={filterText}
-          onChangeText={setFilterText}
-        />
-      )}
+          <Text style={styles.sectionLabel}>
+            {activeCategory === 'all'
+              ? 'Filter All Activities'
+              : `Choose Activities in ${
+                  categories.find((c) => c.id === activeCategory)?.name || ''
+                }`}
+          </Text>
 
-      {/* ✅ Selected Count */}
-      <View style={styles.selectedCountRow}>
-        <Text style={styles.selectedCountText}>{selected.length} Selected</Text>
-      </View>
+          {activeCategory === 'all' && (
+            <TextInput
+              style={styles.filterInput}
+              placeholder='Search activities...'
+              placeholderTextColor='rgba(255,255,255,0.6)'
+              value={filterText}
+              onChangeText={setFilterText}
+            />
+          )}
 
-      {/* ✅ Activities */}
-      <Animated.View
-        style={{
-          flex: 1,
-          opacity: fadeAnim,
-        }}
-      >
-        <ScrollView style={styles.activitiesScroll}>
-          <View style={styles.activitiesGrid}>
-            {filteredActivities.length > 0 ? (
-              filteredActivities.map((activity) => (
-                <TouchableOpacity
-                  key={activity.name} // Use unique key for each activity
-                  style={[
-                    styles.activityChip,
-                    selected.includes(activity.name) &&
-                      styles.selectedActivityChip,
-                  ]}
-                  onPress={() => toggle(activity.name)} // Toggle individual activity
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.activityText,
-                      selected.includes(activity.name) &&
-                        styles.selectedActivityText,
-                    ]}
-                  >
-                    {activity.name}
-                  </Text>
-                  {selected.includes(activity.name) && (
-                    <Ionicons
-                      name='checkmark'
-                      size={14}
-                      color='#fff'
-                      style={styles.checkIcon}
-                    />
-                  )}
-                </TouchableOpacity>
-              ))
-            ) : (
-              <Text style={styles.emptyState}>
-                No activities match your search.
-              </Text>
-            )}
+          <View style={styles.selectedCountRow}>
+            <Text style={styles.selectedCountText}>
+              {selected.length} Selected
+            </Text>
           </View>
-        </ScrollView>
-      </Animated.View>
 
-      {/* ✅ Button */}
-      {loading ? (
-        <ActivityIndicator style={{ marginVertical: 20 }} />
-      ) : (
-        <TouchableOpacity style={styles.nextButton} onPress={onNext}>
-          <Text style={styles.nextButtonText}>Next</Text>
-        </TouchableOpacity>
-      )}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-    </SafeAreaView>
+          <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+            <View style={styles.activitiesGrid}>
+              {filteredActivities.length > 0 ? (
+                filteredActivities.map((activity) => (
+                  <TouchableOpacity
+                    key={activity.name}
+                    style={[
+                      styles.activityChip,
+                      selected.includes(activity.name) &&
+                        styles.selectedActivityChip,
+                    ]}
+                    onPress={() => toggle(activity.name)}
+                  >
+                    <Text
+                      style={[
+                        styles.activityText,
+                        selected.includes(activity.name) &&
+                          styles.selectedActivityText,
+                      ]}
+                    >
+                      {activity.name}
+                    </Text>
+                    {selected.includes(activity.name) && (
+                      <Ionicons
+                        name='checkmark'
+                        size={14}
+                        color='#ff6b6b'
+                        style={styles.checkIcon}
+                      />
+                    )}
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.emptyState}>
+                  No activities match your search.
+                </Text>
+              )}
+            </View>
+          </Animated.View>
+
+          {loading ? (
+            <ActivityIndicator style={{ marginVertical: 20 }} color='#fff' />
+          ) : (
+            <TouchableOpacity style={styles.nextButton} onPress={onNext}>
+              <Text style={styles.nextButtonText}>Next</Text>
+            </TouchableOpacity>
+          )}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+        </ScrollView>
+      </SafeAreaView>
+    </AnimatedGradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
+  safe: { flex: 1 },
+  contentContainer: { paddingBottom: 24 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
   },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#333' },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#222',
+    textShadowColor: 'rgba(255,255,255,0.25)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   goBackButton: {
     marginRight: 16,
     padding: 10,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: 8,
   },
-
-  // ✅ Categories
-  categoriesContainer: {
-    paddingVertical: 1,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    backgroundColor: '#fafafa',
-  },
-  categoryRows: {
-    paddingHorizontal: 10,
-  },
+  categoryRows: { paddingHorizontal: 10 },
   categoryRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-start', // Align items to the start
-    flexWrap: 'nowrap', // Prevent wrapping
+    justifyContent: 'flex-start',
+    flexWrap: 'nowrap',
     marginBottom: 8,
   },
-  horizontalScroll: {
-    marginBottom: 8, // Add spacing between rows
-  },
+  horizontalScroll: { marginBottom: 8 },
   categoryChip: {
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: 16,
-    backgroundColor: '#f2f2f2',
+    backgroundColor: 'rgba(255,255,255,0.13)',
     justifyContent: 'center',
-    marginRight: 8, // Add spacing between chips
+    marginRight: 8,
   },
-  activeCategoryChip: {
-    backgroundColor: '#007AFF',
-    shadowColor: '#007AFF',
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 2,
-  },
+  activeCategoryChip: { backgroundColor: '#fff' },
   categoryChipText: {
-    fontSize: 13,
-    color: '#333',
-    fontWeight: '500',
+    fontSize: 14,
+    color: '#222',
+    fontWeight: '600',
+    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
   activeCategoryChipText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: '#ff6b6b',
+    fontWeight: '800',
+    textShadowColor: 'rgba(255,255,255,0.22)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-
-  selectedCountRow: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
+  selectedCountRow: { paddingHorizontal: 16, paddingTop: 8 },
   selectedCountText: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 14,
+    color: '#222',
+    fontWeight: '600',
+    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
-
-  // ✅ Activities
-  activitiesScroll: { flex: 1, paddingHorizontal: 10, marginTop: 4 },
   activitiesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
+    paddingHorizontal: 10,
+    marginTop: 4,
   },
   activityChip: {
-    backgroundColor: '#f7f7f7',
+    backgroundColor: 'rgba(255,255,255,0.16)',
     borderRadius: 14,
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -345,62 +331,73 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   selectedActivityChip: {
-    backgroundColor: '#007AFF',
-    shadowColor: '#007AFF',
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
+    backgroundColor: '#fff',
     transform: [{ scale: 1.05 }],
   },
-  activityText: { fontSize: 13, color: '#333' },
-  selectedActivityText: { color: '#fff', fontWeight: '600' },
+  activityText: {
+    fontSize: 15,
+    color: '#222',
+    fontWeight: '600',
+    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+  },
+  selectedActivityText: {
+    color: '#ff6b6b',
+    fontWeight: '800',
+    textShadowColor: 'rgba(255,255,255,0.22)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   checkIcon: { marginLeft: 5 },
   emptyState: {
-    fontSize: 14,
-    color: '#999',
+    fontSize: 15,
+    color: '#222',
     textAlign: 'center',
     marginTop: 20,
     width: '100%',
+    fontWeight: '600',
+    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
-
-  // ✅ Button
   nextButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: 'rgba(255,255,255,0.22)',
     borderRadius: 25,
     paddingVertical: 14,
     alignItems: 'center',
     margin: 16,
-    shadowColor: '#007AFF',
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 2,
   },
   nextButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#222',
+    fontSize: 17,
+    fontWeight: '700',
+    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
-  error: {
-    color: 'red',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
+  error: { color: 'red', textAlign: 'center', marginBottom: 10 },
   sectionLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#222',
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 4,
+    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
   filterInput: {
     marginHorizontal: 16,
     marginVertical: 8,
     padding: 10,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: 'rgba(255,255,255,0.45)',
     borderRadius: 8,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.13)',
+    color: '#fff',
   },
 });
 
-export default InterestsScreen; // Ensure the component is exported correctly
+export default InterestsScreen;

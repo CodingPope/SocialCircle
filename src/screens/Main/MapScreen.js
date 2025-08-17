@@ -20,7 +20,7 @@ import {
   doc,
   getDoc,
 } from 'firebase/firestore';
-import { useAuth } from '../../context/AuthContext';
+import { useUserStore } from '../../store/userStore';
 import CreateEventScreen from './CreateEventScreen';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import EventListView from '../../components/EventListView';
@@ -40,7 +40,8 @@ const CustomDotMarker = ({ color, label, scale }) => (
 );
 
 export default function MapScreen() {
-  const { user } = useAuth();
+  // Description: Get current user from Zustand userStore
+  const user = useUserStore((state) => state.user);
 
   if (!user) {
     return (
@@ -77,35 +78,48 @@ export default function MapScreen() {
 
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission Denied',
-          'Location permission is required to view events.'
-        );
-        return;
-      }
-      const location = await Location.getCurrentPositionAsync({});
-      const initialRegion = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        latitudeDelta: 0.0922 * 1.5,
-        longitudeDelta: 0.0421 * 1.5,
-      };
-      setRegion(initialRegion);
-      setSelectedFilters((prev) => ({
-        ...prev,
-        interests: userInterests,
-      }));
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert(
+            'Permission Denied',
+            'Location permission is required to view events.'
+          );
+          return;
+        }
 
-      await fetchEventsInRegion(initialRegion, true);
+        const location = await Location.getCurrentPositionAsync({});
+        const initialRegion = {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          latitudeDelta: 0.0922 * 1.5,
+          longitudeDelta: 0.0421 * 1.5,
+        };
+
+        setRegion(initialRegion);
+        await fetchEventsInRegion(initialRegion, true);
+      } catch (error) {
+        console.error('Error loading map data:', error);
+      }
     })();
-  }, [userInterests]);
+  }, []);
+
+  useEffect(() => {
+    if (
+      events.length > 0 ||
+      selectedFilters.interests.length > 0 ||
+      selectedFilters.date ||
+      selectedFilters.genderOnly
+    ) {
+      applyFilters(selectedFilters);
+    }
+  }, [events, selectedFilters]);
 
   const applyFilters = (filters) => {
     setSelectedFilters(filters);
     const { date, interests, genderOnly } = filters;
     let filtered = [...events];
+    if (!events.length) return;
 
     const now = Date.now();
     filtered = filtered.filter((event) => {
@@ -122,11 +136,49 @@ export default function MapScreen() {
       return eventTime && eventTime + 60 * 60 * 1000 > now;
     });
 
-    if (date) filtered = filtered.filter((e) => e.date === date);
-    if (interests?.length > 0) {
-      const interestIds = interests.map((i) => i.id);
-      filtered = filtered.filter((e) => interestIds.includes(e.category));
+    // Date filter: compare by UTC date string (YYYY-MM-DD) to match picker formatting
+    if (date) {
+      filtered = filtered.filter((e) => {
+        let startMs = null;
+        const d = e?.date;
+        if (d?.toDate) startMs = d.toDate().getTime();
+        else if (typeof d?.seconds === 'number') startMs = d.seconds * 1000;
+        else if (d instanceof Date) startMs = d.getTime();
+        else if (typeof d === 'string') {
+          const parsed = Date.parse(d);
+          if (!isNaN(parsed)) startMs = parsed;
+        }
+        if (!startMs) return false;
+        const evDateStr = new Date(startMs).toISOString().split('T')[0];
+        return evDateStr === date;
+      });
     }
+
+    // Fix: interests from filter are strings (names). Events store `interest` as a string.
+    if (Array.isArray(interests) && interests.length > 0) {
+      const interestSet = new Set(
+        interests
+          .map((i) =>
+            (typeof i === 'string' ? i : i?.name || i?.id || '')
+              .toString()
+              .trim()
+              .toLowerCase()
+          )
+          .filter(Boolean)
+      );
+      filtered = filtered.filter((e) => {
+        const evInterest = (
+          typeof e.interest === 'string'
+            ? e.interest
+            : e.interest?.name || e.category || ''
+        )
+          .toString()
+          .trim()
+          .toLowerCase();
+        return evInterest && interestSet.has(evInterest);
+      });
+    }
+
     if (genderOnly) {
       filtered = filtered.filter((e) => e.privacy === genderOnly);
     }
@@ -158,23 +210,75 @@ export default function MapScreen() {
       where('location.latitude', '>=', latMin),
       where('location.latitude', '<=', latMax),
       where('location.longitude', '>=', lngMin),
-      where('location.longitude', '<=', lngMax)
+      where('location.longitude', '<=', lngMax),
+      // Server-side: exclude soft-deleted events
+      where('isDeleted', '==', false)
     );
 
     return new Promise((resolve) => {
-      unsubscribeRef.current = onSnapshot(q, (snap) => {
-        const regionEvents = snap.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setEvents(regionEvents);
-        applyFilters(selectedFilters);
+      unsubscribeRef.current = onSnapshot(
+        q,
+        (snap) => {
+          const nowMs = Date.now();
+          const regionEvents = snap.docs
+            .map((doc) => ({ id: doc.id, ...doc.data() }))
+            // exclude soft-deleted
+            .filter((e) => e.isDeleted !== true)
+            // exclude expired (date + 1h)
+            .filter((event) => {
+              let eventTime = null;
+              if (event.endAt) {
+                if (event.endAt.toDate)
+                  eventTime = event.endAt.toDate().getTime();
+                else if (event.endAt.seconds)
+                  eventTime = event.endAt.seconds * 1000;
+              } else if (event.date) {
+                if (event.date.toDate)
+                  eventTime = event.date.toDate().getTime();
+                else if (event.date.seconds)
+                  eventTime = event.date.seconds * 1000;
+                else if (event.date instanceof Date)
+                  eventTime = event.date.getTime();
+              }
+              return eventTime && eventTime + 60 * 60 * 1000 > nowMs;
+            });
+          setEvents(regionEvents);
+          applyFilters(selectedFilters);
 
-        if (isInitial) {
-          setInitialLoading(false);
+          if (isInitial) {
+            setInitialLoading(false);
+          }
+          resolve();
+        },
+        (error) => {
+          if (error?.code === 'permission-denied') {
+            setEvents([]);
+            try {
+              unsubscribeRef.current && unsubscribeRef.current();
+            } catch {}
+            // also register global once for logout cleanup
+            try {
+              if (!global.unsubscribeAllListeners)
+                global.unsubscribeAllListeners = [];
+              if (unsubscribeRef.current)
+                global.unsubscribeAllListeners.push(unsubscribeRef.current);
+            } catch {}
+            if (isInitial) setInitialLoading(false);
+            resolve();
+            return;
+          }
+          console.error('Map events listener error:', error);
+          if (isInitial) setInitialLoading(false);
+          resolve();
         }
-        resolve();
-      });
+      );
+      // Track globally for general case
+      try {
+        if (!global.unsubscribeAllListeners)
+          global.unsubscribeAllListeners = [];
+        if (unsubscribeRef.current)
+          global.unsubscribeAllListeners.push(unsubscribeRef.current);
+      } catch {}
     });
   };
 
@@ -336,7 +440,7 @@ export default function MapScreen() {
             backgroundColor: 'transparent',
             zIndex: 5,
           }}
-          pointerEvents='auto'
+          pointerEvents='none' // Changed from 'auto' to 'none' to fix touchability
         />
       )}
 
@@ -347,19 +451,22 @@ export default function MapScreen() {
           onRegionChangeComplete={handleRegionChangeComplete}
           onLongPress={handleMapLongPress}
         >
-          {filteredEvents.map((event) => (
-            <Marker
-              key={event.id}
-              coordinate={event.location}
-              onPress={() => handleMarkerPress(event)}
-            >
-              <CustomDotMarker
-                color={getMarkerColor(event)}
-                label={event.attendeeCount?.toString()}
-                scale={1}
-              />
-            </Marker>
-          ))}
+          {filteredEvents
+            // Defensive: ensure marker has a valid location and isn't soft-deleted
+            .filter((e) => e && e.location && !e.isDeleted)
+            .map((event) => (
+              <Marker
+                key={event.id}
+                coordinate={event.location}
+                onPress={() => handleMarkerPress(event)}
+              >
+                <CustomDotMarker
+                  color={getMarkerColor(event)}
+                  label={event.attendeeCount?.toString()}
+                  scale={1}
+                />
+              </Marker>
+            ))}
           {newEventLocation && (
             <Marker coordinate={newEventLocation}>
               <CustomDotMarker color='#007AFF' scale={1} />

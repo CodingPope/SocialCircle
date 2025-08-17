@@ -1,16 +1,17 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 
 export default function ConfirmationScreen({ route, navigation }) {
   const { action, onConfirm } = route.params;
 
-  const handleConfirm = () => {
-    onConfirm();
-    navigation.goBack();
-  };
-
-  const handleCancel = () => {
-    navigation.goBack();
+  const handleConfirm = async () => {
+    try {
+      await onConfirm();
+      navigation.goBack();
+    } catch (error) {
+      console.error('Error during confirmation:', error);
+      Alert.alert('Error', 'An error occurred while processing your request.');
+    }
   };
 
   return (
@@ -23,7 +24,10 @@ export default function ConfirmationScreen({ route, navigation }) {
         <TouchableOpacity style={styles.button} onPress={handleConfirm}>
           <Text style={styles.buttonText}>Yes</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.button} onPress={handleCancel}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.goBack()}
+        >
           <Text style={styles.buttonText}>No</Text>
         </TouchableOpacity>
       </View>

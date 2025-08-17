@@ -1,0 +1,32 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function isImage() { return request.resource.contentType.matches('image/.*'); }
+    function maxSize(bytes) { return request.resource.size < bytes; }
+
+    // Profile images: profileImages/{uid}/{file}
+    match /profileImages/{uid}/{file} {
+      allow read: if true;
+      allow write: if signedIn()
+        && request.auth.uid == uid
+        && isImage()
+        && maxSize(5 * 1024 * 1024); // 5MB limit
+    }
+
+    // Event images: event-images/{eventId}/...
+    // Host-only writes; allow nested files with {file=**}
+    match /event-images/{eventId}/{file=**} {
+      allow read: if true;
+      allow write: if signedIn()
+        && isImage()
+        && maxSize(10 * 1024 * 1024) // 10MB limit
+        && get(/databases/(default)/documents/events/$(eventId)).data.ownerId == request.auth.uid;
+    }
+
+    // Deny everything else explicitly
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

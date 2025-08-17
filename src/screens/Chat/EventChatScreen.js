@@ -14,7 +14,10 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import Modal from 'react-native-modal';
 import {
@@ -25,19 +28,32 @@ import {
   query,
   orderBy,
   getDoc,
-  deleteDoc,
   updateDoc,
   arrayUnion,
+  arrayRemove, // Added for attendee removal
+  writeBatch, // Added for leave event batching
+  serverTimestamp, // Added: ensure consistent timestamps for ordering
 } from 'firebase/firestore';
-import { db, auth } from '../../firebase/config';
+import {
+  db,
+  auth,
+  sendNotification,
+  updateEventCount,
+  deleteEvent, // import soft-delete helper
+} from '../../firebase/config';
 import smileDefault from '../../../assets/smileDefault.png';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import ReportModal from '../../components/ReportModal'; // Import reusable modal component
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import { getApp } from 'firebase/app';
 
 const EventChatScreen = () => {
   const route = useRoute();
   const navigation = useNavigation();
-  const { eventId, locationName: locationNameParam } = route.params;
+  const insets = useSafeAreaInsets();
+  // Make route params defensive & provide default
+  const { eventId, locationName: locationNameParam = null } =
+    route.params || {};
   const [event, setEvent] = useState(null);
   const [attendees, setAttendees] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -51,46 +67,177 @@ const EventChatScreen = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const flatListRef = useRef(null);
 
+  // Track listener unsubscribes so we can stop them immediately on leave
+  const eventUnsubRef = useRef(null);
+  const messagesUnsubRef = useRef(null);
+
+  // --- Read-only / archived checks ---
+  const isSoftDeleted = event?.isDeleted === true;
+
+  // Helper to get event end time in ms: prefer endAt, fallback to date + 1h
+  const getEventEndMs = (ev) => {
+    if (!ev) return null;
+    let endMs = null;
+    if (ev.endAt) {
+      if (ev.endAt.toDate) endMs = ev.endAt.toDate().getTime();
+      else if (typeof ev.endAt.seconds === 'number')
+        endMs = ev.endAt.seconds * 1000;
+    } else if (ev.date) {
+      if (ev.date.toDate) endMs = ev.date.toDate().getTime();
+      else if (typeof ev.date.seconds === 'number')
+        endMs = ev.date.seconds * 1000;
+      else if (ev.date instanceof Date) endMs = ev.date.getTime();
+      // Fallback duration = 1 hour when only start date exists
+      if (endMs) endMs += 60 * 60 * 1000;
+    }
+    return endMs;
+  };
+
+  const endMs = getEventEndMs(event);
+  const nowMs = Date.now();
+  const ended = !!endMs && nowMs >= endMs; // event time has passed
+  const archived = !!endMs && nowMs >= endMs + 3 * 24 * 60 * 60 * 1000; // 3 days after end
+  const readOnly = isSoftDeleted || archived; // Chat write disabled when archived or soft-deleted
+
+  // Helper: Resolve best location label (expanded with more fallbacks & lat/lng variants)
+  const getLocationLabel = (ev = event) => {
+    if (!ev) return 'Location not available';
+
+    // 1. Navigation param (if meaningful)
+    if (
+      locationNameParam &&
+      !/Fetching address|Address not available|Location not specified|Unknown address/i.test(
+        locationNameParam
+      )
+    ) {
+      return locationNameParam;
+    }
+
+    // 2. Direct fields commonly used
+    if (ev.locationName && typeof ev.locationName === 'string')
+      return ev.locationName;
+    if (ev.address && /[a-zA-Z0-9]/.test(ev.address)) return ev.address;
+
+    // 3. Nested location object variations
+    const loc = ev.location;
+    if (loc) {
+      if (typeof loc === 'string' && /[a-zA-Z0-9]/.test(loc)) return loc;
+      if (loc.address && /[a-zA-Z0-9]/.test(loc.address)) return loc.address;
+      if (loc.name && /[a-zA-Z0-9]/.test(loc.name)) return loc.name;
+      if (loc.label && /[a-zA-Z0-9]/.test(loc.label)) return loc.label;
+
+      // Geo point variants
+      const lat = loc.latitude || loc.lat || loc._lat;
+      const lng = loc.longitude || loc.lng || loc._long || loc.lon;
+      if (
+        typeof lat === 'number' &&
+        typeof lng === 'number' &&
+        !Number.isNaN(lat) &&
+        !Number.isNaN(lng)
+      ) {
+        return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      }
+    }
+
+    // 4. Any legacy field
+    if (ev.city && ev.state) return `${ev.city}, ${ev.state}`;
+    if (ev.city) return ev.city;
+
+    return 'Location not available';
+  };
+
+  const [resolvedLocationLabel, setResolvedLocationLabel] = useState(
+    'Location not available'
+  );
+
+  // Recompute when event or param changes
+  useEffect(() => {
+    const label = getLocationLabel();
+    setResolvedLocationLabel(label);
+  }, [event, locationNameParam]);
+
+  // Debug (remove in production)
+  useEffect(() => {
+    if (event) {
+      console.log('[EventChat] Event location debug:', {
+        eventId: eventId,
+        locationNameParam,
+        address: event.address,
+        locationField: event.location,
+        locationName: event.locationName,
+        computed: getLocationLabel(),
+      });
+    }
+  }, [event, locationNameParam, eventId]);
+
   // Fetch event info + attendees
   useEffect(() => {
     if (!auth.currentUser) return;
 
-    const unsub = onSnapshot(doc(db, 'events', eventId), async (snap) => {
-      const data = snap.data();
-      setEvent(data);
+    const unsub = onSnapshot(
+      doc(db, 'events', eventId),
+      async (snap) => {
+        const data = snap.data();
+        setEvent(data);
 
-      if (data?.attendees?.length) {
-        const attendeePromises = data.attendees.map(async (uid) => {
-          const userDoc = await getDoc(doc(db, 'users', uid));
-          const userData = userDoc.exists() ? userDoc.data() : {};
-          return {
-            id: uid,
-            displayName:
-              userData.displayName ||
-              `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
-              'User',
-            photoURL:
-              userData.photoURL ||
-              userData.profileImage ||
-              userData.avatarURL ||
-              null,
-          };
-        });
-        const attendeeData = await Promise.all(attendeePromises);
-        setAttendees(attendeeData);
-      } else {
-        setAttendees([]);
+        if (data?.attendees?.length) {
+          const attendeePromises = data.attendees.map(async (uid) => {
+            const userDoc = await getDoc(doc(db, 'users', uid));
+            const userData = userDoc.exists() ? userDoc.data() : {};
+            return {
+              id: uid,
+              displayName:
+                userData.displayName ||
+                `${userData.firstName || ''} ${
+                  userData.lastName || ''
+                }`.trim() ||
+                'User',
+              photoURL:
+                userData.photoURL ||
+                userData.profileImage ||
+                userData.avatarURL ||
+                null,
+              // Added: ranking with fallback to 'rating'
+              ranking:
+                typeof userData.ranking === 'number'
+                  ? userData.ranking
+                  : typeof userData.rating === 'number'
+                  ? userData.rating
+                  : null,
+            };
+          });
+          const attendeeData = await Promise.all(attendeePromises);
+          setAttendees(attendeeData);
+        } else {
+          setAttendees([]);
+        }
+      },
+      (error) => {
+        if (error?.code === 'permission-denied') {
+          setEvent(null);
+          setAttendees([]);
+          return;
+        }
+        console.error('Event listener error:', error);
       }
-    });
+    );
+
+    // Save unsub refs for immediate cleanup (leave flow)
+    eventUnsubRef.current = unsub;
 
     // ✅ Track globally for logout cleanup
     if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
     global.unsubscribeAllListeners.push(unsub);
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+      if (eventUnsubRef.current === unsub) eventUnsubRef.current = null;
+    };
   }, [eventId, auth.currentUser]);
 
-  // ✅ Chat messages listener
+  // ✅ Chat messages listener (single source with error handler)
   useEffect(() => {
     if (!auth.currentUser) return;
 
@@ -99,25 +246,49 @@ const EventChatScreen = () => {
       orderBy('createdAt', 'asc')
     );
 
-    const unsub = onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    });
+    const unsub = onSnapshot(
+      q,
+      { includeMetadataChanges: true },
+      (snap) => {
+        // Ignore local pending writes to avoid brief flicker before rule rejection/commit
+        const items = snap.docs
+          .filter((d) => !d.metadata.hasPendingWrites)
+          .map((d) => ({ id: d.id, ...d.data() }));
+        setMessages(items);
+        setLoading(false);
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      },
+      (error) => {
+        if (error?.code === 'permission-denied') {
+          setMessages([]);
+          setLoading(false);
+          return;
+        }
+        console.error('Chat messages listener error:', error);
+      }
+    );
+
+    // Save unsub refs for immediate cleanup (leave flow)
+    messagesUnsubRef.current = unsub;
 
     if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
     global.unsubscribeAllListeners.push(unsub);
 
-    return () => unsub();
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+      if (messagesUnsubRef.current === unsub) messagesUnsubRef.current = null;
+    };
   }, [eventId, auth.currentUser]);
 
   // ✅ Host user info when event changes (no snapshot, just getDoc)
   useEffect(() => {
-    const hostId = event?.hostId || event?.ownerId;
-    if (hostId) {
-      getDoc(doc(db, 'users', hostId)).then((userDoc) => {
+    const ownerId = event?.ownerId;
+    if (ownerId) {
+      getDoc(doc(db, 'users', ownerId)).then((userDoc) => {
         if (userDoc.exists()) {
           const userData = userDoc.data();
           setHostUser({
@@ -126,8 +297,13 @@ const EventChatScreen = () => {
               `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
               'User',
             photoURL: userData.profileImage || userData.avatarURL || null,
+            // NOTE: 'ranking' legacy field; fall back to 'rating' (current schema)
             ranking:
-              typeof userData.ranking === 'number' ? userData.ranking : null,
+              typeof userData.ranking === 'number'
+                ? userData.ranking
+                : typeof userData.rating === 'number'
+                ? userData.rating
+                : null,
           });
         } else {
           setHostUser(null);
@@ -136,71 +312,7 @@ const EventChatScreen = () => {
     } else {
       setHostUser(null);
     }
-  }, [event?.hostId, event?.ownerId]);
-
-  // Fetch chat messages
-  useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const q = query(
-      collection(db, 'chats', eventId, 'messages'),
-      orderBy('createdAt', 'asc')
-    );
-
-    const unsub = onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-    });
-
-    if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
-    global.unsubscribeAllListeners.push(unsub);
-
-    return () => unsub();
-  }, [eventId, auth.currentUser]);
-
-  // Fetch host user info when event changes
-  useEffect(() => {
-    // Description: Support both hostId and ownerId for event creator
-    const hostId = event?.hostId || event?.ownerId;
-    if (hostId) {
-      getDoc(doc(db, 'users', hostId)).then((userDoc) => {
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          setHostUser({
-            displayName:
-              userData.displayName ||
-              `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
-              'User',
-            photoURL:
-              userData.profileImage ||
-              userData.profileImage ||
-              userData.avatarURL ||
-              null,
-            ranking:
-              typeof userData.ranking === 'number' ? userData.ranking : null,
-          });
-        } else {
-          setHostUser(null);
-        }
-      });
-    } else {
-      setHostUser(null);
-    }
-  }, [event?.hostId, event?.ownerId]);
-
-  // Send message
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-    await addDoc(collection(db, 'chats', eventId, 'messages'), {
-      text: input,
-      senderId: auth.currentUser?.uid,
-      createdAt: new Date(),
-    });
-    setInput('');
-  };
+  }, [event?.ownerId]);
 
   // Check if current user is attendee
   const isAttendee =
@@ -208,62 +320,117 @@ const EventChatScreen = () => {
     event.attendees.includes(auth.currentUser?.uid);
 
   // Check if current user is event creator (support both ownerId and hostId)
-  const isCreator =
-    event?.ownerId === auth.currentUser?.uid ||
-    event?.hostId === auth.currentUser?.uid;
+  const isCreator = event?.ownerId === auth.currentUser?.uid;
+
+  // Block chat access for non-members entirely
+  useEffect(() => {
+    if (!event || !auth.currentUser) return;
+    const isMember = isAttendee || isCreator;
+    if (!isMember) {
+      Alert.alert(
+        'No Access',
+        'Only attendees or the host can view this chat.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    }
+  }, [event?.attendees, event?.ownerId, auth.currentUser]);
+
+  // Send message
+  const sendMessage = async () => {
+    // Description: Validate input and permissions, then write message with server timestamp
+    const trimmed = (input || '').trim();
+    if (!trimmed) return;
+
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      Alert.alert('Not signed in', 'Please sign in to send messages.');
+      return;
+    }
+
+    // Soft guards in UI (rules still enforce): must be host or attendee
+    const allowed = isAttendee || isCreator;
+    if (!allowed) {
+      Alert.alert(
+        'Not allowed',
+        'Only attendees or the host can send messages.'
+      );
+      return;
+    }
+
+    // Prevent writes when event is archived or soft-deleted (3+ days after end)
+    if (readOnly) {
+      Alert.alert('Chat Archived', 'This chat is read-only for this event.');
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, 'chats', eventId, 'messages'), {
+        text: trimmed,
+        senderId: uid,
+        createdAt: serverTimestamp(), // Use server time for stable ordering
+      });
+      setInput('');
+    } catch (err) {
+      console.error('sendMessage error:', err);
+      const code = err?.code || '';
+      let msg = err?.message || 'Failed to send message.';
+      if (code.includes('permission') || code.includes('denied')) {
+        msg = 'You need to be an attendee or the host to chat in this event.';
+      } else if (code.includes('unavailable')) {
+        msg = 'Network unavailable. Please try again.';
+      }
+      Alert.alert('Send failed', msg);
+    }
+  };
 
   // Accept request handler
   const handleAcceptRequest = async (userId) => {
+    if (isSoftDeleted || ended) {
+      Alert.alert(
+        'Action unavailable',
+        'Cannot modify requests for archived or ended events.'
+      );
+      return;
+    }
     try {
-      const eventRef = doc(db, 'events', eventId);
-      await updateDoc(eventRef, {
-        attendees: arrayUnion(userId),
-        requests: event.requests.filter((req) => req !== userId),
-      });
+      const functions = getFunctions(getApp(), 'us-central1');
+      const accept = httpsCallable(functions, 'acceptRsvpRequest');
+      await accept({ eventId, userId });
 
-      // Notify the requester
-      const notificationRef = collection(db, 'notifications');
-      await addDoc(notificationRef, {
-        type: 'request_accepted',
-        eventId: eventId,
-        recipientId: userId,
-        createdAt: new Date(),
-      });
-
-      setEvent((prev) => ({
-        ...prev,
-        requests: prev.requests.filter((req) => req !== userId),
-      }));
+      // Optimistic local update; snapshot will reconcile
+      setEvent((prev) =>
+        prev
+          ? { ...prev, requests: (prev.requests || []).filter((r) => r !== userId) }
+          : prev
+      );
     } catch (err) {
-      console.error('Error accepting request:', err.message);
-      alert('Failed to accept request. Please check your permissions.');
+      console.error('Error accepting request:', err.message || err);
+      alert('Failed to accept request. Please try again.');
     }
   };
 
   // Decline request handler
   const handleDeclineRequest = async (userId) => {
+    if (isSoftDeleted || ended) {
+      Alert.alert(
+        'Action unavailable',
+        'Cannot modify requests for archived or ended events.'
+      );
+      return;
+    }
     try {
-      const eventRef = doc(db, 'events', eventId);
-      await updateDoc(eventRef, {
-        requests: event.requests.filter((req) => req !== userId),
-      });
+      const functions = getFunctions(getApp(), 'us-central1');
+      const decline = httpsCallable(functions, 'declineRsvpRequest');
+      await decline({ eventId, userId });
 
-      // Notify the requester
-      const notificationRef = collection(db, 'notifications');
-      await addDoc(notificationRef, {
-        type: 'request_declined',
-        eventId: eventId,
-        recipientId: userId,
-        createdAt: new Date(),
-      });
-
-      setEvent((prev) => ({
-        ...prev,
-        requests: prev.requests.filter((req) => req !== userId),
-      }));
+      setEvent((prev) =>
+        prev
+          ? { ...prev, requests: (prev.requests || []).filter((r) => r !== userId) }
+          : prev
+      );
     } catch (err) {
-      console.error('Error declining request:', err.message);
-      alert('Failed to decline request. Please check your permissions.');
+      console.error('Error declining request:', err.message || err);
+      alert('Failed to decline request. Please try again.');
     }
   };
 
@@ -283,6 +450,8 @@ const EventChatScreen = () => {
           ranking:
             typeof userData.ranking === 'number'
               ? userData.ranking.toFixed(1)
+              : typeof userData.rating === 'number'
+              ? userData.rating.toFixed(1)
               : 'Unrated',
         };
       }
@@ -322,25 +491,155 @@ const EventChatScreen = () => {
     setIsReportModalVisible(true);
   };
 
-  // Long press attendee handler
-  const handleLongPressAttendee = (attendee) => {
-    setSelectedUser({ id: attendee.id, type: 'attendee', attendee });
-    setIsReportModalVisible(true);
+  // Long press attendee handler (improved cross-platform options)
+  const openAttendeeOptions = (attendee) => {
+    if (!attendee) return;
+    // Host removal / report options
+    if (isCreator) {
+      Alert.alert(attendee.displayName || 'Attendee', 'Choose an action', [
+        {
+          text: 'View Profile',
+          onPress: () => {
+            setIsModalVisible(false);
+            navigation.navigate('OtherUserProfile', { userId: attendee.id });
+          },
+        },
+        {
+          text: 'Remove From Event',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert(
+              'Confirm Removal',
+              'Remove this attendee? They will lose chat access.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Remove',
+                  style: 'destructive',
+                  onPress: () => handleRemoveUser(attendee.id),
+                },
+              ]
+            ),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    } else {
+      // Non-host: open report modal (reuse existing)
+      setSelectedUser({ id: attendee.id, type: 'attendee', attendee });
+      setIsReportModalVisible(true);
+    }
   };
 
   // Remove user from event
   const handleRemoveUser = async (userId) => {
+    if (isSoftDeleted || ended) {
+      Alert.alert(
+        'Action unavailable',
+        'Cannot remove attendees from archived or ended events.'
+      );
+      return;
+    }
+    if (!userId || !eventId) return;
+    if (userId === event?.ownerId) {
+      Alert.alert('You cannot remove the host of the event.');
+      return;
+    }
     try {
       const eventRef = doc(db, 'events', eventId);
-      await updateDoc(eventRef, {
-        attendees: event.attendees.filter((uid) => uid !== userId),
-      });
-      setAttendees((prev) => prev.filter((attendee) => attendee.id !== userId));
-      Alert.alert('User removed successfully.');
+      // Description: Atomically remove user from event attendees
+      await updateDoc(eventRef, { attendees: arrayRemove(userId) });
+
+      // Description: Remove event reference from user's attended / attending arrays
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        attendedEvents: arrayRemove(eventId),
+        attendingEvents: arrayRemove(eventId), // legacy field support
+      }).catch(() => {}); // swallow if fields missing
+
+      // Optional: system message (could be used later for audit trail)
+      // await addDoc(collection(db, 'chats', eventId, 'messages'), {
+      //   text: 'A user was removed by the host.',
+      //   senderId: 'system',
+      //   createdAt: new Date(),
+      // });
+
+      // Local optimistic update; snapshot will reconcile
+      setAttendees((prev) => prev.filter((a) => a.id !== userId));
+      Alert.alert('Removed', 'User removed from event.');
+      setIsReportModalVisible(false);
     } catch (err) {
       console.error('Error removing user:', err.message);
-      Alert.alert('Failed to remove user.');
+      Alert.alert('Removal Failed', 'Could not remove user. Try again.');
     }
+  };
+
+  // Description: Allow a non-host attendee to leave the event (removes from event + user doc)
+  const handleLeaveEvent = async () => {
+    if (isSoftDeleted || ended) {
+      Alert.alert(
+        'Action unavailable',
+        'Cannot modify attendance for archived or ended events.'
+      );
+      return;
+    }
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid || !eventId) return;
+    if (isCreator) return; // Creator uses delete flow instead
+
+    Alert.alert(
+      'Leave Event',
+      'Are you sure you want to leave this event? You will lose access to the chat.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Proactively stop listeners to avoid permission-denied errors during transition
+              try {
+                eventUnsubRef.current && eventUnsubRef.current();
+              } catch {}
+              try {
+                messagesUnsubRef.current && messagesUnsubRef.current();
+              } catch {}
+              eventUnsubRef.current = null;
+              messagesUnsubRef.current = null;
+
+              const functions = getFunctions(getApp(), 'us-central1');
+              const leave = httpsCallable(functions, 'leaveEvent');
+              await leave({ eventId });
+
+              // Optimistic local updates
+              setAttendees((prev) => prev.filter((a) => a.id !== currentUid));
+              setEvent((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      attendees: (prev.attendees || []).filter(
+                        (id) => id !== currentUid
+                      ),
+                    }
+                  : prev
+              );
+
+              // Navigate back out of chat
+              setIsModalVisible(false);
+              navigation.goBack();
+            } catch (err) {
+              console.error('Leave event error:', err);
+              const code = err?.code || '';
+              let msg = err?.message || 'Could not leave the event.';
+              if (code.includes('unauthenticated')) msg = 'Please sign in.';
+              else if (code.includes('permission') || code.includes('denied'))
+                msg = "You don't have permission to leave this event.";
+              else if (code.includes('not-found')) msg = 'Event not found.';
+              Alert.alert('Leave Failed', msg);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Report submit handler
@@ -375,6 +674,20 @@ const EventChatScreen = () => {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Archived / Ended banner */}
+      {(isSoftDeleted || ended) && (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>
+            {isSoftDeleted
+              ? 'This event has been archived. Chat is read-only.'
+              : archived
+              ? 'This event ended over 3 days ago. Chat is read-only.'
+              : 'This event has ended. Chat remains open for 3 days.'}
+          </Text>
+        </View>
+      )}
+
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -386,8 +699,30 @@ const EventChatScreen = () => {
           data={messages}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
-            const sender = attendees.find((a) => a.id === item.senderId);
+            const isSystem =
+              item?.senderId === 'system' || item?.type === 'system';
+            if (isSystem) {
+              return (
+                <View style={styles.systemContainer}>
+                  <Text style={styles.systemText}>
+                    {item?.text || 'System update'}
+                  </Text>
+                </View>
+              );
+            }
+
+            const isHost = item.senderId === event?.ownerId;
+            const sender =
+              isHost && hostUser
+                ? {
+                    id: event.ownerId,
+                    displayName: hostUser.displayName,
+                    photoURL: hostUser.photoURL,
+                  }
+                : attendees.find((a) => a.id === item.senderId);
             const isCurrentUser = item.senderId === auth.currentUser?.uid;
+            const displayName =
+              sender?.displayName || (isHost ? 'Host' : 'User');
             return (
               <View
                 style={{
@@ -400,7 +735,8 @@ const EventChatScreen = () => {
                 <TouchableOpacity
                   onPress={() => {
                     navigation.navigate('OtherUserProfile', {
-                      userId: sender?.id,
+                      userId:
+                        sender?.id || (isHost ? event?.ownerId : undefined),
                     });
                   }}
                   onLongPress={() => handleLongPressMessage(item)}
@@ -409,7 +745,10 @@ const EventChatScreen = () => {
                     source={
                       sender?.photoURL ? { uri: sender.photoURL } : smileDefault // Fallback to default image
                     }
-                    style={styles.messageAvatar}
+                    style={[
+                      styles.messageAvatar,
+                      isHost && styles.hostAvatarBorder,
+                    ]}
                   />
                 </TouchableOpacity>
                 <View
@@ -421,14 +760,18 @@ const EventChatScreen = () => {
                   <TouchableOpacity
                     onPress={() => {
                       navigation.navigate('OtherUserProfile', {
-                        userId: sender?.id,
+                        userId:
+                          sender?.id || (isHost ? event?.ownerId : undefined),
                       });
                     }}
                     onLongPress={() => handleLongPressMessage(item)}
                   >
-                    <Text style={styles.senderName}>
-                      {sender?.displayName || 'User'}
-                    </Text>
+                    <View
+                      style={{ flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Text style={styles.senderName}>{displayName}</Text>
+                      {isHost && <Text style={styles.hostChip}>HOST</Text>}
+                    </View>
                   </TouchableOpacity>
                   <View
                     style={[
@@ -452,20 +795,44 @@ const EventChatScreen = () => {
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
-              placeholder='Type a message...'
+              placeholder={
+                isSoftDeleted
+                  ? 'Event archived — chat read-only'
+                  : archived
+                  ? 'Chat archived — read-only'
+                  : ended
+                  ? 'Event ended — chat open for 3 days'
+                  : 'Type a message...'
+              }
               value={input}
               onChangeText={setInput}
-              onSubmitEditing={sendMessage}
+              onSubmitEditing={() => {
+                if (!readOnly) sendMessage();
+              }}
+              editable={!readOnly}
               returnKeyType='send'
             />
-            <TouchableOpacity onPress={sendMessage} style={styles.sendButton}>
+            <TouchableOpacity
+              onPress={sendMessage}
+              style={[
+                styles.sendButton,
+                (readOnly || !(input || '').trim()) && {
+                  opacity: 0.5,
+                },
+              ]}
+              disabled={readOnly || !(input || '').trim()}
+            >
               <Text style={styles.sendText}>Send</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={{ padding: 16, alignItems: 'center' }}>
             <Text style={{ color: '#888' }}>
-              Only attendees or the event creator can chat in this event.
+              {isSoftDeleted
+                ? 'This event has been archived. Chat is read-only.'
+                : ended
+                ? 'This event has ended.'
+                : 'Only attendees or the event creator can chat in this event.'}
             </Text>
           </View>
         )}
@@ -480,7 +847,11 @@ const EventChatScreen = () => {
           backdropOpacity={0.4}
         >
           <ScrollView
-            style={styles.modalContent}
+            style={[
+              styles.modalContent,
+              { paddingBottom: (insets.bottom || 0) + 32 }, // Ensure bottom actions are above home indicator / nav bar
+            ]}
+            contentContainerStyle={{ paddingBottom: (insets.bottom || 0) + 32 }}
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.dragHandle} />
@@ -491,14 +862,24 @@ const EventChatScreen = () => {
               activeOpacity={hostUser ? 0.7 : 1}
               onPress={() => {
                 // Description: Consistent profile navigation logic + close modal after navigation
-                const hostId = event?.hostId || event?.ownerId;
-                if (hostUser && hostId) {
+                const ownerId = event?.ownerId;
+                if (hostUser && ownerId) {
                   setIsModalVisible(false);
-                  if (hostId === auth.currentUser?.uid) {
+                  if (ownerId === auth.currentUser?.uid) {
                     // Navigate to the main Profile tab
-                    navigation.navigate('MainTabs', { screen: 'ProfileStack' });
+                    navigation.reset({
+                      index: 0,
+                      routes: [
+                        {
+                          name: 'MainTabs',
+                          params: { screen: 'ProfileStack' },
+                        },
+                      ],
+                    });
                   } else {
-                    navigation.navigate('OtherUserProfile', { userId: hostId });
+                    navigation.navigate('OtherUserProfile', {
+                      userId: ownerId,
+                    });
                   }
                 }
               }}
@@ -520,7 +901,7 @@ const EventChatScreen = () => {
                     </Text>
                     <Text style={styles.hostRanking}>
                       {typeof hostUser.ranking === 'number'
-                        ? `Ranking: ${hostUser.ranking.toFixed(1)} ⭐`
+                        ? `⭐ Ranking: ${hostUser.ranking.toFixed(1)} `
                         : 'Ranking: Unrated'}
                     </Text>
                   </View>
@@ -541,19 +922,20 @@ const EventChatScreen = () => {
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Location</Text>
               <TouchableOpacity
-                onPress={() =>
-                  Linking.openURL(
-                    `https://maps.google.com/?q=${
-                      locationNameParam || event?.locationName || 'Location'
-                    }`
-                  )
-                }
+                onPress={() => {
+                  if (
+                    resolvedLocationLabel &&
+                    resolvedLocationLabel !== 'Location not available'
+                  ) {
+                    Linking.openURL(
+                      `https://maps.google.com/?q=${encodeURIComponent(
+                        resolvedLocationLabel
+                      )}`
+                    );
+                  }
+                }}
               >
-                <Text style={styles.linkText}>
-                  {locationNameParam ||
-                    event?.locationName ||
-                    'Location not available'}
-                </Text>
+                <Text style={styles.linkText}>{resolvedLocationLabel}</Text>
               </TouchableOpacity>
             </View>
 
@@ -622,13 +1004,8 @@ const EventChatScreen = () => {
                         userId: item.id,
                       });
                     }}
-                    onLongPress={() => {
-                      if (isCreator) {
-                        setSelectedUser({ id: item.id, type: 'attendee' });
-                        setIsReportModalVisible(true);
-                      }
-                    }}
-                    delayLongPress={500} // smoother long press
+                    onLongPress={() => openAttendeeOptions(item)}
+                    delayLongPress={350}
                   >
                     <Image
                       source={
@@ -726,8 +1103,25 @@ const EventChatScreen = () => {
                         style: 'destructive',
                         onPress: () => {
                           // Description: Delete event from Firestore
-                          const eventRef = doc(db, 'events', eventId);
-                          deleteDoc(eventRef)
+                          // const eventRef = doc(db, 'events', eventId);
+                          // deleteDoc(eventRef)
+                          //   .then(() => {
+                          //     navigation.goBack();
+                          //     Alert.alert(
+                          //       'Event Deleted',
+                          //       'The event has been deleted.'
+                          //     );
+                          //   })
+                          //   .catch((error) => {
+                          //     console.error('Error deleting event:', error);
+                          //     Alert.alert(
+                          //       'Error',
+                          //       'Failed to delete the event.'
+                          //     );
+                          //   });
+
+                          // Soft delete flow
+                          deleteEvent(eventId, auth.currentUser.uid)
                             .then(() => {
                               navigation.goBack();
                               Alert.alert(
@@ -747,7 +1141,7 @@ const EventChatScreen = () => {
                     ]
                   );
                 } else {
-                  console.log('Leave Event');
+                  handleLeaveEvent();
                 }
               }}
             >
@@ -780,15 +1174,42 @@ const EventChatScreen = () => {
 
 const styles = StyleSheet.create({
   messageAvatar: {
-    width: 36,
-    height: 36,
+    width: 45,
+    height: 45,
     borderRadius: 10,
     marginHorizontal: 6,
     backgroundColor: '#eee',
   },
+  hostAvatarBorder: {
+    borderWidth: 2,
+    borderColor: '#8B5CF6', // purple border for host
+  },
   senderName: { fontSize: 12, fontWeight: 'bold', marginBottom: 2 },
+  hostChip: {
+    marginLeft: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: '#8B5CF6',
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+    overflow: 'hidden',
+  },
+  systemContainer: {
+    alignSelf: 'center',
+    backgroundColor: '#EFEFEF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginVertical: 6,
+  },
+  systemText: {
+    color: '#666',
+    fontSize: 12,
+  },
   messageBubble: {
-    borderRadius: 16,
+    borderRadius: 20, // pill/oval shape
     paddingVertical: 8,
     paddingHorizontal: 12,
     marginTop: 2,
@@ -796,7 +1217,7 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     padding: 8,
-    marginBottom: 10,
+    marginBottom: 25,
     borderTopWidth: 1,
     borderColor: '#eee',
     backgroundColor: '#fafafa',
@@ -818,7 +1239,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: '90%',
+    maxHeight: '95%', // Slightly taller & allow internal padding to show last button
   },
   card: {
     backgroundColor: '#fff',
@@ -987,6 +1408,18 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 14,
     marginTop: 8,
+  },
+  banner: {
+    backgroundColor: '#FFEB3B',
+    padding: 10,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderColor: '#FFD54F',
+  },
+  bannerText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
   },
 });
 

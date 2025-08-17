@@ -71,6 +71,33 @@ export default function DiscoveryScreen() {
   }, []);
 
   useEffect(() => {
+    async function preloadData() {
+      try {
+        const [location, interests] = await Promise.all([
+          Location.getCurrentPositionAsync({}),
+          fetchUserInterests(),
+        ]);
+        setUserLocation(location.coords);
+        setUserInterests(interests);
+
+        const cachedEvents = await AsyncStorage.getItem('hotEvents');
+        if (cachedEvents) {
+          setEvents(JSON.parse(cachedEvents));
+        }
+
+        const newEvents = await fetchHotEvents(interests, location.coords);
+        const filteredEvents = newEvents.filter((event) => !event.isDeleted);
+        setEvents(filteredEvents);
+        await AsyncStorage.setItem('hotEvents', JSON.stringify(filteredEvents));
+      } catch (error) {
+        console.error('Error preloading data:', error);
+      }
+    }
+
+    preloadData();
+  }, []);
+
+  useEffect(() => {
     if (
       (activeTab === 'New' || activeTab === 'This Week') &&
       userInterests.length > 0
@@ -93,37 +120,40 @@ export default function DiscoveryScreen() {
   }, [activeTab, selectedInterest, userLocation]);
 
   async function enrichEvents(data) {
-    return await Promise.all(
+    // Description: Enrich events with host user data using canonical ownerId
+    const enriched = await Promise.all(
       data.map(async (event) => {
+        let userData = null;
+        const ownerId =
+          typeof event.ownerId === 'string' && event.ownerId.length > 0
+            ? event.ownerId
+            : undefined;
         try {
-          const userData = await fetchUserById(event.ownerId);
-          return {
-            ...event,
-            userData: {
-              name: `${userData.firstName} ${userData.lastName}`.trim(),
-              photoURL: userData.profileImage,
-              rating: userData.rating,
-            },
-            formattedDate: event.date?.seconds
-              ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : 'Date TBD',
-          };
-        } catch {
-          return {
-            ...event,
-            userData: { name: 'Unknown Host', photoURL: null, rating: 0 },
-            formattedDate: 'Date TBD',
-          };
+          if (ownerId) {
+            userData = await fetchUserById(ownerId);
+          } else {
+            console.warn('[DiscoveryScreen] Event missing ownerId:', event.id);
+          }
+        } catch (err) {
+          console.error('[DiscoveryScreen] Error fetching host user:', err);
         }
+        return {
+          ...event,
+          userData,
+          hostName:
+            userData && (userData.firstName || userData.lastName)
+              ? `${userData.firstName || ''} ${
+                  userData.lastName || ''
+                }`.trim() || 'Unknown Host'
+              : 'Unknown Host',
+          hostPhoto: userData?.profileImage || null,
+          hostRating:
+            typeof userData?.rating === 'number' ? userData.rating : null,
+        };
       })
     );
+    // Always return enriched events, even if host is missing
+    return enriched;
   }
 
   async function loadEvents(reset = false) {
@@ -155,16 +185,13 @@ export default function DiscoveryScreen() {
     }
 
     const enriched = await enrichEvents(newEvents);
-
     setEvents((prevEvents) => {
       const merged = reset ? enriched : [...prevEvents, ...enriched];
-
       // De-duplicate by ID
       const uniqueById = merged.filter(
         (event, index, self) =>
           index === self.findIndex((e) => e.id === event.id)
       );
-
       return uniqueById;
     });
   }
@@ -294,9 +321,15 @@ export default function DiscoveryScreen() {
                   latitude: event.location?.latitude,
                   longitude: event.location?.longitude,
                 },
-                hostName: event.userData?.name,
-                hostPhoto: event.userData?.photoURL,
-                hostRating: event.userData?.rating,
+                // Always provide fallback host info for missing userData
+                hostName: event.hostName || 'Unknown Host',
+                hostPhoto:
+                  event.hostPhoto ||
+                  require('../../../assets/smileDefault.png'),
+                hostRating:
+                  typeof event.hostRating === 'number'
+                    ? event.hostRating
+                    : null,
                 formattedDate: event.formattedDate,
                 interest: event.interest,
                 attendees: event.attendees,

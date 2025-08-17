@@ -1,46 +1,98 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read access to all documents for authenticated users
-    match /{document=**} {
-      allow read: if request.auth != null;
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function isEventHost(e) {
+      return signedIn() && (
+        request.auth.uid == e.data.ownerId || request.auth.uid == e.data.hostId
+      );
+    }
+    function isAttendee(e) { return signedIn() && (request.auth.uid in (e.data.attendees == null ? [] : e.data.attendees)); }
+    function isValidDeviceToken(t) {
+      return t == null || (t is string && t != '' && t.matches('^ExponentPushToken.*'));
     }
 
-    // Rules for the 'notifications' collection
-    match /notifications/{notificationId} {
-      // Allow creating notifications if the user is authenticated
-      allow create: if request.auth != null;
+    // Helpers for safe list ops
+    function asList(x) { return x is list ? x : []; }
+    function listSize(x) { return (x is list) ? x.size() : 0; }
+    function listHasAll(x, vals) { return (x is list) && x.hasAll(vals); }
 
-      // Allow reading notifications if the user is the recipient
-      allow read: if request.auth != null && resource.data.recipientId == request.auth.uid;
-
-      // Allow updating notifications if the user is the recipient
-      allow update: if request.auth != null && resource.data.recipientId == request.auth.uid;
+    function isChatParticipant(eventId) {
+      return signedIn() && (
+        request.auth.uid in get(/databases/$(database)/documents/chats/$(eventId)).data.participants
+      );
     }
 
-    // Rules for the 'events' collection
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken);
+      allow update: if isOwner(uid);
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /events/{eventId} {
-      // Allow creating events if the user is authenticated
-      allow create: if request.auth != null;
+      allow read: if signedIn();
+      allow create: if signedIn();
 
-      // Allow reading events for authenticated users
-      allow read: if request.auth != null;
+      // Host-initiated updates
+      allow update: if isEventHost(resource);
 
-      // Allow updating event requests if the user is authenticated
-      allow update: if request.auth != null && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requests']);
-      
-      // Allow updating events if the user is the owner
-      allow update: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      // Self-leave (safe against nulls) OR RSVP request (safe against nulls)
+      allow update: if signedIn() && (
+        // Self-leave: only attendees changes; exactly remove caller uid
+        (
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['attendees']) &&
+          listSize(asList(request.resource.data.attendees)) == listSize(asList(resource.data.attendees)) - 1 &&
+          listHasAll(asList(resource.data.attendees), [request.auth.uid]) &&
+          !(listHasAll(asList(request.resource.data.attendees), [request.auth.uid]))
+        )
+        ||
+        // RSVP: only requests changes; exactly add caller uid; event is RSVP and not deleted; caller not host/attendee
+        (
+          request.resource.data.diff(resource.data).changedKeys().hasOnly(['requests']) &&
+          resource.data.privacy == 'rsvp' && resource.data.isDeleted != true &&
+          request.auth.uid != (resource.data.ownerId == null ? '' : resource.data.ownerId) &&
+          request.auth.uid != (resource.data.hostId == null ? '' : resource.data.hostId) &&
+          !(listHasAll(asList(resource.data.attendees), [request.auth.uid])) &&
+          !(listHasAll(asList(resource.data.requests), [request.auth.uid])) &&
+          listSize(asList(request.resource.data.requests)) == listSize(asList(resource.data.requests)) + 1 &&
+          listHasAll(asList(request.resource.data.requests), [request.auth.uid])
+        )
+      );
     }
 
-    // Rules for the 'users' collection
-    match /users/{userId} {
-      // Allow reading user profiles for authenticated users
-      allow read: if request.auth != null;
+    match /chats/{eventId} {
+      allow read: if signedIn();
+      allow create, update: if isEventHost(get(/databases/$(database)/documents/events/$(eventId))) ||
+        isAttendee(get(/databases/$(database)/documents/events/$(eventId))) ||
+        isChatParticipant(eventId);
 
-      // Allow updating user profiles if the user is the owner
-      allow update: if request.auth != null && request.auth.uid == userId;
+      match /messages/{messageId} {
+        allow read: if isEventHost(get(/databases/$(database)/documents/events/$(eventId))) ||
+          isAttendee(get(/databases/$(database)/documents/events/$(eventId))) ||
+          isChatParticipant(eventId);
+        allow create: if isEventHost(get(/databases/$(database)/documents/events/$(eventId))) ||
+          isAttendee(get(/databases/$(database)/documents/events/$(eventId))) ||
+          isChatParticipant(eventId);
+        allow update, delete: if false;
+      }
     }
+
+    match /notifications/{id} {
+      allow read: if isOwner(resource.data.recipientId) || signedIn();
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    match /reports/{id} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }
-

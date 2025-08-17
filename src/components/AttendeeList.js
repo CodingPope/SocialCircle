@@ -22,13 +22,14 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import smileDefault from '../../assets/smileDefault.png';
-import * as Haptics from 'expo-haptics'; // ✅ for a nice tactile feel
+import * as Haptics from 'expo-haptics';
 
 export default function AttendeeList({
   attendees = [],
   eventId,
   isCreator,
   navigation, // Ensure navigation prop is received
+  readOnly = false,
 }) {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -56,7 +57,8 @@ export default function AttendeeList({
             snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
           );
         }
-        setUsers(allUsers);
+        // Filter out users who are soft-deleted (isDeleted === true)
+        setUsers(allUsers.filter((user) => !user.isDeleted));
       } catch (err) {
         console.error('Error fetching attendee users:', err);
       }
@@ -65,31 +67,46 @@ export default function AttendeeList({
   }, [attendees]);
 
   const handleRemoveAttendee = async (userId) => {
+    if (readOnly) {
+      Alert.alert('Action unavailable', 'This event is archived or ended.');
+      return;
+    }
+    if (!eventId || !userId) return;
     try {
+      // Description: Remove userId from event.attendees array
       const eventRef = doc(db, 'events', eventId);
       await updateDoc(eventRef, {
         attendees: arrayRemove(userId),
       });
 
+      // Description: Remove eventId from user's attended / attending arrays (support both naming variants)
       const userRef = doc(db, 'users', userId);
       await updateDoc(userRef, {
         attendedEvents: arrayRemove(eventId),
+        attendingEvents: arrayRemove(eventId), // in case this variant exists
       });
 
+      // Description: Optimistically update local list
       setUsers((prev) => prev.filter((user) => user.id !== userId));
     } catch (err) {
       console.error('Error removing attendee:', err);
+      Alert.alert('Removal Failed', 'Could not remove attendee. Try again.');
     }
   };
 
+  // Unified long-press options handler (iOS ActionSheet / Android modal)
   const openOptions = (user) => {
-    Haptics.selectionAsync(); // ✅ nice tactile feedback
+    if (readOnly) return; // don't open options on archived events
+    // Haptics (try/catch in case not available in environment)
+    Haptics.selectionAsync?.().catch(() => {});
+    console.log('Long press detected on user:', user?.id); // DEBUG
+
     if (Platform.OS === 'ios') {
       import('react-native').then(({ ActionSheetIOS }) => {
         const options = isCreator
           ? ['View Profile', 'Remove User', 'Cancel']
           : ['View Profile', 'Report User', 'Cancel'];
-        const destructiveIndex = isCreator ? 1 : 1;
+        const destructiveIndex = isCreator ? 1 : 1; // removal OR report
         const cancelIndex = 2;
 
         ActionSheetIOS.showActionSheetWithOptions(
@@ -102,13 +119,26 @@ export default function AttendeeList({
             if (buttonIndex === 0) {
               navigation.navigate('OtherUserProfile', { userId: user.id });
             } else if (buttonIndex === 1 && isCreator) {
-              handleRemoveAttendee(user.id);
+              // Confirm removal for safety
+              Alert.alert(
+                'Remove Attendee',
+                'Remove this attendee from the event? They will lose chat access.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Remove',
+                    style: 'destructive',
+                    onPress: () => handleRemoveAttendee(user.id),
+                  },
+                ]
+              );
+            } else if (buttonIndex === 1 && !isCreator) {
+              // Future: open report modal
             }
           }
         );
       });
     } else {
-      // ✅ Android fallback (custom modal)
       setSelectedUser(user);
       setModalVisible(true);
     }
@@ -121,32 +151,37 @@ export default function AttendeeList({
     if (action === 'view') {
       navigation.navigate('OtherUserProfile', { userId: selectedUser.id });
     } else if (action === 'remove' && isCreator) {
-      handleRemoveAttendee(selectedUser.id);
+      if (readOnly) {
+        Alert.alert('Action unavailable', 'This event is archived or ended.');
+        return;
+      }
+      Alert.alert(
+        'Remove Attendee',
+        'Remove this attendee from the event? They will lose chat access.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: () => handleRemoveAttendee(selectedUser.id),
+          },
+        ]
+      );
     }
   };
-  const handleAttendeeOptions = (userId) => {
-    Alert.alert(
-      'Options',
-      'Choose an action:',
-      [
-        {
-          text: 'View Profile',
-          onPress: () => navigation.navigate('OtherUserProfile', { userId }), // Use navigation for profile interaction
-        },
-        isCreator && {
-          text: 'Remove User',
-          style: 'destructive',
-          onPress: () => handleRemoveAttendee(userId),
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ].filter(Boolean)
-    );
-  };
 
+  // Description: Render single attendee avatar + name with long press options
   const renderItem = ({ item }) => (
     <TouchableOpacity
       style={styles.attendee}
-      onPress={() => handleAttendeeOptions(item.id)} // Ensure interaction triggers options
+      onPress={() =>
+        navigation.navigate('OtherUserProfile', { userId: item.id })
+      }
+      onLongPress={() => openOptions(item)}
+      delayLongPress={400}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      accessibilityRole='button'
+      accessibilityLabel={`Attendee ${item.displayName || 'User'}`}
     >
       <Image
         source={
@@ -179,10 +214,10 @@ export default function AttendeeList({
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
-        pointerEvents='auto' // ✅ ensure touches are passed through
+        pointerEvents='auto'
       />
 
-      {/* ✅ Android / Cross-platform modal */}
+      {/* Android / cross-platform modal options */}
       <Modal
         visible={modalVisible}
         transparent
@@ -252,7 +287,6 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 14,
   },
-  // ✅ Modal styles
   modalOverlay: {
     flex: 1,
     justifyContent: 'center',
@@ -265,7 +299,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    elevation: 5, // Ensure modal is above other elements
+    elevation: 5,
   },
   modalTitle: {
     fontSize: 16,
