@@ -31,13 +31,16 @@ module.exports = ({ config }) => {
           'Social Circle uses your location to show nearby events and improve discovery.',
         NSCameraUsageDescription:
           'Allow camera access to take photos for events and your profile.',
+        NSPhotoLibraryUsageDescription:
+          'Allow photo library access to choose images for events and your profile.',
         NSPhotoLibraryAddUsageDescription:
           'We save event photos and profile pictures to your library on request.',
         NSCalendarsUsageDescription:
-          'Add events to your calendar if you choose.',
+          'Allow calendar access so you can add events to your calendar.',
       },
       config: {
-        usesNonExemptEncryption: false, // simplifies export compliance for TestFlight
+        usesNonExemptEncryption: false,
+        googleMapsApiKey: googleMapsApiKey,
       },
     },
     android: {
@@ -53,8 +56,8 @@ module.exports = ({ config }) => {
       ['expo-notifications', { icon: './assets/icon.png' }],
       'expo-video',
       'sentry-expo',
-      // Optional: provide maps key to native (also keep using JS SDK key where needed)
       ['expo-location', {}],
+      'expo-calendar',
     ],
     extra: {
       eas: { projectId },
