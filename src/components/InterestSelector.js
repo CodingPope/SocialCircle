@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -130,10 +130,20 @@ const InterestSelector = ({
         return aSel ? -1 : 1;
       });
 
-      setFilteredActivities(reordered);
+      setFilteredActivities((prev) => {
+        // Avoid churn if unchanged
+        const same =
+          prev.length === reordered.length &&
+          prev.every((p, i) => p === reordered[i]);
+        return same ? prev : reordered;
+      });
     }, 250);
     return () => clearTimeout(delay);
-  }, [effectiveSearch, activities, selectedInterests]);
+  }, [
+    effectiveSearch,
+    JSON.stringify(activities),
+    JSON.stringify(selectedInterests),
+  ]);
 
   return (
     <View>

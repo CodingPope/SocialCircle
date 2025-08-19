@@ -1,5 +1,11 @@
 // src/screens/Main/DiscoveryScreen.js
-import React, { useEffect, useState, useRef } from 'react';
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+} from 'react';
 import {
   SafeAreaView,
   View,
@@ -21,6 +27,7 @@ import PostCard from '../../components/PostCard';
 import { fetchUserInterests, fetchUserById } from '../../services/userQueries';
 import EventPopupCard from '../../components/EventPopUpCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUserSnippetStore } from '../../store/userSnippetStore';
 
 export default function DiscoveryScreen() {
   const [popupEvent, setPopupEvent] = useState(null);
@@ -36,6 +43,7 @@ export default function DiscoveryScreen() {
 
   const chipScrollViewRef = useRef(null);
   const scrollViewRef = useRef(null);
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
 
   useEffect(() => {
     async function initializeUserData() {
@@ -119,42 +127,35 @@ export default function DiscoveryScreen() {
     }
   }, [activeTab, selectedInterest, userLocation]);
 
-  async function enrichEvents(data) {
-    // Description: Enrich events with host user data using canonical ownerId
-    const enriched = await Promise.all(
-      data.map(async (event) => {
-        let userData = null;
-        const ownerId =
-          typeof event.ownerId === 'string' && event.ownerId.length > 0
-            ? event.ownerId
-            : undefined;
-        try {
-          if (ownerId) {
-            userData = await fetchUserById(ownerId);
-          } else {
-            console.warn('[DiscoveryScreen] Event missing ownerId:', event.id);
-          }
-        } catch (err) {
-          console.error('[DiscoveryScreen] Error fetching host user:', err);
-        }
-        return {
-          ...event,
-          userData,
-          hostName:
-            userData && (userData.firstName || userData.lastName)
-              ? `${userData.firstName || ''} ${
-                  userData.lastName || ''
-                }`.trim() || 'Unknown Host'
-              : 'Unknown Host',
-          hostPhoto: userData?.profileImage || null,
-          hostRating:
-            typeof userData?.rating === 'number' ? userData.rating : null,
-        };
-      })
-    );
-    // Always return enriched events, even if host is missing
-    return enriched;
-  }
+  // Description: Enrich events in the discovery feed with host snippets (cached, batched)
+  const enrichEventsWithHosts = useCallback(
+    async (events) => {
+      const ownerIds = Array.from(
+        new Set(
+          events.map((e) => e.ownerId || e.ownerUID || e.owner).filter(Boolean)
+        )
+      );
+      if (ownerIds.length === 0) return events;
+
+      try {
+        const map = await ensureSnippets(ownerIds);
+        return events.map((e) => {
+          const oid = e.ownerId || e.ownerUID || e.owner;
+          const s = oid ? map.get(oid) : null;
+          if (!s) return e;
+          return {
+            ...e,
+            hostName: s.name || e.hostName,
+            hostPhoto: s.photoURL || e.hostPhoto,
+            hostRating: s.rating || e.hostRating,
+          };
+        });
+      } catch {
+        return events;
+      }
+    },
+    [ensureSnippets]
+  );
 
   async function loadEvents(reset = false) {
     console.log('User location:', userLocation);
@@ -184,7 +185,7 @@ export default function DiscoveryScreen() {
       setLastDoc(result.lastDoc);
     }
 
-    const enriched = await enrichEvents(newEvents);
+    const enriched = await enrichEventsWithHosts(newEvents);
     setEvents((prevEvents) => {
       const merged = reset ? enriched : [...prevEvents, ...enriched];
       // De-duplicate by ID

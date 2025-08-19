@@ -4,7 +4,7 @@
  * - Select interests -> redirected into main app
  * - Close and re-open the app -> should go straight into main app as logged in.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -24,14 +24,14 @@ import {
   OAuthProvider,
 } from 'firebase/auth';
 import * as Google from 'expo-auth-session/providers/google';
-import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../../../.env';
-import { Platform } from 'react-native';
+import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
 
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import { useUserStore } from '../../store/userStore';
+import { registerForPushTokenAsync, initPushForUser } from '../../lib/push';
 // Apple Sign-In handler
 async function handleAppleSignIn() {
   const appleAuthResponse = await AppleAuthentication.signInAsync({
@@ -69,7 +69,7 @@ export default function LoginScreen({ navigation }) {
     });
   console.log('Google Auth Request:', googleRequest);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (googleResponse?.type === 'success') {
       const { id_token } = googleResponse.params;
       const credential = GoogleAuthProvider.credential(id_token);
@@ -80,12 +80,12 @@ export default function LoginScreen({ navigation }) {
   }, [googleResponse]);
 
   // Description: Handles login and navigates to MainTabs (Map tab) on success
-  // Description: Handles login and navigates to MainTabs (default Map tab) on success
-  // Description: Handles login and navigates to MainTabs (Map tab) on success
   const handleLogin = async () => {
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const res = await signInWithEmailAndPassword(auth, email, password);
+      // Refresh token for returning users (best-effort)
+      initPushForUser(res.user.uid).catch(() => {});
       // On successful login, reset navigation to MainTabs (default tab is Map)
       navigation.reset({
         index: 0,
@@ -125,8 +125,6 @@ export default function LoginScreen({ navigation }) {
                 style: 'default',
                 onPress: async () => {
                   try {
-                    // Call your reactivation logic here (e.g., cloud function)
-                    // You may need to import and call reactivateUser from userService
                     const {
                       findSoftDeletedUserByEmail,
                       reactivateUser,
@@ -150,25 +148,26 @@ export default function LoginScreen({ navigation }) {
           );
           return;
         } else if (signInErr.code === 'auth/user-not-found') {
-          // User does not exist, proceed with normal signup
+          // proceed with normal signup
         } else if (signInErr.code === 'auth/wrong-password') {
           setError('An account with this email already exists. Please log in.');
           return;
-        } else if (signInErr.code === 'auth/invalid-email') {
-          setError('Invalid email address.');
-          return;
-        } else {
-          // Other errors, proceed with signup
         }
       }
       // If we reach here, user does not exist, proceed with normal signup
       const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // Request push permission (best-effort); do not block if denied
+      const token = await registerForPushTokenAsync().catch(() => null);
       await setDoc(doc(db, 'users', cred.user.uid), {
         email,
         createdAt: serverTimestamp(),
-        isDeleted: false, // Soft delete flag
-        deletedAt: null, // Timestamp for deletion
+        isDeleted: false,
+        deletedAt: null,
+        deviceToken: token || null,
+        pushOptIn: !!token,
       });
+      // Best-effort init to store platform and timestamps
+      initPushForUser(cred.user.uid).catch(() => {});
     } catch (e) {
       setError(e.message);
     }
@@ -260,7 +259,7 @@ export default function LoginScreen({ navigation }) {
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </TouchableOpacity>
         )}
-        //reset password modal
+        {/* reset password modal */}
         <Modal visible={showReset} animationType='slide' transparent={true}>
           <View style={styles.modalContainer}>
             <View style={styles.modalContent}>

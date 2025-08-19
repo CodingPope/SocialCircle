@@ -19,6 +19,7 @@ import RatingStars from '../../components/profile/RatingStars';
 import smileDefault from '../../../assets/smileDefault.png';
 import { useUserStore } from '../../store/userStore';
 import { useNotificationStore } from '../../store/notificationStore';
+import { useUserSnippetStore } from '../../store/userSnippetStore';
 import { db, functions } from '../../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -49,6 +50,8 @@ const NotificationCard = memo(
     // Track if user already acted locally to hide buttons thereafter
     const [acted, setActed] = useState(item.status === 'handled');
 
+    const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
+
     // Resolve requesterId from possible fields in payload
     const requesterId =
       item.requesterId || item.fromUserId || item.userId || null;
@@ -70,11 +73,29 @@ const NotificationCard = memo(
               );
             }
             if (requesterId) {
-              promises.push(
-                getDoc(doc(db, 'users', requesterId)).then((snap) => {
-                  if (mounted && snap.exists()) setRequester(snap.data());
-                })
-              );
+              // Prefer snippet store (batched, cached)
+              try {
+                const map = await ensureSnippets([requesterId]);
+                const s = map.get(requesterId);
+                if (mounted && s)
+                  setRequester({
+                    profileImage: s.photoURL,
+                    avatarURL: null,
+                    photoURL: s.photoURL,
+                    firstName: null,
+                    lastName: null,
+                    rating: s.rating || null,
+                  });
+              } catch {}
+
+              if (!requester) {
+                // Fallback
+                promises.push(
+                  getDoc(doc(db, 'users', requesterId)).then((snap) => {
+                    if (mounted && snap.exists()) setRequester(snap.data());
+                  })
+                );
+              }
             }
             await Promise.all(promises);
           }

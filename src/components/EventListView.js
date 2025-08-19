@@ -9,12 +9,14 @@ import PostCard from './PostCard';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { getUserById } from '../services/userService';
+import { useUserSnippetStore } from '../store/userSnippetStore';
 
 const EventListView = ({ events, onCloseListView }) => {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [enhancedEvents, setEnhancedEvents] = useState([]);
   const bottomSheetRef = useRef(null);
-  const snapPoints = useMemo(() => ['93%'], []);
+  const snapPoints = useMemo(() => ['90%'], []);
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
 
   // Description: Deduplicate incoming events by id to prevent double rendering
   const uniqueEvents = useMemo(() => {
@@ -25,44 +27,35 @@ const EventListView = ({ events, onCloseListView }) => {
     return Array.from(map.values());
   }, [events]);
 
+  // Stable key for dependency to avoid array identity churn
+  const uniqueIdsKey = useMemo(
+    () => uniqueEvents.map((e) => e.id).join('|'),
+    [uniqueEvents]
+  );
+
   const handleEventPress = (event) => setSelectedEvent(event);
   const closeModal = () => setSelectedEvent(null);
 
-  // Description: Batch fetch host photos/ratings for all unique ownerIds (chunks of 10)
-  const fetchHostPhotosAndRatings = async () => {
+  // Description: Batch fetch host snippets for all unique ownerIds via shared cache
+  const fetchHostSnippets = async () => {
     try {
       const ownerIds = [
         ...new Set(uniqueEvents.map((e) => e?.ownerId).filter(Boolean)),
       ];
-      const chunks = [];
-      for (let i = 0; i < ownerIds.length; i += 10)
-        chunks.push(ownerIds.slice(i, i + 10));
-
-      const usersMap = new Map();
-      for (const chunk of chunks) {
-        const q = query(
-          collection(db, 'users'),
-          where('__name__', 'in', chunk)
-        );
-        const snap = await getDocs(q);
-        for (const d of snap.docs) usersMap.set(d.id, d.data());
+      if (!ownerIds.length) {
+        setEnhancedEvents(uniqueEvents);
+        return;
       }
 
-      // Map events to enhanced objects; keep unique by id just in case
+      const map = await ensureSnippets(ownerIds);
+
       const enhanced = uniqueEvents.map((event) => {
-        const userData = event?.ownerId ? usersMap.get(event.ownerId) : null;
-        const hostName =
-          userData?.displayName ||
-          userData?.username ||
-          userData?.name ||
-          `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim() ||
-          event.ownerName ||
-          'Unknown Host';
+        const s = map.get(event.ownerId);
+        const hostName = s?.name || event.ownerName || 'Unknown Host';
         return {
           ...event,
-          hostPhoto: userData?.profileImage || userData?.avatarURL || null,
-          hostRating:
-            typeof userData?.rating === 'number' ? userData.rating : 0,
+          hostPhoto: s?.photoURL || null,
+          hostRating: typeof s?.rating === 'number' ? s.rating : 0,
           hostName,
         };
       });
@@ -70,17 +63,26 @@ const EventListView = ({ events, onCloseListView }) => {
       // Final de-duplication by id to prevent doubles in UI
       const finalMap = new Map();
       for (const ev of enhanced) if (ev?.id) finalMap.set(ev.id, ev);
-      setEnhancedEvents(Array.from(finalMap.values()));
+      const next = Array.from(finalMap.values());
+
+      setEnhancedEvents((prev) => {
+        if (
+          prev.length === next.length &&
+          prev.every((p, i) => p.id === next[i].id)
+        ) {
+          return prev; // avoid unnecessary state update
+        }
+        return next;
+      });
     } catch (err) {
-      console.warn('[EventListView] Failed to fetch host data:', err);
-      // Fallback: just pass through uniqueEvents without host metadata
+      console.warn('[EventListView] Failed to fetch host snippets:', err);
       setEnhancedEvents(uniqueEvents);
     }
   };
 
   useEffect(() => {
-    fetchHostPhotosAndRatings();
-  }, [uniqueEvents]);
+    fetchHostSnippets();
+  }, [uniqueIdsKey]);
 
   const renderHeader = () => (
     <View style={styles.sheetHeader}>

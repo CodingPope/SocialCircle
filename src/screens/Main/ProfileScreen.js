@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useCallback, memo, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  memo,
+  useRef,
+  useMemo,
+} from 'react';
 import { Animated, Dimensions, PanResponder } from 'react-native';
 import {
   SafeAreaView,
@@ -45,6 +52,7 @@ import PostCard from '../../components/PostCard';
 // import PopupMenu from '../../components/PopupMenu'; // No longer used, avoid legacy Modal usage
 import ActionModals from '../../components/profile/ActionModals'; // Import ActionModals for share, report, sign out
 import { GOOGLE_MAPS_API_KEY } from '@env';
+import { useUserSnippetStore } from '../../store/userSnippetStore';
 
 // Helper: Merge unique events and sort by startAt descending
 function mergeUniqueEvents(...eventArrays) {
@@ -66,6 +74,15 @@ export default function ProfileScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
   const myEvents = useMyEvents(user?.uid || '');
   const now = new Date();
+
+  // Keep a stable reference to myEvents to avoid effect dependency loops
+  const myEventsRef = useRef(myEvents);
+  useEffect(() => {
+    myEventsRef.current = myEvents;
+  }, [myEvents]);
+
+  // Ensure snippet fetcher from store
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
 
   // --- Notification badge state ---
   const [unreadCount, setUnreadCount] = useState(0);
@@ -385,7 +402,8 @@ export default function ProfileScreen({ navigation }) {
           // Exclude soft-deleted
           return results.filter((e) => e.isDeleted !== true);
         } catch {
-          return myEvents.filter(
+          // Fallback: filter from latest myEvents snapshot without re-triggering effects
+          return (myEventsRef.current || []).filter(
             (ev) => ids.includes(ev.id) && ev.isDeleted !== true
           );
         }
@@ -406,7 +424,7 @@ export default function ProfileScreen({ navigation }) {
     } finally {
       setRefreshing(false);
     }
-  }, [user?.uid, myEvents, groupEvents]);
+  }, [user?.uid]);
 
   useEffect(() => {
     let isMounted = true;
@@ -466,7 +484,8 @@ export default function ProfileScreen({ navigation }) {
           // Exclude soft-deleted
           return results.filter((e) => e.isDeleted !== true);
         } catch {
-          return myEvents.filter(
+          // Fallback: filter from latest myEvents snapshot without re-triggering effects
+          return (myEventsRef.current || []).filter(
             (ev) => ids.includes(ev.id) && ev.isDeleted !== true
           );
         }
@@ -513,7 +532,7 @@ export default function ProfileScreen({ navigation }) {
     return () => {
       isMounted = false;
     };
-  }, [user?.uid, myEvents]);
+  }, [user?.uid]);
 
   // ✅ Move these two lines UP, before the useEffect
   const allEvents = mergeUniqueEvents(
@@ -522,92 +541,86 @@ export default function ProfileScreen({ navigation }) {
     userEvents.attended,
     groupEvents
   );
-  const visibleEvents = allEvents.slice(0, visibleCount);
+  const visibleEvents = useMemo(
+    () => allEvents.slice(0, visibleCount),
+    [allEvents, visibleCount]
+  );
+  const visibleIdsKey = useMemo(
+    () => visibleEvents.map((e) => e.id).join('|'),
+    [visibleEvents]
+  );
 
   useEffect(() => {
     const enhanceEventData = async () => {
-      const updated = await Promise.all(
-        visibleEvents.map(async (event) => {
-          if (!event.ownerId) {
-            return {
-              ...event,
-              hostPhoto: null,
-              hostRating: 0,
-              hostName: 'Unknown Host',
-              formattedDate: event.date?.seconds
-                ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : 'Date TBD',
-              location: event.location?.address || 'Location not available',
-            };
-          }
+      // Snapshot current slice to avoid drift during async work
+      const slice = visibleEvents;
+      if (!slice.length) {
+        setEnhancedEvents([]);
+        return;
+      }
+      // Batch ownerId hydration via snippet store
+      const ownerIds = [
+        ...new Set(slice.map((e) => e?.ownerId).filter(Boolean)),
+      ];
 
-          try {
-            const snap = await getDoc(doc(db, 'users', event.ownerId));
-            if (snap.exists()) {
-              const data = snap.data();
-              return {
-                ...event,
-                hostPhoto: data.profileImage || data.avatarURL || null,
-                hostRating: data.rating || 0,
-                hostName:
-                  data.displayName ||
-                  data.username ||
-                  data.name ||
-                  data.fullName ||
-                  `${data.firstName || ''} ${data.lastName || ''}`.trim() ||
-                  event.ownerName || // fallback if stored directly on event
-                  'Unknown Host',
-                formattedDate: event.date?.seconds
-                  ? new Date(event.date.seconds * 1000).toLocaleString(
-                      'en-US',
-                      {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      }
-                    )
-                  : 'Date TBD',
-                location: event.location?.address || 'Location not available',
-              };
+      let map = new Map();
+      try {
+        if (ownerIds.length && ensureSnippets)
+          map = await ensureSnippets(ownerIds);
+      } catch (e) {
+        // ignore, will fallback to unknown host
+      }
+
+      const updated = slice.map((event) => {
+        const s = event.ownerId ? map.get(event.ownerId) : null;
+        const hostName = s?.name || event.ownerName || 'Unknown Host';
+        const hostPhoto = s?.photoURL || null;
+        const hostRating = typeof s?.rating === 'number' ? s.rating : 0;
+        return {
+          ...event,
+          hostPhoto,
+          hostRating,
+          hostName,
+          formattedDate: event.date?.seconds
+            ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+            : 'Date TBD',
+          location: event.location?.address || 'Location not available',
+        };
+      });
+
+      // Avoid unnecessary state updates that can cause effect churn
+      setEnhancedEvents((prev) => {
+        if (Array.isArray(prev) && prev.length === updated.length) {
+          let same = true;
+          for (let i = 0; i < prev.length; i++) {
+            if (
+              prev[i].id !== updated[i].id ||
+              prev[i].hostName !== updated[i].hostName ||
+              prev[i].hostPhoto !== updated[i].hostPhoto
+            ) {
+              same = false;
+              break;
             }
-          } catch (err) {
-            console.error('Error fetching host info:', err);
           }
-
-          return {
-            ...event,
-            hostPhoto: null,
-            hostRating: 0,
-            hostName: 'Unknown Host',
-            formattedDate: event.date?.seconds
-              ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : 'Date TBD',
-            location: event.location?.address || 'Location not available',
-          };
-        })
-      );
-
-      setEnhancedEvents(updated);
+          if (same) return prev;
+        }
+        return updated;
+      });
     };
 
     if (visibleEvents.length) {
       enhanceEventData();
+    } else {
+      setEnhancedEvents([]);
     }
-  }, [visibleEvents]);
+    // Depend only on a stable key of the current slice to prevent infinite loops
+  }, [visibleIdsKey]);
 
   // Helper function to format location
   const formatLocation = (location) => {

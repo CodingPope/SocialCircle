@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   SafeAreaView,
   View,
@@ -12,6 +12,7 @@ import {
   ScrollView,
   StatusBar,
   Platform,
+  PanResponder,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -24,7 +25,11 @@ import {
   deleteEvent,
   sendNotification,
   reportContent,
+  followUser,
+  unfollowUser,
+  functions,
 } from '../../firebase/config';
+import { httpsCallable } from 'firebase/functions';
 import {
   collection,
   getDocs,
@@ -32,8 +37,10 @@ import {
   where,
   doc,
   getDoc,
+  getCountFromServer,
 } from 'firebase/firestore';
 import { useUserStore } from '../../store/userStore';
+import { useUserSnippetStore } from '../../store/userSnippetStore';
 import PopupMenu from '../../components/PopupMenu'; // Import the PopupMenu component
 import PostCard from '../../components/PostCard'; // Import the PostCard component
 
@@ -63,7 +70,10 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const [hostMap, setHostMap] = useState({}); // Map of ownerId -> user info
   // Description: Get current user from Zustand userStore
   const currentUser = useUserStore((state) => state.user);
+  const setUserStore = useUserStore((state) => state.setUser);
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [followerCountView, setFollowerCountView] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [visibleCount, setVisibleCount] = useState(10);
   const [selectedRating, setSelectedRating] = useState(0);
@@ -71,16 +81,66 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const [sharedEvents, setSharedEvents] = useState(false); // Track if shared events exist
   const [ratingModalVisible, setRatingModalVisible] = useState(false); // Modal for rating
 
+  // Swipe right to go back (full-screen gesture)
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        const { dx, dy } = gestureState;
+        // Engage for predominantly horizontal rightward gestures
+        return Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) && dx > 0;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const { dx, vx } = gestureState;
+        const distancePass = dx > 60;
+        const velocityPass = vx > 0.35;
+        if ((distancePass || velocityPass) && navigation.canGoBack?.()) {
+          navigation.goBack();
+        }
+      },
+    })
+  ).current;
+
+  const followingKey = useMemo(
+    () =>
+      Array.isArray(currentUser?.following)
+        ? currentUser.following.join('|')
+        : '',
+    [currentUser?.following]
+  );
+
   useEffect(() => {
     const fetchUser = async () => {
       const data = await getUserData(userId);
       setUser(data);
-      if (currentUser?.following?.includes(userId)) {
-        setIsFollowing(true);
-      }
+      setIsFollowing(
+        Array.isArray(currentUser?.following) &&
+          currentUser.following.includes(userId)
+      );
     };
     fetchUser();
-  }, [userId, currentUser]);
+  }, [userId, followingKey]);
+
+  // Live-ish follower count using Firestore count() aggregate, updates when our following changes
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!userId) return;
+      try {
+        const q = query(
+          collection(db, 'users'),
+          where('following', 'array-contains', userId)
+        );
+        const snap = await getCountFromServer(q);
+        if (!cancelled) setFollowerCountView(snap?.data()?.count ?? null);
+      } catch (e) {
+        if (!cancelled) setFollowerCountView(null);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, followingKey]);
 
   useEffect(() => {
     async function fetchUserEventsAndHosts() {
@@ -158,15 +218,27 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       ];
       const hostMapTemp = {};
       if (ownerIds.length) {
-        // Batch in chunks of 10 (Firestore limitation)
-        for (let i = 0; i < ownerIds.length; i += 10) {
-          const chunk = ownerIds.slice(i, i + 10);
-          const usersRef = collection(db, 'users');
-          const q = query(usersRef, where('__name__', 'in', chunk));
-          const snap = await getDocs(q);
-          snap.docs.forEach((docSnap) => {
-            hostMapTemp[docSnap.id] = docSnap.data();
+        try {
+          const map = await ensureSnippets(ownerIds);
+          ownerIds.forEach((id) => {
+            const s = map.get(id);
+            if (s) {
+              // Normalize snippet fields to what downstream UI expects
+              hostMapTemp[id] = {
+                displayName: s.name,
+                name: s.name,
+                fullName: s.name,
+                profileImage: s.photoURL,
+                avatarURL: s.photoURL,
+                rating: s.rating,
+                verified: s.verified,
+                uid: s.uid,
+              };
+            }
           });
+        } catch (e) {
+          // Fallback retained: if snippet ensure fails, do nothing; downstream will handle
+          console.warn('Host snippet fetch failed', e?.message || e);
         }
       }
       setHostMap(hostMapTemp);
@@ -236,6 +308,9 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       : Array.isArray(user.followers)
       ? user.followers.length
       : 0;
+  // Derived: prefer aggregate count if available
+  const followerCountDisplay =
+    typeof followerCountView === 'number' ? followerCountView : followerCount;
 
   const allEvents = mergeUniqueEvents(
     userEvents.created,
@@ -277,18 +352,34 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const visibleEvents = filteredEvents.slice(0, visibleCount);
 
   const handleFollow = async () => {
-    if (!currentUser || !user) return;
+    if (!currentUser || !user || currentUser.uid === userId) return;
     setRequestingFollow(true);
     try {
-      await updateUserData(currentUser.uid, {
-        following: Array.isArray(currentUser.following)
-          ? [...currentUser.following, userId]
-          : [userId],
+      await followUser(currentUser.uid, userId);
+      setIsFollowing(true);
+      // Optimistic: update local target profile count
+      setUser((prev) => ({
+        ...prev,
+        followerCount: (prev?.followerCount || 0) + 1,
+      }));
+      // Optimistic: update global user store following array
+      useUserStore.setState((state) => {
+        if (!state.user) return state;
+        const existing = Array.isArray(state.user.following)
+          ? state.user.following
+          : [];
+        const next = Array.from(new Set([...existing, userId]));
+        return { user: { ...state.user, following: next } };
       });
-      await updateUserData(userId, {
-        followerCount: (user.followerCount || 0) + 1,
-      });
-      // Send notification to the user being followed
+    } catch (err) {
+      console.error('Follow failed:', err);
+      Alert.alert('Error', 'Failed to follow user.');
+      return;
+    } finally {
+      setRequestingFollow(false);
+    }
+    // Fire-and-forget notification (do not fail the follow UX)
+    try {
       await sendNotification('friend_request', userId, {
         fromUserId: currentUser.uid,
         fromUserName:
@@ -304,28 +395,33 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         linkId: currentUser.uid,
         read: false,
       });
-      setIsFollowing(true);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to follow user.');
-    } finally {
-      setRequestingFollow(false);
+    } catch (e) {
+      console.warn('Notification send failed (non-blocking):', e?.message || e);
     }
   };
 
   const handleUnfollow = async () => {
-    if (!currentUser || !user) return;
+    if (!currentUser || !user || currentUser.uid === userId) return;
     setRequestingFollow(true);
     try {
-      await updateUserData(currentUser.uid, {
-        following: Array.isArray(currentUser.following)
-          ? currentUser.following.filter((id) => id !== userId)
-          : [],
-      });
-      await updateUserData(userId, {
-        followerCount: Math.max((user.followerCount || 1) - 1, 0),
-      });
+      await unfollowUser(currentUser.uid, userId);
       setIsFollowing(false);
+      // Optimistic local target profile count
+      setUser((prev) => ({
+        ...prev,
+        followerCount: Math.max((prev?.followerCount || 1) - 1, 0),
+      }));
+      // Optimistic: update global user store following array
+      useUserStore.setState((state) => {
+        if (!state.user) return state;
+        const existing = Array.isArray(state.user.following)
+          ? state.user.following
+          : [];
+        const next = existing.filter((id) => id !== userId);
+        return { user: { ...state.user, following: next } };
+      });
     } catch (err) {
+      console.error('Unfollow failed:', err);
       Alert.alert('Error', 'Failed to unfollow user.');
     } finally {
       setRequestingFollow(false);
@@ -373,7 +469,9 @@ export default function OtherUserProfileScreen({ route, navigation }) {
 
   const handleRateUser = async (rating) => {
     try {
-      await updateUserRating(userId, currentUser.uid, rating);
+      // Use callable directly to satisfy security rules and validate mutual events
+      const fn = httpsCallable(functions, 'rateUser');
+      await fn({ targetUid: userId, rating });
 
       // Fetch the updated user data after rating
       const updatedUser = await getUserData(userId);
@@ -383,12 +481,16 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       Alert.alert('Success', 'Rating updated successfully!');
     } catch (err) {
       console.error('Error rating user:', err);
-      Alert.alert('Error', 'Failed to rate user.');
+      const msg = err?.message || 'Failed to rate user.';
+      Alert.alert('Error', msg);
     }
   };
 
+  // Proxy join press (kept for future customization); actual checks happen inside PostCard
+  const handleJoinPress = () => {};
+
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} {...panResponder.panHandlers}>
       {/* Rating Modal */}
       {ratingModalVisible && (
         <Modal
@@ -455,7 +557,10 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         </Modal>
       )}
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        {...panResponder.panHandlers}
+      >
         {/* Header */}
         <LinearGradient
           colors={['#4DA0B0', '#D39D38']}
@@ -495,7 +600,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         {/* Stats Row */}
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>{followerCount}</Text>
+            <Text style={styles.statValue}>{followerCountDisplay}</Text>
             <Text style={styles.statLabel}>Friends</Text>
           </View>
           <View style={styles.statCard}>
@@ -635,7 +740,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
                 key={event.id}
                 event={eventWithHost}
                 onPress={handleEventPress}
-                onJoinPress={() => {}}
+                onJoinPress={handleJoinPress}
               />
             );
           })

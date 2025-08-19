@@ -1,4 +1,4 @@
-import React, { useEffect, useState, memo } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 
@@ -8,7 +8,7 @@ const EventCard = memo(({ event, navigation }) => {
 
   useEffect(() => {
     const fetchAddress = async () => {
-      if (!event.location) {
+      if (!event?.location) {
         setAddress('Address not available');
         return;
       }
@@ -20,7 +20,8 @@ const EventCard = memo(({ event, navigation }) => {
         const data = await res.json();
         if (data.status === 'OK' && data.results.length) {
           const fullAddress = data.results[0].formatted_address;
-          setAddress(fullAddress.split(',').slice(0, 2).join(', '));
+          const next = fullAddress.split(',').slice(0, 2).join(', ');
+          setAddress((prev) => (prev === next ? prev : next));
         } else {
           setAddress('Address not available');
         }
@@ -29,7 +30,8 @@ const EventCard = memo(({ event, navigation }) => {
       }
     };
     fetchAddress();
-  }, [event.location]);
+    // Depend on primitive lat/lng to avoid re-running from object identity churn
+  }, [event?.location?.latitude, event?.location?.longitude]);
 
   return (
     <TouchableOpacity
@@ -74,6 +76,7 @@ const EventCard = memo(({ event, navigation }) => {
 });
 
 export default function EventList({ events, loading, navigation }) {
+  // Note: For host photo/name/rating, prefer enhancing upstream via userSnippetStore ensureSnippets(ownerIds)
   if (loading) {
     return (
       <Text style={{ color: '#888', marginTop: 8 }}>Loading events...</Text>

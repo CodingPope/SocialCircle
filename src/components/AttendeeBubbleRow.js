@@ -2,36 +2,83 @@
 import React, { useEffect, useState } from 'react';
 import { View, Image, StyleSheet, Text } from 'react-native';
 import smileDefault from '../../assets/smileDefault.png';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { useUserSnippetStore } from '../store/userSnippetStore';
 
-export default function AttendeeBubbleRow({ attendees = [] }) {
+export default function AttendeeBubbleRow({
+  attendees = [],
+  snippets = null,
+  countOverride = null,
+}) {
   const [users, setUsers] = useState([]);
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
+
+  // Stable string keys to avoid effect loops from array identity
+  const attendeesKey = JSON.stringify(attendees || []);
+  const snippetsKey = snippets
+    ? Array.isArray(snippets)
+      ? JSON.stringify(
+          snippets
+            .map((s) => s?.uid)
+            .filter(Boolean)
+            .sort()
+        )
+      : JSON.stringify(Object.keys(snippets).sort())
+    : 'none';
 
   useEffect(() => {
+    async function hydrateFromSnippets() {
+      // Prefer denormalized snippets when provided
+      if (
+        snippets &&
+        (Array.isArray(snippets) || typeof snippets === 'object')
+      ) {
+        const arr = Array.isArray(snippets)
+          ? snippets
+          : Object.values(snippets || {});
+        // Normalize to minimal user shape expected by UI
+        const mapped = arr
+          .filter((s) => s && s.uid)
+          .map((s) => ({
+            id: s.uid,
+            profileImage: s.photoURL || null,
+            avatarURL: null,
+            displayName: s.name || 'User',
+          }));
+        setUsers((prev) => {
+          // Avoid redundant setState
+          const same =
+            prev.length === mapped.length &&
+            prev.every((p, i) => p.id === mapped[i].id);
+          return same ? prev : mapped;
+        });
+        return true;
+      }
+      return false;
+    }
+
     async function fetchAttendeeUsers() {
-      if (!attendees.length) {
-        setUsers([]);
+      const ids = Array.isArray(attendees) ? attendees : [];
+      if (!ids.length) {
+        setUsers((prev) => (prev.length ? [] : prev));
         return;
       }
       try {
-        // Firestore 'in' query supports up to 10 items per chunk
-        const chunks = [];
-        for (let i = 0; i < attendees.length; i += 10) {
-          chunks.push(attendees.slice(i, i + 10));
-        }
-        let allUsers = [];
-        for (const chunk of chunks) {
-          const q = query(
-            collection(db, 'users'),
-            where('__name__', 'in', chunk)
-          );
-          const snapshot = await getDocs(q);
-          allUsers = allUsers.concat(
-            snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
-          );
-        }
-        setUsers(allUsers);
+        const map = await ensureSnippets(ids);
+        const mapped = ids
+          .map((uid) => map.get(uid))
+          .filter(Boolean)
+          .map((s) => ({
+            id: s.uid,
+            profileImage: s.photoURL || null,
+            avatarURL: null,
+            displayName: s.name || 'User',
+          }));
+        setUsers((prev) => {
+          const same =
+            prev.length === mapped.length &&
+            prev.every((p, i) => p.id === mapped[i].id);
+          return same ? prev : mapped;
+        });
       } catch (err) {
         console.error(
           '[AttendeeBubbleRow] Error fetching attendee users:',
@@ -40,10 +87,18 @@ export default function AttendeeBubbleRow({ attendees = [] }) {
         setUsers([]);
       }
     }
-    fetchAttendeeUsers();
-  }, [attendees]);
 
-  if (!users.length) {
+    hydrateFromSnippets().then((usedSnippets) => {
+      if (!usedSnippets) fetchAttendeeUsers();
+    });
+  }, [attendeesKey, snippetsKey]);
+
+  const totalCount =
+    typeof countOverride === 'number' && countOverride >= 0
+      ? countOverride
+      : users.length;
+
+  if (!totalCount) {
     return (
       <View style={styles.bubbleRowEmpty} accessibilityLabel='No attendees yet'>
         <Text style={styles.emptyText}>No attendees yet</Text>
@@ -58,12 +113,12 @@ export default function AttendeeBubbleRow({ attendees = [] }) {
     <View
       style={styles.bubbleRow}
       accessibilityRole='image'
-      accessibilityLabel={`${users.length} attendees joined`}
+      accessibilityLabel={`${totalCount} attendees joined`}
     >
       <View style={styles.avatarStack}>
         {displayedUsers.map((user, index) => (
           <Image
-            key={user.id}
+            key={user.id || index}
             source={
               user.profileImage
                 ? { uri: user.profileImage }
@@ -77,7 +132,7 @@ export default function AttendeeBubbleRow({ attendees = [] }) {
           />
         ))}
       </View>
-      <Text style={styles.countText}>{users.length} joined</Text>
+      <Text style={styles.countText}>{totalCount} joined</Text>
     </View>
   );
 }

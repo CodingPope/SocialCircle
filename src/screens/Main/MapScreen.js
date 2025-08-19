@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, {
+  useMemo,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+} from 'react';
 import {
   View,
   Modal,
@@ -21,6 +27,7 @@ import {
   getDoc,
 } from 'firebase/firestore';
 import { useUserStore } from '../../store/userStore';
+import { useUserSnippetStore } from '../../store/userSnippetStore';
 import CreateEventScreen from './CreateEventScreen';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import EventListView from '../../components/EventListView';
@@ -42,6 +49,7 @@ const CustomDotMarker = ({ color, label, scale }) => (
 export default function MapScreen() {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
 
   if (!user) {
     return (
@@ -302,15 +310,39 @@ export default function MapScreen() {
     }
   };
 
-  const handleMarkerPress = async (event) => {
-    try {
-      const userRef = doc(db, 'users', event.ownerId);
-      const userSnapshot = await getDoc(userRef);
-      setSelectedEvent({ ...event, user: userSnapshot.data() });
-    } catch (error) {
-      console.error('Error fetching user data:', error);
-    }
-  };
+  const onMarkerPress = useCallback(
+    async (event) => {
+      // Description: When a marker is pressed, enrich with host snippet via cache
+      const ownerId = event?.ownerId || event?.ownerUID || event?.owner || null;
+      if (!ownerId) return;
+      try {
+        const map = await ensureSnippets([ownerId]);
+        const host = map.get(ownerId);
+        if (host) {
+          // Attach host snippet for downstream UI components
+          const enriched = {
+            ...event,
+            hostName: host.name || event.hostName,
+            hostPhoto: host.photoURL || event.hostPhoto,
+            hostRating: host.rating || event.hostRating,
+          };
+          setSelectedEvent(enriched);
+        } else {
+          // Fallback: directly fetch user data if snippet not found
+          try {
+            const userRef = doc(db, 'users', event.ownerId);
+            const userSnapshot = await getDoc(userRef);
+            setSelectedEvent({ ...event, user: userSnapshot.data() });
+          } catch (error) {
+            console.error('Error fetching user data:', error);
+          }
+        }
+      } catch (e) {
+        console.error('Error ensuring snippets:', e);
+      }
+    },
+    [ensureSnippets]
+  );
 
   const getMarkerColor = (event) => {
     if (event.isSponsored) return '#9B59B6';
@@ -458,7 +490,7 @@ export default function MapScreen() {
               <Marker
                 key={event.id}
                 coordinate={event.location}
-                onPress={() => handleMarkerPress(event)}
+                onPress={() => onMarkerPress(event)}
               >
                 <CustomDotMarker
                   color={getMarkerColor(event)}

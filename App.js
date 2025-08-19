@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef } from './src/navigation/RootNavigation';
@@ -7,6 +7,32 @@ import { db } from './src/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
+import { initPushForUser } from './src/lib/push';
+import Constants from 'expo-constants';
+import { initErrorReporting } from './src/lib/errorReporting';
+
+// Initialize error reporting once at module load to capture early errors
+try {
+  const envDsn =
+    typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_SENTRY_DSN : '';
+  const expoCfg = Constants?.expoConfig || {};
+  const dsn = envDsn || expoCfg?.extra?.sentryDsn || '';
+  const environment =
+    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SENTRY_ENV) ||
+    expoCfg?.extra?.sentryEnv ||
+    (__DEV__ ? 'development' : 'beta');
+  const bundleId = expoCfg?.ios?.bundleIdentifier || 'com.socialcirclellc.app';
+  const version = expoCfg?.version || '1.0.0';
+  const buildNumber = expoCfg?.ios?.buildNumber || version;
+  const release = `${bundleId}@${version}+${buildNumber}`;
+  initErrorReporting({
+    dsn,
+    tracesSampleRate: 0.1,
+    debug: false,
+    environment,
+    release,
+  });
+} catch {}
 
 function AppContent() {
   // Description: Get user from Zustand store
@@ -16,6 +42,13 @@ function AppContent() {
   const [onboardingStep, setOnboardingStep] = useState(null);
   // Import onboarding router utility
   const { getNextOnboardingStep } = require('./src/utils/onboardingRouter');
+
+  // Tag Sentry with user context when it changes
+  useEffect(() => {
+    try {
+      setUserInErrorReporting(user);
+    } catch {}
+  }, [user?.uid]);
 
   // NEW: Start auth listener once on mount (since AuthProvider is not used)
   useEffect(() => {
@@ -30,12 +63,29 @@ function AppContent() {
     const sub = Notifications.addNotificationResponseReceivedListener(
       (resp) => {
         const data = resp?.notification?.request?.content?.data || {};
-        // Example: navigate based on notification payload
-        // if (data.eventId) navigate('EventChat', { eventId: data.eventId });
+        // Deep link routing: prefer chat if eventId + chat
+        try {
+          if (data.eventId && data.linkType === 'chat') {
+            navigate('EventChat', { eventId: data.eventId });
+          } else if (data.eventId) {
+            navigate('EventDetail', { eventId: data.eventId });
+          } else if (data.linkType && data.linkId) {
+            navigate(data.linkType, { id: data.linkId });
+          }
+        } catch {}
       }
     );
     return () => sub.remove();
   }, []);
+
+  // NEW: Initialize push token once per session after login (per-uid guard)
+  const initializedPushRef = useRef(new Set());
+  useEffect(() => {
+    if (user?.uid && !initializedPushRef.current.has(user.uid)) {
+      initializedPushRef.current.add(user.uid);
+      initPushForUser(user.uid).catch(() => {});
+    }
+  }, [user?.uid]);
 
   useEffect(() => {
     const check = async () => {

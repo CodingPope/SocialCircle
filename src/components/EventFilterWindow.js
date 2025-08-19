@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -51,7 +51,19 @@ const EventFilterWindow = ({
         useNativeDriver: true,
       }).start();
     }
-  }, [isVisible]);
+  }, [isVisible, slideAnim]);
+
+  // Stable memo of selectedFilters primitives
+  const filtersKey = useMemo(
+    () =>
+      JSON.stringify({
+        date: selectedFilters?.date || null,
+        interests: (selectedFilters?.interests || []).slice().sort(),
+        genderOnly: !!selectedFilters?.genderOnly,
+        userInterests: (userInterests || []).slice().sort(),
+      }),
+    [selectedFilters, userInterests]
+  );
 
   useEffect(() => {
     if (selectedFilters) {
@@ -63,7 +75,8 @@ const EventFilterWindow = ({
       setSelectedInterests(userInterests || []);
       setGenderOnly(false);
     }
-  }, [selectedFilters, userInterests]);
+    // Only re-run when the stable key changes
+  }, [filtersKey]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -108,7 +121,7 @@ const EventFilterWindow = ({
     return () => clearTimeout(timer);
   }, [
     selectedDate,
-    selectedInterests,
+    JSON.stringify(selectedInterests),
     genderOnly,
     currentUserGender,
     isVisible,

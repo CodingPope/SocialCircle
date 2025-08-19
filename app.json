@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "SocialCircle",
-    "slug": "SocialCircle",
+    "slug": "socialcircle",
     "scheme": "socialcircle",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -15,18 +15,48 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourcompany.socialcircle"
+      "bundleIdentifier": "com.socialcirclellc.app",
+      "config": {
+        "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}"
+      },
+      "buildNumber": "1.0.0",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Social Circle uses your location to show nearby events and improve discovery.",
+        "NSCameraUsageDescription": "Allow camera access to take photos for events and your profile.",
+        "NSPhotoLibraryUsageDescription": "Allow photo library access to choose images for events and your profile.",
+        "NSPhotoLibraryAddUsageDescription": "Allow saving images from Social Circle to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": ""
+        }
       }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [["expo-notifications"], "expo-video"],
-    "eas": { "projectId": "<YOUR_EAS_PROJECT_ID>" }
+    "plugins": [
+      "expo-notifications",
+      "expo-video",
+      "sentry-expo"
+    ],
+    "eas": {
+      "projectId": "c51101fd-e7e7-47ff-925e-44799b9dbe12"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c51101fd-e7e7-47ff-925e-44799b9dbe12"
+      },
+      "sentryDsn": "",
+      "sentryEnv": "beta"
+    },
+    "owner": "joe1561"
   }
 }

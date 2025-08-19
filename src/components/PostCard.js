@@ -29,6 +29,7 @@ import {
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { Video } from 'expo-video';
+import joinEvent from '../lib/joinEvent';
 
 export default function PostCard({ event, onPress, onJoinPress }) {
   // Description: Get current user from Zustand userStore
@@ -40,6 +41,9 @@ export default function PostCard({ event, onPress, onJoinPress }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseTimeoutRef = useRef(null);
+
+  // Track local requested state for immediate UI feedback on RSVP requests
+  const [requestedLocal, setRequestedLocal] = useState(false);
 
   // Derived: soft-delete and expiry checks to control UI (fix ReferenceError)
   const isSoftDeleted = event?.isDeleted === true;
@@ -123,55 +127,127 @@ export default function PostCard({ event, onPress, onJoinPress }) {
     return msg || 'Failed to join event. Please try again.';
   }, []);
 
-  // Description: Join event handler
-  const handleJoin = useCallback(async () => {
-    if (isSoftDeleted) {
-      alert('This event has been archived and cannot be joined.');
-      return;
-    }
-    if (isExpired) {
-      alert('This event has ended and cannot be joined.');
-      return;
-    }
-    if (!user || !event?.id) return;
-    const isOwnerLocal = event.ownerId === user.uid;
-    const attendeesLocal = Array.isArray(event.attendees)
-      ? event.attendees
-      : [];
-    const isAttendeeLocal = attendeesLocal.includes(user.uid);
-
-    if (isAttendeeLocal || isOwnerLocal) {
-      onPress?.(event, 'EventChatScreen');
-      return;
-    }
-
-    // If event is full
-    if (
-      typeof event.capacity === 'number' &&
-      event.capacity > 0 &&
-      attendeesLocal.length >= event.capacity
-    ) {
-      alert('Event is full. You can join the waitlist if available.');
-      return;
-    }
-
+  // Helper: compute age from a possible Firestore Timestamp or Date
+  const getUserAge = useCallback((dob) => {
+    if (!dob) return null;
+    let d = null;
     try {
-      // Use centralized eventStore.rsvpEvent (preferred)
-      const rsvpFn = useEventStore.getState().rsvpEvent;
-      if (typeof rsvpFn === 'function') {
-        await rsvpFn(event.id, user.uid);
-        // Navigate to chat
-        onPress?.(event, 'EventChatScreen');
-        return;
-      }
-      throw new Error('RSVP function unavailable');
-    } catch (e) {
-      console.error('rsvp via store failed', e);
-      alert(getFriendlyJoinError(e));
+      if (dob?.toDate) d = dob.toDate();
+      else if (typeof dob?.seconds === 'number')
+        d = new Date(dob.seconds * 1000);
+      else if (dob instanceof Date) d = dob;
+      else if (typeof dob === 'string') d = new Date(dob);
+    } catch {}
+    if (!d || isNaN(d.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
+    return age;
+  }, []);
+
+  // Checks: gender/age/privacy eligibility before attempting any join
+  const getJoinEligibility = useCallback(() => {
+    const privacy = (event?.privacy || 'public').toString().toLowerCase();
+    const userSex = (user?.sex || user?.gender || '').toString().toLowerCase();
+
+    // Gender-only privacy
+    if (privacy === 'female-only' && userSex !== 'female') {
+      return { ok: false, reason: 'This event is for women only.' };
+    }
+    if (privacy === 'male-only' && userSex !== 'male') {
+      return { ok: false, reason: 'This event is for men only.' };
     }
 
-    // Note: removed direct client-side Firestore update fallback to enforce centralized callable flow
-  }, [event, user, isSoftDeleted, isExpired, onPress, getFriendlyJoinError]);
+    // Age range check
+    const range = Array.isArray(event?.ageRange) ? event.ageRange : null;
+    if (range && range.length === 2) {
+      const [min, max] = range.map((n) =>
+        typeof n === 'number' ? n : parseInt(n, 10)
+      );
+      const age = getUserAge(user?.dob);
+      if (typeof age !== 'number') {
+        return {
+          ok: false,
+          reason:
+            'Add your birthday in profile to request/join age-restricted events.',
+        };
+      }
+      if (
+        (typeof min === 'number' && age < min) ||
+        (typeof max === 'number' && age > max)
+      ) {
+        return {
+          ok: false,
+          reason: `This event is restricted to ages ${min}-${max}.`,
+        };
+      }
+    }
+
+    return { ok: true };
+  }, [
+    event?.privacy,
+    event?.ageRange,
+    user?.sex,
+    user?.gender,
+    user?.dob,
+    getUserAge,
+  ]);
+
+  // Helper: compute event end time in ms (prefer endAt, fallback to date + 1h)
+  const getEventEndMs = useCallback((e) => {
+    if (!e) return null;
+    let end = null;
+    if (e.endAt) {
+      if (e.endAt.toDate) end = e.endAt.toDate().getTime();
+      else if (typeof e.endAt.seconds === 'number')
+        end = e.endAt.seconds * 1000;
+    } else if (e.date) {
+      if (e.date.toDate) end = e.date.toDate().getTime();
+      else if (typeof e.date.seconds === 'number') end = e.date.seconds * 1000;
+      else if (e.date instanceof Date) end = e.date.getTime();
+      if (end) end += 60 * 60 * 1000; // assume 1h duration when only start exists
+    }
+    return end;
+  }, []);
+
+  const endMs = useMemo(
+    () => getEventEndMs(event),
+    [event?.id, event?.date, event?.endAt, getEventEndMs]
+  );
+  const archived = useMemo(
+    () =>
+      typeof endMs === 'number'
+        ? Date.now() >= endMs + 3 * 24 * 60 * 60 * 1000
+        : false,
+    [endMs]
+  );
+
+  // Description: Join event handler (unified)
+  const handleJoin = useCallback(async () => {
+    if (!user || !event?.id) return;
+
+    const onShowMessage = (msg) => msg && alert(msg);
+
+    const res = await joinEvent({
+      event,
+      user,
+      // Use helper navigation for joined; don't pass navigation here
+      navigation: null,
+      stores: { eventStore: useEventStore.getState() },
+      options: { onShowMessage },
+    });
+
+    // If owner or already-attending, open chat using onPress contract
+    if (res?.status === 'owner' || res?.status === 'already-attending') {
+      onPress?.(event, 'EventChatScreen');
+    }
+
+    // Reflect local requested/requested UI quickly
+    if (res?.status === 'requested') {
+      setRequestedLocal(true);
+    }
+  }, [event, user, onPress]);
 
   // Description: Memoized derived values
   const attendeesCount = useMemo(
@@ -202,20 +278,18 @@ export default function PostCard({ event, onPress, onJoinPress }) {
 
   // Description: Fetch address if not present
   useEffect(() => {
-    if (
-      !event.address &&
-      event.location?.latitude &&
-      event.location?.longitude
-    ) {
+    const lat = event?.location?.latitude;
+    const lng = event?.location?.longitude;
+    if (!event?.address && lat && lng) {
       const fetchAddress = async () => {
         try {
-          const { latitude, longitude } = event.location;
           const res = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
           );
           const data = await res.json();
           if (data.status === 'OK' && data.results.length) {
-            setResolvedAddress(data.results[0].formatted_address);
+            const next = data.results[0].formatted_address;
+            setResolvedAddress((prev) => (prev === next ? prev : next));
           } else {
             setResolvedAddress('Address not available');
           }
@@ -225,7 +299,12 @@ export default function PostCard({ event, onPress, onJoinPress }) {
       };
       fetchAddress();
     }
-  }, [event.address, event.location, GOOGLE_MAPS_API_KEY]);
+  }, [
+    event?.address,
+    event?.location?.latitude,
+    event?.location?.longitude,
+    GOOGLE_MAPS_API_KEY,
+  ]);
 
   // Description: RSVP badge pulse animation for low spots
   useEffect(() => {
@@ -279,6 +358,41 @@ export default function PostCard({ event, onPress, onJoinPress }) {
     if (fillPercent >= 0.25) return styles.rsvpTextMid;
     return styles.rsvpTextLow;
   }, [fillPercent]);
+
+  // Member check for label/behavior
+  const isMember = useMemo(() => {
+    const uid = user?.uid;
+    if (!uid) return false;
+    if (event?.ownerId === uid) return true;
+    return Array.isArray(event?.attendees) && event.attendees.includes(uid);
+  }, [event?.ownerId, event?.attendees, user?.uid]);
+
+  // Has pending request (server or locally just sent)
+  const hasRequested = useMemo(() => {
+    const uid = user?.uid;
+    const already = Array.isArray(event?.requests)
+      ? event.requests.includes(uid)
+      : false;
+    return requestedLocal || already;
+  }, [event?.requests, user?.uid, requestedLocal]);
+
+  // Derived UI state for button label and disabled styling
+  const privacy = (event?.privacy || 'public').toString().toLowerCase();
+  const isReadOnly = isSoftDeleted || archived;
+  const buttonLabel = isMember
+    ? 'Check Chat'
+    : privacy === 'rsvp'
+    ? hasRequested
+      ? 'Requested'
+      : 'Request'
+    : 'Join';
+
+  // Disable only when:
+  // - RSVP already requested (non-member), or
+  // - Non-member on archived/soft-deleted event (cannot join),
+  // Members stay enabled to open chat even in read-only
+  const joinDisabled =
+    (privacy === 'rsvp' && hasRequested) || (!isMember && isReadOnly);
 
   return (
     <Animated.View
@@ -367,14 +481,38 @@ export default function PostCard({ event, onPress, onJoinPress }) {
         <View style={styles.actionRow}>
           <View style={styles.actionLeft}>
             {Array.isArray(event.attendees) && attendeesCount > 0 ? (
-              <AttendeeBubbleRow attendees={event.attendees} />
+              <AttendeeBubbleRow
+                attendees={event.attendees}
+                snippets={event.attendeeSnippets || null}
+                countOverride={
+                  typeof event.attendeesCount === 'number'
+                    ? event.attendeesCount
+                    : null
+                }
+              />
             ) : (
               <Text style={styles.noAttendeesText}>No attendees yet</Text>
             )}
           </View>
           <View style={styles.actionRight}>
-            <TouchableOpacity style={styles.joinButton} onPress={handleJoin}>
-              <Text style={styles.joinText}>Join</Text>
+            <TouchableOpacity
+              style={[
+                styles.joinButton,
+                (joinDisabled || (isMember && isReadOnly)) &&
+                  styles.joinButtonDisabled,
+              ]}
+              onPress={handleJoin}
+              disabled={joinDisabled}
+            >
+              <Text
+                style={[
+                  styles.joinText,
+                  (joinDisabled || (isMember && isReadOnly)) &&
+                    styles.joinTextDisabled,
+                ]}
+              >
+                {buttonLabel}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -538,9 +676,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 10,
   },
+  joinButtonDisabled: {
+    backgroundColor: '#C9CCD1', // dull/grey when disabled
+  },
   joinText: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 14,
+  },
+  joinTextDisabled: {
+    color: '#f2f2f2',
   },
 });

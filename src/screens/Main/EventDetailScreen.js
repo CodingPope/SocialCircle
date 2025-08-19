@@ -33,7 +33,17 @@ export default function EventDetailScreen({ route, navigation }) {
       try {
         const eventDoc = await getDoc(doc(db, 'events', eventId));
         if (eventDoc.exists()) {
-          setEvent({ id: eventDoc.id, ...eventDoc.data() });
+          const next = { id: eventDoc.id, ...eventDoc.data() };
+          setEvent((prev) => {
+            if (
+              prev &&
+              prev.id === next.id &&
+              prev.updatedAt?.seconds === next.updatedAt?.seconds
+            ) {
+              return prev;
+            }
+            return next;
+          });
         } else {
           console.error('Event not found');
         }
@@ -74,6 +84,10 @@ export default function EventDetailScreen({ route, navigation }) {
       {/* If archived/ended, show attendees but disable interactive actions in child components where applicable */}
       <AttendeeList
         attendees={event.attendees || []}
+        attendeeSnippets={event.attendeeSnippets || null}
+        attendeesCount={
+          typeof event.attendeesCount === 'number' ? event.attendeesCount : null
+        }
         eventId={eventId}
         isCreator={event.ownerId === user?.uid}
         navigation={navigation}

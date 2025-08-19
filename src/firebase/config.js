@@ -45,7 +45,8 @@ export const auth = initializeAuth(app, {
 });
 
 export const db = getFirestore(app);
-export const functions = getFunctions(app);
+// Initialize Functions in the same region as deployed callables
+export const functions = getFunctions(app, 'us-central1');
 export const storage = getStorage(app);
 
 // Fetch user data from Firestore
@@ -165,13 +166,14 @@ export const followUser = async (currentUid, targetUid) => {
     currentUserData.following.includes(targetUid);
   if (alreadyFollowing) return;
 
-  // Description: Add to following array and increment target user's followerCount atomically
+  // Only update the caller's own document (allowed by rules)
   await updateDoc(currentUserDoc, {
     following: arrayUnion(targetUid),
   });
-  await updateDoc(doc(db, 'users', targetUid), {
-    followerCount: increment(1),
-  });
+
+  // Note: We intentionally do NOT update target user's followerCount here, since
+  // client is not allowed to write someone else's user doc per rules. Use a backend
+  // function/cron to reconcile counts if needed.
 };
 
 // Unfollow a user
@@ -190,24 +192,27 @@ export const unfollowUser = async (currentUid, targetUid) => {
     currentUserData.following.includes(targetUid);
   if (!isFollowing) return;
 
-  // Description: Remove from following array and decrement target user's followerCount atomically
+  // Only update the caller's own document (allowed by rules)
   await updateDoc(currentUserDoc, {
     following: arrayRemove(targetUid),
   });
-  await updateDoc(doc(db, 'users', targetUid), {
-    followerCount: increment(-1),
-  });
+
+  // Note: No decrement on target user's followerCount for the same permissions reason.
 };
 
-// Send a notification
-export const sendNotification = async (type, recipientId, data) => {
-  const notificationRef = collection(db, 'notifications');
-  await addDoc(notificationRef, {
-    type,
-    recipientId,
-    ...data,
-    createdAt: new Date(),
-  });
+// Send a notification via callable (server-side creation only)
+export const sendNotification = async (type, recipientId, data = {}) => {
+  try {
+    const { getFunctions, httpsCallable } = await import('firebase/functions');
+    const { getApp } = await import('firebase/app');
+    const functions = getFunctions(getApp(), 'us-central1');
+    const create = httpsCallable(functions, 'createNotification');
+    const res = await create({ type, recipientId, data });
+    return res?.data || { ok: true };
+  } catch (e) {
+    console.error('sendNotification failed:', e);
+    throw e;
+  }
 };
 
 // Update user rating
@@ -355,3 +360,10 @@ export async function getUserEventsByIds(eventIds) {
   // Exclude soft-deleted events client-side to avoid requiring a composite index
   return allResults.filter((e) => e.isDeleted !== true);
 }
+
+// Update user rating via callable (enforces mutual-event rule server-side)
+export const rateUserCallable = async (targetUid, raterUid, rating) => {
+  const fn = httpsCallable(functions, 'rateUser');
+  const res = await fn({ targetUid, rating });
+  return res?.data || { ok: true };
+};

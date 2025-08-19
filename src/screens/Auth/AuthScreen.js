@@ -28,12 +28,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useUserStore } from '../../store/userStore';
-import { registerForPushTokenAsync } from '../../lib/push';
+import { registerForPushTokenAsync, initPushForUser } from '../../lib/push';
 import {
   updateDoc,
   doc as fsDoc,
   serverTimestamp as fsServerTimestamp,
 } from 'firebase/firestore';
+import { GOOGLE_CLIENT_ID } from '@env';
 
 export default function AuthScreen({ navigation }) {
   const [mode, setMode] = useState('login');
@@ -60,7 +61,7 @@ export default function AuthScreen({ navigation }) {
   // Google Auth (disabled for now but kept in)
   const [googleRequest, googleResponse, googlePromptAsync] =
     Google.useIdTokenAuthRequest({
-      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientId: GOOGLE_CLIENT_ID,
     });
 
   useEffect(() => {
@@ -71,34 +72,21 @@ export default function AuthScreen({ navigation }) {
       signInWithCredential(auth, credential)
         .then(async (result) => {
           if (result.additionalUserInfo?.isNewUser) {
-            // Use createUser utility for full schema
             const { createUser } = require('../../services/userService');
+            const token = await registerForPushTokenAsync().catch(() => null);
             await createUser(result.user.uid, {
               email: result.user.email,
+              deviceToken: token || null,
+              pushOptIn: !!token,
             });
+            if (token) initPushForUser(result.user.uid).catch(() => {});
+          } else {
+            initPushForUser(result.user.uid).catch(() => {});
           }
         })
         .catch((err) => Alert.alert('Google Sign Up Error', err.message));
     }
   }, [googleResponse]);
-
-  async function initPushForUser(uid) {
-    try {
-      const token = await registerForPushTokenAsync();
-      if (!token) return; // user denied / error
-      await updateDoc(fsDoc(db, 'users', uid), {
-        deviceToken: token,
-        pushOptIn: true,
-        updatedAt: fsServerTimestamp(),
-      });
-      // keep Zustand mirror in sync
-      const setUserLocal = useUserStore.getState().setUser;
-      const userLocal = useUserStore.getState().user || {};
-      setUserLocal({ ...userLocal, deviceToken: token, pushOptIn: true });
-    } catch (e) {
-      console.warn('[push] init token failed:', e?.message || e);
-    }
-  }
 
   const handleSubmit = async () => {
     if (!email || !password) {
@@ -246,6 +234,10 @@ export default function AuthScreen({ navigation }) {
             const userDocSnap = await getDoc(userDocRef);
             if (!userDocSnap.exists()) {
               try {
+                // Request push permission and token BEFORE creating the user doc (best-effort)
+                const token = await registerForPushTokenAsync().catch(
+                  () => null
+                );
                 console.log(
                   '[AuthScreen] Creating Firestore user doc for:',
                   result.user.uid
@@ -279,13 +271,10 @@ export default function AuthScreen({ navigation }) {
                   following: [],
                   followingCount: 0,
                   lastActive: serverTimestamp(),
-                  deviceToken: '',
-                  savedCount: 0,
-                  sex: '',
-                  status: 'active',
+                  deviceToken: token || null,
+                  pushOptIn: !!token,
                   isDeleted: false,
                   deletedAt: null,
-                  // Add any other fields as needed from the image
                 });
                 const { collection } = require('firebase/firestore');
                 const profileviewsRef = collection(userDocRef, 'profileviews');

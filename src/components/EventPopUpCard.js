@@ -34,6 +34,9 @@ import BottomSheet, {
 import { Ionicons } from '@expo/vector-icons';
 import { useUserStore } from '../store/userStore';
 import { useEventStore } from '../store/eventStore';
+import { useUserSnippetStore } from '../store/userSnippetStore';
+import joinEvent from '../lib/joinEvent';
+
 const screenHeight = Dimensions.get('window').height;
 
 export default function EventPopUpCard({ event, onClose, onJoin }) {
@@ -45,6 +48,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
   const snapPoints = useMemo(() => ['50%', '90%', '95%'], []);
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
 
   // NEW: Keep a live copy of the event document
   const [liveEvent, setLiveEvent] = useState(event || null);
@@ -66,7 +70,17 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
           return;
         }
         const data = { id: snap.id, ...snap.data() };
-        setLiveEvent(data);
+        setLiveEvent((prev) => {
+          // Skip update if nothing meaningful changed to avoid cascading renders
+          if (
+            prev &&
+            prev.id === data.id &&
+            prev.updatedAt?.seconds === data.updatedAt?.seconds
+          ) {
+            return prev;
+          }
+          return data;
+        });
         // Auto-close if soft-deleted
         if (data.isDeleted === true) onClose && onClose();
       },
@@ -96,7 +110,8 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
           );
           const data = await res.json();
           if (data.status === 'OK' && data.results.length) {
-            setAddress(data.results[0].formatted_address);
+            const next = data.results[0].formatted_address;
+            setAddress((prev) => (prev === next ? prev : next));
           } else {
             setAddress('Address not available');
           }
@@ -109,17 +124,43 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
 
     const ownerId = liveEvent.ownerId;
     if (!ownerId) return;
-    const fetchUser = async () => {
+
+    // Prefer cached/batched snippet over per-doc get
+    const fetchHostSnippet = async () => {
       try {
-        const ref = doc(db, 'users', ownerId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) setUserDetails({ id: snap.id, ...snap.data() });
+        const map = await ensureSnippets([ownerId]);
+        const s = map.get(ownerId);
+        if (s)
+          setUserDetails((prev) => {
+            if (
+              prev &&
+              prev.id === ownerId &&
+              prev.photoURL === s.photoURL &&
+              prev.name === s.name
+            )
+              return prev;
+            return { id: ownerId, ...s };
+          });
+        else setUserDetails(null);
       } catch (err) {
-        console.error('Error fetching user details:', err);
+        // Fallback to direct get as last resort to preserve behavior
+        try {
+          const ref = doc(db, 'users', ownerId);
+          const snap = await getDoc(ref);
+          if (snap.exists()) setUserDetails({ id: snap.id, ...snap.data() });
+        } catch (err2) {
+          console.error('Error fetching user details:', err2);
+          setUserDetails(null);
+        }
       }
     };
-    fetchUser();
-  }, [liveEvent]);
+    fetchHostSnippet();
+  }, [
+    liveEvent?.id,
+    liveEvent?.location?.latitude,
+    liveEvent?.location?.longitude,
+    liveEvent?.ownerId,
+  ]);
 
   const isSoftDeleted = liveEvent?.isDeleted === true;
   const isExpired = (() => {
@@ -138,17 +179,20 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
     return eventTime + 60 * 60 * 1000 <= Date.now();
   })();
 
-  const displayName = userDetails
-    ? `${userDetails.firstName || ''} ${userDetails.lastName || ''}`.trim() ||
-      userDetails.name ||
-      'Anonymous'
-    : 'Anonymous';
+  const displayName =
+    userDetails?.name ||
+    (userDetails
+      ? `${userDetails.firstName || ''} ${userDetails.lastName || ''}`.trim() ||
+        userDetails.name ||
+        'Anonymous'
+      : 'Anonymous');
 
   // Use fallback image for event image
-  const profileImageSource =
-    userDetails?.profileImage || userDetails?.avatarURL
-      ? { uri: userDetails.profileImage || userDetails.avatarURL }
-      : require('../../assets/smileDefault.png');
+  const profileImageSource = userDetails?.photoURL
+    ? { uri: userDetails.photoURL }
+    : userDetails?.profileImage || userDetails?.avatarURL
+    ? { uri: userDetails.profileImage || userDetails.avatarURL }
+    : require('../../assets/smileDefault.png');
 
   const openInMaps = () => {
     if (liveEvent?.location) {
@@ -158,111 +202,89 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
   };
 
   // --- Join Event Logic ---
+  // Track local request state to instantly reflect UI after sending a request
+  const [requestPendingLocal, setRequestPendingLocal] = useState(false);
+
+  // --- Live derived state ---
   const attendees = Array.isArray(liveEvent?.attendees)
     ? liveEvent.attendees
     : [];
   const requests = Array.isArray(liveEvent?.requests) ? liveEvent.requests : [];
   const isOwner = liveEvent?.ownerId === user?.uid;
   const isAttendee = attendees.includes(user?.uid);
-  const hasRequested = requests.includes(user?.uid);
+  const isMember = isOwner || isAttendee;
+  const hasRequested =
+    (requests.includes(user?.uid) || requestPendingLocal) && !isMember;
 
-  // --- Join/Request/Chat Button Logic (now reactive to liveEvent) ---
+  // Compute archived (read-only) state: >3 days after end, or soft-deleted
+  const getEventEndMs = (e) => {
+    if (!e) return null;
+    let end = null;
+    if (e.endAt) {
+      if (e.endAt.toDate) end = e.endAt.toDate().getTime();
+      else if (typeof e.endAt.seconds === 'number')
+        end = e.endAt.seconds * 1000;
+    } else if (e.date) {
+      if (e.date.toDate) end = e.date.toDate().getTime();
+      else if (typeof e.date.seconds === 'number') end = e.date.seconds * 1000;
+      else if (e.date instanceof Date) end = e.date.getTime();
+      if (end) end += 60 * 60 * 1000; // assume 1h duration when only start exists
+    }
+    return end;
+  };
+  const endMs = useMemo(
+    () => getEventEndMs(liveEvent),
+    [liveEvent?.id, liveEvent?.date, liveEvent?.endAt]
+  );
+  const archived = useMemo(
+    () =>
+      typeof endMs === 'number'
+        ? Date.now() >= endMs + 3 * 24 * 60 * 60 * 1000
+        : false,
+    [endMs]
+  );
+  const isReadOnly = isSoftDeleted || archived;
+
+  // --- Join/Request/Chat Button Logic ---
   let actionButtonLabel = 'Join Event';
-  if (isAttendee || isOwner) {
+  if (isMember) {
     actionButtonLabel = 'Check Chat';
-  } else if (liveEvent?.privacy === 'rsvp') {
-    actionButtonLabel = hasRequested ? 'Request Pending' : 'Request To Join';
+  } else if ((liveEvent?.privacy || 'public') === 'rsvp') {
+    actionButtonLabel = hasRequested ? 'Requested' : 'Request To Join';
   }
+
+  // Disable only when:
+  // - RSVP already requested (non-member), or
+  // - Non-member and view-only (archived/soft-deleted)
+  const joinDisabled =
+    !isMember &&
+    (isReadOnly ||
+      ((liveEvent?.privacy || 'public') === 'rsvp' && hasRequested));
 
   // --- Button Action Handler ---
   const handleActionButton = async () => {
-    if (isSoftDeleted) {
-      alert('This event has been archived and is no longer interactive.');
-      return;
-    }
-    if (isExpired) {
-      alert('This event has ended and is read-only.');
-      return;
-    }
-    if (isAttendee || isOwner) {
-      navigation.navigate('EventChat', {
-        eventId: liveEvent.id,
-        locationName: address,
-      });
-      return;
-    }
-    if (liveEvent?.privacy === 'rsvp') {
-      if (hasRequested) {
-        alert('Your request is pending approval.');
-        return;
-      }
-      await handleRequestToJoin();
-      return;
-    }
-    await handleJoin();
-  };
-
-  const handleRequestToJoin = async () => {
-    if (!user || !liveEvent?.id) return;
-    try {
-      const call = httpsCallable(functions, 'requestToJoinEvent');
-      const res = await call({ eventId: liveEvent.id });
-      const already = res?.data?.alreadyRequested;
-      alert(
-        already
-          ? 'You have already requested to join. Please wait for approval.'
-          : 'Request sent to the host. Await approval.'
-      );
-    } catch (err) {
-      console.error('Request to join error:', err);
-      alert(`Failed to send request. Error: ${err?.message || err}`);
-    }
-  };
-
-  const handleJoin = async () => {
-    if (isSoftDeleted) {
-      alert('This event has been archived and cannot be joined.');
-      return;
-    }
-    if (isExpired) {
-      alert('This event has ended and cannot be joined.');
-      return;
-    }
     if (!user || !liveEvent?.id) return;
 
-    const a = Array.isArray(liveEvent.attendees) ? liveEvent.attendees : [];
-    const isOwnerLocal = liveEvent.ownerId === user.uid;
-    if (isOwnerLocal || a.includes(user.uid)) {
+    const onShowMessage = (msg) => msg && alert(msg);
+
+    const res = await joinEvent({
+      event: liveEvent,
+      user,
+      navigation, // allow helper to navigate to chat on join
+      stores: { eventStore: useEventStore.getState() },
+      options: { onShowMessage },
+    });
+
+    if (res?.status === 'owner' || res?.status === 'already-attending') {
+      // helper would navigate, but keep address param behavior consistent
       navigation.navigate('EventChat', {
         eventId: liveEvent.id,
         locationName: address,
       });
       return;
     }
-
-    if (
-      typeof liveEvent.capacity === 'number' &&
-      liveEvent.capacity > 0 &&
-      a.length >= liveEvent.capacity
-    ) {
-      alert('Event is full. You can join the waitlist if available.');
-      return;
-    }
-
-    try {
-      const rsvpFn = useEventStore.getState().rsvpEvent;
-      if (typeof rsvpFn !== 'function') {
-        throw new Error('RSVP function unavailable');
-      }
-      await rsvpFn(liveEvent.id, user.uid);
-      navigation.navigate('EventChat', {
-        eventId: liveEvent.id,
-        locationName: address,
-      });
-      return;
-    } catch (err) {
-      console.error('Join event via store failed:', err);
-      alert(friendlyJoinError(err));
+    if (res?.status === 'requested') {
+      setRequestPendingLocal(true);
     }
   };
 
@@ -376,7 +398,7 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
               <Text style={styles.userRating}>
                 {typeof userDetails.rating === 'number' &&
                 userDetails.rating > 0
-                  ? `⭐ ${userDetails.rating.toFixed(1)}`
+                  ? `⭐ ${Number(userDetails.rating).toFixed(1)}`
                   : 'No Rating'}
               </Text>
             </View>
@@ -392,10 +414,23 @@ export default function EventPopUpCard({ event, onClose, onJoin }) {
             <Text style={styles.capacityText}>{attendees.length} joined</Text>
           )}
           <TouchableOpacity
-            style={styles.joinButton}
+            style={[
+              styles.joinButton,
+              (joinDisabled || (isMember && isReadOnly)) &&
+                styles.joinButtonDisabled,
+            ]}
             onPress={handleActionButton}
+            disabled={joinDisabled}
           >
-            <Text style={styles.joinButtonText}>{actionButtonLabel}</Text>
+            <Text
+              style={[
+                styles.joinButtonText,
+                (joinDisabled || (isMember && isReadOnly)) &&
+                  styles.joinButtonTextDisabled,
+              ]}
+            >
+              {actionButtonLabel}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.reportButton} onPress={handleReport}>
             <Text style={styles.reportButtonText}>Report</Text>
@@ -476,9 +511,13 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 5,
     alignItems: 'center',
-    marginBottom: 8, // Add spacing between buttons
+    marginBottom: 8,
+  },
+  joinButtonDisabled: {
+    backgroundColor: '#C9CCD1', // dull/grey when disabled for requested or read-only state
   },
   joinButtonText: { color: '#fff', fontWeight: 'bold' },
+  joinButtonTextDisabled: { color: '#f2f2f2' },
   reportButton: {
     backgroundColor: '#FFB300',
     padding: 8,

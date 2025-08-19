@@ -7,6 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { geohashQueryBounds, distanceBetween } from 'geofire-common';
+import { getWithTTL } from '../lib/ttlCache';
 
 function chunkArray(arr, chunkSize) {
   const result = [];
@@ -31,51 +32,56 @@ export async function fetchHotEvents(
     const bounds = geohashQueryBounds(center, radiusInM);
     const interestChunks =
       interests.length > 10 ? chunkArray(interests, 10) : [interests];
-    const promises = [];
 
-    for (const interestChunk of interestChunks) {
-      for (const b of bounds) {
-        const q = query(
-          collection(db, 'events'),
-          where('geohash', '>=', b[0]),
-          where('geohash', '<=', b[1]),
-          where('interest', 'in', interestChunk),
-          where('status', '==', 'active'),
-          // Server-side: exclude soft-deleted events when possible
-          where('isDeleted', '==', false),
-          where('date', '>=', Timestamp.now())
-        );
-        promises.push(getDocs(q));
+    const doFetch = async () => {
+      const promises = [];
+      for (const interestChunk of interestChunks) {
+        for (const b of bounds) {
+          const q = query(
+            collection(db, 'events'),
+            where('geohash', '>=', b[0]),
+            where('geohash', '<=', b[1]),
+            where('interest', 'in', interestChunk),
+            where('status', '==', 'active'),
+            where('isDeleted', '==', false),
+            where('date', '>=', Timestamp.now())
+          );
+          promises.push(getDocs(q));
+        }
       }
-    }
 
-    const snapshots = await Promise.allSettled(promises);
-    const matchingDocs = new Map();
+      const snapshots = await Promise.allSettled(promises);
+      const matchingDocs = new Map();
 
-    for (const result of snapshots) {
-      if (result.status === 'fulfilled') {
-        for (const doc of result.value.docs) {
-          const data = doc.data();
-          // Defensive: always skip soft-deleted docs
-          if (data?.isDeleted === true) continue;
-          if (
-            !data.location ||
-            data.location.latitude == null ||
-            data.location.longitude == null
-          )
-            continue;
-          const loc = [data.location.latitude, data.location.longitude];
-          const distance = distanceBetween(center, loc) * 1000;
-          if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
-            matchingDocs.set(doc.id, { id: doc.id, ...data });
+      for (const result of snapshots) {
+        if (result.status === 'fulfilled') {
+          for (const doc of result.value.docs) {
+            const data = doc.data();
+            if (data?.isDeleted === true) continue;
+            if (
+              !data.location ||
+              data.location.latitude == null ||
+              data.location.longitude == null
+            )
+              continue;
+            const loc = [data.location.latitude, data.location.longitude];
+            const distance = distanceBetween(center, loc) * 1000;
+            if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
+              matchingDocs.set(doc.id, { id: doc.id, ...data });
+            }
           }
         }
       }
-    }
 
-    const results = Array.from(matchingDocs.values());
-    console.log('[🔥 Hot Feed] Matching events:', results.length);
-    return results;
+      return Array.from(matchingDocs.values());
+    };
+
+    const key = `hot:${center.join(',')}:${radiusInM}:${interests
+      .slice(0, 10)
+      .sort()
+      .join('|')}`;
+    // Short TTL for feed freshness (2 minutes)
+    return await getWithTTL(key, doFetch, 2 * 60 * 1000);
   } catch (error) {
     console.error('Error fetching Hot events:', error);
     return [];
@@ -101,45 +107,51 @@ export async function fetchNewEvents(
     const now = Date.now();
     const twentyFourHoursAgo = Timestamp.fromMillis(now - 24 * 60 * 60 * 1000);
 
-    const promises = bounds.map((b) =>
-      getDocs(
-        query(
-          collection(db, 'events'),
-          where('geohash', '>=', b[0]),
-          where('geohash', '<=', b[1]),
-          where('interest', '==', selectedInterest),
-          where('status', '==', 'active'),
-          where('isDeleted', '==', false),
-          where('createdAt', '>=', twentyFourHoursAgo)
+    const doFetch = async () => {
+      const promises = bounds.map((b) =>
+        getDocs(
+          query(
+            collection(db, 'events'),
+            where('geohash', '>=', b[0]),
+            where('geohash', '<=', b[1]),
+            where('interest', '==', selectedInterest),
+            where('status', '==', 'active'),
+            where('isDeleted', '==', false),
+            where('createdAt', '>=', twentyFourHoursAgo)
+          )
         )
-      )
-    );
+      );
 
-    const snapshots = await Promise.all(promises);
+      const snapshots = await Promise.all(promises);
 
-    const matchingDocs = new Map();
-    for (const snap of snapshots) {
-      for (const doc of snap.docs) {
-        const data = doc.data();
-        if (data?.isDeleted === true) continue;
-        if (
-          !data.location ||
-          data.location.latitude == null ||
-          data.location.longitude == null
-        )
-          continue;
-        const loc = [data.location.latitude, data.location.longitude];
-        const distance = distanceBetween(center, loc) * 1000;
-        if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
-          matchingDocs.set(doc.id, { id: doc.id, ...data });
+      const matchingDocs = new Map();
+      for (const snap of snapshots) {
+        for (const doc of snap.docs) {
+          const data = doc.data();
+          if (data?.isDeleted === true) continue;
+          if (
+            !data.location ||
+            data.location.latitude == null ||
+            data.location.longitude == null
+          )
+            continue;
+          const loc = [data.location.latitude, data.location.longitude];
+          const distance = distanceBetween(center, loc) * 1000;
+          if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
+            matchingDocs.set(doc.id, { id: doc.id, ...data });
+          }
         }
       }
-    }
 
-    const results = Array.from(matchingDocs.values()).sort(
-      (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
-    );
-    return { events: results.slice(0, pageSize), lastDoc: null };
+      const results = Array.from(matchingDocs.values()).sort(
+        (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+      );
+      return { events: results.slice(0, pageSize), lastDoc: null };
+    };
+
+    const key = `new:${center.join(',')}:${radiusInM}:${selectedInterest}`;
+    const res = await getWithTTL(key, doFetch, 2 * 60 * 1000);
+    return res;
   } catch (err) {
     console.error('Error fetching New events:', err);
     return { events: [], lastDoc: null };
@@ -167,46 +179,52 @@ export async function fetchThisWeekEvents(
       Date.now() + 7 * 24 * 60 * 60 * 1000
     );
 
-    const promises = bounds.map((b) =>
-      getDocs(
-        query(
-          collection(db, 'events'),
-          where('geohash', '>=', b[0]),
-          where('geohash', '<=', b[1]),
-          where('interest', '==', selectedInterest),
-          where('status', '==', 'active'),
-          where('isDeleted', '==', false),
-          where('date', '>=', now),
-          where('date', '<=', weekFromNow)
+    const doFetch = async () => {
+      const promises = bounds.map((b) =>
+        getDocs(
+          query(
+            collection(db, 'events'),
+            where('geohash', '>=', b[0]),
+            where('geohash', '<=', b[1]),
+            where('interest', '==', selectedInterest),
+            where('status', '==', 'active'),
+            where('isDeleted', '==', false),
+            where('date', '>=', now),
+            where('date', '<=', weekFromNow)
+          )
         )
-      )
-    );
+      );
 
-    const snapshots = await Promise.all(promises);
+      const snapshots = await Promise.all(promises);
 
-    const matchingDocs = new Map();
-    for (const snap of snapshots) {
-      for (const doc of snap.docs) {
-        const data = doc.data();
-        if (data?.isDeleted === true) continue;
-        if (
-          !data.location ||
-          data.location.latitude == null ||
-          data.location.longitude == null
-        )
-          continue;
-        const loc = [data.location.latitude, data.location.longitude];
-        const distance = distanceBetween(center, loc) * 1000;
-        if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
-          matchingDocs.set(doc.id, { id: doc.id, ...data });
+      const matchingDocs = new Map();
+      for (const snap of snapshots) {
+        for (const doc of snap.docs) {
+          const data = doc.data();
+          if (data?.isDeleted === true) continue;
+          if (
+            !data.location ||
+            data.location.latitude == null ||
+            data.location.longitude == null
+          )
+            continue;
+          const loc = [data.location.latitude, data.location.longitude];
+          const distance = distanceBetween(center, loc) * 1000;
+          if (distance <= radiusInM && !matchingDocs.has(doc.id)) {
+            matchingDocs.set(doc.id, { id: doc.id, ...data });
+          }
         }
       }
-    }
 
-    const results = Array.from(matchingDocs.values()).sort(
-      (a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0)
-    );
-    return { events: results.slice(0, pageSize), lastDoc: null };
+      const results = Array.from(matchingDocs.values()).sort(
+        (a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0)
+      );
+      return { events: results.slice(0, pageSize), lastDoc: null };
+    };
+
+    const key = `week:${center.join(',')}:${radiusInM}:${selectedInterest}`;
+    const res = await getWithTTL(key, doFetch, 2 * 60 * 1000);
+    return res;
   } catch (err) {
     console.error('Error fetching This Week events:', err);
     return { events: [], lastDoc: null };

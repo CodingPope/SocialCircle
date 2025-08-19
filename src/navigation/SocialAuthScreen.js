@@ -9,15 +9,16 @@ import {
 } from 'firebase/auth';
 import { auth } from '../firebase/config';
 import * as WebBrowser from 'expo-web-browser';
+import { GOOGLE_EXPO_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function SocialAuthScreen({ navigation }) {
   const [request, response, promptAsync] = Google.useAuthRequest({
-    expoClientId: process.env.GOOGLE_EXPO_CLIENT_ID, // your “Web” client
-    iosClientId: process.env.GOOGLE_IOS_CLIENT_ID, // the one you just created
-    androidClientId: process.env.GOOGLE_IOS_CLIENT_ID, // also host.exp.exponent
-    webClientId: process.env.GOOGLE_EXPO_CLIENT_ID, // often same as expoClientId
+    expoClientId: GOOGLE_EXPO_CLIENT_ID, // your “Web” client
+    iosClientId: GOOGLE_IOS_CLIENT_ID, // the one you just created
+    androidClientId: GOOGLE_IOS_CLIENT_ID, // also host.exp.exponent
+    webClientId: GOOGLE_EXPO_CLIENT_ID, // often same as expoClientId
   });
 
   useEffect(() => {

@@ -1,9 +1,11 @@
 // src/lib/push.js
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useUserStore } from '../store/userStore';
+import { EAS_PROJECT_ID } from '@env';
 
 // Foreground behavior (optional)
 Notifications.setNotificationHandler({
@@ -14,26 +16,52 @@ Notifications.setNotificationHandler({
   }),
 });
 
+async function ensureAndroidChannel() {
+  if (Platform.OS !== 'android') return;
+  try {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+  } catch {}
+}
+
 export async function registerForPushTokenAsync() {
-  // iOS: ask permission
-  const settings = await Notifications.getPermissionsAsync();
-  let status = settings.status;
-  if (status !== 'granted') {
-    const req = await Notifications.requestPermissionsAsync();
-    status = req.status;
+  try {
+    await ensureAndroidChannel();
+
+    // iOS: ask permission
+    const settings = await Notifications.getPermissionsAsync();
+    let status = settings.status;
+    if (status !== 'granted') {
+      const req = await Notifications.requestPermissionsAsync();
+      status = req.status;
+    }
+    if (status !== 'granted') return null;
+
+    // Get Expo push token
+    const inferredId =
+      Constants?.expoConfig?.extra?.eas?.projectId ||
+      Constants?.easConfig?.projectId ||
+      EAS_PROJECT_ID ||
+      null;
+
+    const tokenData = await Notifications.getExpoPushTokenAsync(
+      inferredId ? { projectId: inferredId } : undefined
+    );
+    const token = tokenData?.data || null;
+    if (
+      !token ||
+      typeof token !== 'string' ||
+      !token.startsWith('ExponentPushToken')
+    ) {
+      return null;
+    }
+    return token;
+  } catch (e) {
+    console.warn('[push] token error:', e?.message || e);
+    return null;
   }
-  if (status !== 'granted') return null;
-
-  // Get Expo push token
-  const projectId =
-    Constants?.expoConfig?.extra?.eas?.projectId ||
-    Constants?.easConfig?.projectId;
-
-  const tokenData = await Notifications.getExpoPushTokenAsync(
-    projectId ? { projectId } : undefined
-  );
-  const expoPushToken = tokenData?.data || null;
-  return expoPushToken;
 }
 
 // NEW: ask permission, get token, and SAVE it (never writes empty)
@@ -46,13 +74,16 @@ export async function initPushForUser(uid) {
     await updateDoc(doc(db, 'users', uid), {
       deviceToken: token,
       pushOptIn: true,
-      updatedAt: serverTimestamp(),
+      devicePlatform: Platform.OS,
+      deviceUpdatedAt: serverTimestamp(),
     });
 
     // keep Zustand mirror in sync if you store the user locally
     const setUser = useUserStore.getState().setUser;
     const current = useUserStore.getState().user || {};
-    setUser({ ...current, deviceToken: token, pushOptIn: true });
+    if (typeof setUser === 'function') {
+      setUser({ ...current, deviceToken: token, pushOptIn: true });
+    }
   } catch (e) {
     console.warn('[push] Failed to init push token:', e?.message || e);
   }

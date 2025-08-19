@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,11 @@ import {
   updateDoc,
   arrayRemove,
   doc,
+  deleteField,
 } from 'firebase/firestore';
 import { db, reportContent } from '../firebase/config';
 import { useUserStore } from '../store/userStore';
+import { useUserSnippetStore } from '../store/userSnippetStore';
 import smileDefault from '../../assets/smileDefault.png';
 import * as Haptics from 'expo-haptics';
 
@@ -31,42 +33,97 @@ export default function AttendeeList({
   isCreator,
   navigation, // Ensure navigation prop is received
   readOnly = false,
+  attendeeSnippets = null,
+  attendeesCount = null,
 }) {
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const currentUser = useUserStore((s) => s.user);
+  const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
+
+  // Stable keys to prevent effect churn
+  const attendeesKey = useMemo(
+    () => JSON.stringify(attendees || []),
+    [attendees]
+  );
+  const snippetsKey = useMemo(() => {
+    if (!attendeeSnippets) return 'none';
+    return Array.isArray(attendeeSnippets)
+      ? JSON.stringify(
+          attendeeSnippets
+            .map((s) => s?.uid)
+            .filter(Boolean)
+            .sort()
+        )
+      : JSON.stringify(Object.keys(attendeeSnippets).sort());
+  }, [attendeeSnippets]);
 
   useEffect(() => {
+    const hydrateFromSnippets = async () => {
+      if (
+        attendeeSnippets &&
+        (Array.isArray(attendeeSnippets) ||
+          typeof attendeeSnippets === 'object')
+      ) {
+        const arr = Array.isArray(attendeeSnippets)
+          ? attendeeSnippets
+          : Object.values(attendeeSnippets || {});
+        const mapped = arr
+          .filter((s) => s && s.uid)
+          .map((s) => ({
+            id: s.uid,
+            profileImage: s.photoURL || null,
+            avatarURL: null,
+            displayName: s.name || 'User',
+            verified: !!s.verified,
+            rating: typeof s.rating === 'number' ? s.rating : null,
+          }));
+        setUsers((prev) => {
+          const same =
+            prev.length === mapped.length &&
+            prev.every((p, i) => p.id === mapped[i].id);
+          return same ? prev : mapped;
+        });
+        return true;
+      }
+      return false;
+    };
+
     const fetchUsers = async () => {
-      if (!attendees.length) {
-        setUsers([]);
+      const ids = Array.isArray(attendees) ? attendees : [];
+      if (!ids.length) {
+        setUsers((prev) => (prev.length ? [] : prev));
         return;
       }
       try {
-        const chunks = [];
-        for (let i = 0; i < attendees.length; i += 10) {
-          chunks.push(attendees.slice(i, i + 10));
-        }
-        let allUsers = [];
-        for (const chunk of chunks) {
-          const q = query(
-            collection(db, 'users'),
-            where('__name__', 'in', chunk)
-          );
-          const snapshot = await getDocs(q);
-          allUsers = allUsers.concat(
-            snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
-          );
-        }
-        // Filter out users who are soft-deleted (isDeleted === true)
-        setUsers(allUsers.filter((user) => !user.isDeleted));
+        const map = await ensureSnippets(ids);
+        const mapped = ids
+          .map((uid) => map.get(uid))
+          .filter(Boolean)
+          .map((s) => ({
+            id: s.uid,
+            profileImage: s.photoURL || null,
+            avatarURL: null,
+            displayName: s.name || 'User',
+            verified: !!s.verified,
+            rating: typeof s.rating === 'number' ? s.rating : null,
+          }));
+        setUsers((prev) => {
+          const same =
+            prev.length === mapped.length &&
+            prev.every((p, i) => p.id === mapped[i].id);
+          return same ? prev : mapped;
+        });
       } catch (err) {
         console.error('Error fetching attendee users:', err);
       }
     };
-    fetchUsers();
-  }, [attendees]);
+
+    hydrateFromSnippets().then((used) => {
+      if (!used) fetchUsers();
+    });
+  }, [attendeesKey, snippetsKey]);
 
   const handleRemoveAttendee = async (userId) => {
     if (readOnly) {
@@ -75,11 +132,13 @@ export default function AttendeeList({
     }
     if (!eventId || !userId) return;
     try {
-      // Description: Remove userId from event.attendees array
+      // Description: Remove userId from event.attendees array and clear snippet
       const eventRef = doc(db, 'events', eventId);
-      await updateDoc(eventRef, {
+      const updates = {
         attendees: arrayRemove(userId),
-      });
+        [`attendeeSnippets.${userId}`]: deleteField(),
+      };
+      await updateDoc(eventRef, updates);
 
       // Description: Remove eventId from user's attended / attending arrays (support both naming variants)
       const userRef = doc(db, 'users', userId);

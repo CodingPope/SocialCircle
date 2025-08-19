@@ -1,22 +1,25 @@
 {
   "cli": { "version": ">= 13.0.0" },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "ios": { "resourceClass": "m-medium" }
-    },
     "preview": {
       "distribution": "store",
       "channel": "preview",
       "ios": { "resourceClass": "m-medium" },
+      "node": "20.11.1",
       "env": { "EXPO_PUBLIC_SENTRY_ENV": "beta" }
     },
     "production": {
       "distribution": "store",
       "channel": "production",
       "ios": { "resourceClass": "m-medium" },
+      "node": "20.11.1",
       "env": { "EXPO_PUBLIC_SENTRY_ENV": "production" }
+    },
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": { "resourceClass": "m-medium" },
+      "node": "20.11.1"
     }
   }
 }

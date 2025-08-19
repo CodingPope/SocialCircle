@@ -304,21 +304,59 @@ exports.rsvpEvent = onCall(
 
     const eventRef = db.doc(`events/${eventId}`);
     const chatRef = db.doc(`chats/${eventId}`);
+    const userRef = db.doc(`users/${userId}`);
 
     try {
-      // Use transaction for idempotent updates; READS must be before WRITES
       const result = await db.runTransaction(async (tx) => {
-        // READS
-        const [evSnap, chatSnap] = await Promise.all([
+        const [evSnap, chatSnap, userSnap] = await Promise.all([
           tx.get(eventRef),
           tx.get(chatRef),
+          tx.get(userRef),
         ]);
         if (!evSnap.exists)
           throw new HttpsError('not-found', 'Event does not exist');
         const ev = evSnap.data();
         const ownerId = ev.ownerId || null;
 
-        // Capacity check (optional safety)
+        // Do not allow direct joins for RSVP events
+        if ((ev.privacy || 'public').toLowerCase() === 'rsvp') {
+          throw new HttpsError(
+            'failed-precondition',
+            'RSVP event requires host approval'
+          );
+        }
+
+        // Gender eligibility
+        const userDoc = userSnap.exists ? userSnap.data() : {};
+        const userSex = (userDoc.sex || userDoc.gender || '')
+          .toString()
+          .toLowerCase();
+        const privacy = (ev.privacy || 'public').toString().toLowerCase();
+        if (privacy === 'female-only' && userSex !== 'female') {
+          throw new HttpsError('permission-denied', 'Not eligible (gender)');
+        }
+        if (privacy === 'male-only' && userSex !== 'male') {
+          throw new HttpsError('permission-denied', 'Not eligible (gender)');
+        }
+
+        // Age eligibility
+        const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
+        if (range && range.length === 2) {
+          const [min, max] = range.map((n) =>
+            typeof n === 'number' ? n : parseInt(n, 10)
+          );
+          const age = getAgeFromDob(userDoc.dob);
+          if (typeof age === 'number') {
+            if (
+              (typeof min === 'number' && age < min) ||
+              (typeof max === 'number' && age > max)
+            ) {
+              throw new HttpsError('permission-denied', 'Not eligible (age)');
+            }
+          }
+        }
+
+        // Capacity check
         const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
         if (
           typeof ev.capacity === 'number' &&
@@ -338,18 +376,30 @@ exports.rsvpEvent = onCall(
         participants.add(userId);
         const participantsArray = Array.from(participants);
 
-        // WRITES
+        // Prepare attendee snippet
+        const snippet = userSnap.exists
+          ? buildSnippetFromUser(userId, userSnap.data())
+          : {
+              uid: userId,
+              name: 'User',
+              photoURL: null,
+              verified: false,
+              rating: null,
+            };
+
+        const updates = {};
         if (!attendeesArr.includes(userId)) {
-          tx.update(eventRef, {
-            attendees: admin.firestore.FieldValue.arrayUnion(userId),
-          });
+          updates.attendees = admin.firestore.FieldValue.arrayUnion(userId);
+          updates.attendeesCount = admin.firestore.FieldValue.increment(1);
+          updates[`attendeeSnippets.${userId}`] = snippet;
         }
+        if (Object.keys(updates).length) tx.update(eventRef, updates);
 
         if (!chatSnap.exists) {
           tx.set(chatRef, {
             eventId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            createdBy: ownerId || auth.uid,
+            createdBy: ownerId || req.auth.uid,
             participants: participantsArray,
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
             messageCount: 0,
@@ -363,24 +413,15 @@ exports.rsvpEvent = onCall(
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
           });
         }
-
-        // Optionally also maintain a mirror field on user doc in the same transaction
-        const userRef = db.doc(`users/${userId}`);
         tx.update(userRef, {
           attendingEvents: admin.firestore.FieldValue.arrayUnion(eventId),
         });
-
         return { chatId: eventId, participants: participantsArray };
       });
 
-      logger.log('[rsvpEvent] success', { eventId, userId });
       return result;
     } catch (err) {
-      if (err instanceof HttpsError) {
-        logger.error('[rsvpEvent] HttpsError', err.code, err.message);
-        throw err;
-      }
-      logger.error('[rsvpEvent] error', err?.message || err);
+      if (err instanceof HttpsError) throw err;
       throw new HttpsError('internal', err?.message || 'RSVP failed');
     }
   }
@@ -433,10 +474,13 @@ exports.leaveEvent = onCall(
         const alreadyGone = !attendeesArr.includes(uid);
 
         // WRITES
+        const updates = {};
         if (!alreadyGone) {
-          tx.update(eventRef, {
-            attendees: admin.firestore.FieldValue.arrayRemove(uid),
-          });
+          updates.attendees = admin.firestore.FieldValue.arrayRemove(uid);
+          updates.attendeesCount = admin.firestore.FieldValue.increment(-1);
+          updates[`attendeeSnippets.${uid}`] =
+            admin.firestore.FieldValue.delete();
+          tx.update(eventRef, updates);
         }
 
         // Update chat participants (if chat exists)
@@ -565,29 +609,59 @@ exports.requestToJoinEvent = onCall(
 
     try {
       const result = await db.runTransaction(async (tx) => {
-        const evSnap = await tx.get(eventRef);
+        const [evSnap, userSnap] = await Promise.all([
+          tx.get(eventRef),
+          tx.get(db.doc(`users/${uid}`)),
+        ]);
         if (!evSnap.exists)
           throw new HttpsError('not-found', 'Event not found');
         const ev = evSnap.data();
-
         if (ev.isDeleted === true)
           throw new HttpsError('failed-precondition', 'Event archived');
-        if (ev.privacy !== 'rsvp')
+        if ((ev.privacy || 'public').toLowerCase() !== 'rsvp')
           throw new HttpsError('failed-precondition', 'Event is not RSVP');
         if (ev.ownerId === uid || ev.hostId === uid)
           throw new HttpsError('failed-precondition', 'Host cannot request');
+
+        // Eligibility checks against user profile
+        const userDoc = userSnap.exists ? userSnap.data() : {};
+        const userSex = (userDoc.sex || userDoc.gender || '')
+          .toString()
+          .toLowerCase();
+        const privacy = (ev.privacy || 'public').toString().toLowerCase();
+        if (privacy === 'female-only' && userSex !== 'female') {
+          throw new HttpsError('permission-denied', 'Not eligible (gender)');
+        }
+        if (privacy === 'male-only' && userSex !== 'male') {
+          throw new HttpsError('permission-denied', 'Not eligible (gender)');
+        }
+        const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
+        if (range && range.length === 2) {
+          const [min, max] = range.map((n) =>
+            typeof n === 'number' ? n : parseInt(n, 10)
+          );
+          const age = getAgeFromDob(userDoc.dob);
+          if (typeof age === 'number') {
+            if (
+              (typeof min === 'number' && age < min) ||
+              (typeof max === 'number' && age > max)
+            ) {
+              throw new HttpsError('permission-denied', 'Not eligible (age)');
+            }
+          }
+        }
 
         const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
         const requests = Array.isArray(ev.requests) ? ev.requests : [];
         if (attendees.includes(uid))
           throw new HttpsError('already-exists', 'Already an attendee');
-        if (requests.includes(uid)) return { ok: true, alreadyRequested: true }; // idempotent
+        if (requests.includes(uid)) return { ok: true, alreadyRequested: true };
 
         tx.update(eventRef, {
           requests: admin.firestore.FieldValue.arrayUnion(uid),
+          waitlistCount: admin.firestore.FieldValue.increment(1),
         });
 
-        // Create notification to host (best-effort)
         const ownerId = ev.ownerId;
         if (ownerId) {
           tx.set(notifRef.doc(), {
@@ -609,7 +683,6 @@ exports.requestToJoinEvent = onCall(
       return result;
     } catch (err) {
       if (err instanceof HttpsError) throw err;
-      logger.error('[requestToJoinEvent] error', err?.message || err);
       throw new HttpsError('internal', err?.message || 'Request failed');
     }
   }
@@ -634,9 +707,10 @@ exports.acceptRsvpRequest = onCall(
     const userRef = db.doc(`users/${userId}`);
 
     await db.runTransaction(async (tx) => {
-      const [evSnap, chatSnap] = await Promise.all([
+      const [evSnap, chatSnap, userSnap] = await Promise.all([
         tx.get(eventRef),
         tx.get(chatRef),
+        tx.get(userRef),
       ]);
       if (!evSnap.exists) throw new HttpsError('not-found', 'Event missing');
       const ev = evSnap.data();
@@ -662,19 +736,26 @@ exports.acceptRsvpRequest = onCall(
         throw new HttpsError('failed-precondition', 'Event full');
       }
 
-      // Update event arrays
+      const updates = {};
       if (!alreadyAttendee) {
-        tx.update(eventRef, {
-          attendees: admin.firestore.FieldValue.arrayUnion(userId),
-          requests: requests.includes(userId)
-            ? admin.firestore.FieldValue.arrayRemove(userId)
-            : admin.firestore.FieldValue.arrayUnion(), // no-op
-        });
-      } else if (requests.includes(userId)) {
-        tx.update(eventRef, {
-          requests: admin.firestore.FieldValue.arrayRemove(userId),
-        });
+        updates.attendees = admin.firestore.FieldValue.arrayUnion(userId);
+        updates.attendeesCount = admin.firestore.FieldValue.increment(1);
+        const snippet = userSnap.exists
+          ? buildSnippetFromUser(userId, userSnap.data())
+          : {
+              uid: userId,
+              name: 'User',
+              photoURL: null,
+              verified: false,
+              rating: null,
+            };
+        updates[`attendeeSnippets.${userId}`] = snippet;
       }
+      if (requests.includes(userId)) {
+        updates.requests = admin.firestore.FieldValue.arrayRemove(userId);
+        updates.waitlistCount = admin.firestore.FieldValue.increment(-1);
+      }
+      if (Object.keys(updates).length) tx.update(eventRef, updates);
 
       // Chat participants
       if (!chatSnap.exists) {
@@ -773,6 +854,7 @@ exports.declineRsvpRequest = onCall(
       if (requests.includes(userId)) {
         tx.update(eventRef, {
           requests: admin.firestore.FieldValue.arrayRemove(userId),
+          waitlistCount: admin.firestore.FieldValue.increment(-1),
         });
       }
     });
@@ -781,6 +863,87 @@ exports.declineRsvpRequest = onCall(
     return { ok: true };
   }
 );
+
+// -------------------- NEW: REPORTING & NOTIFICATIONS CALLABLES --------------------
+
+// Callable: submit a report (since client cannot write /reports per rules)
+// data: { targetType: 'user'|'event', targetId: string, reason?: string, details?: string }
+exports.submitReport = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required');
+    const { targetType, targetId, reason, details } = req.data || {};
+    if (!['user', 'event'].includes(targetType))
+      throw new HttpsError('invalid-argument', 'Invalid targetType');
+    if (!targetId || typeof targetId !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing targetId');
+
+    const safe = (v, max = 2000) =>
+      typeof v === 'string' ? v.toString().slice(0, max) : null;
+
+    const doc = {
+      targetType,
+      targetId,
+      reason: safe(reason, 256),
+      details: safe(details, 2000),
+      createdBy: uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      status: 'open',
+      appVersion: process.env.APP_VERSION || null,
+      environment: process.env.ENVIRONMENT || 'beta',
+    };
+
+    const ref = await db.collection('reports').add(doc);
+    logger.log('[reports] submitted', ref.id, targetType, targetId);
+    return { ok: true, id: ref.id };
+  }
+);
+
+// Callable: create a notification document on behalf of the client (client cannot create directly)
+// data: { recipientId: string, type: string, title?: string, message?: string, linkType?, linkId?, eventId? }
+exports.createNotification = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required');
+    const { recipientId, type, title, message, linkType, linkId, eventId } =
+      req.data || {};
+    if (!recipientId || typeof recipientId !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing recipientId');
+    if (!type || typeof type !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing type');
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const doc = {
+      recipientId,
+      type,
+      title: typeof title === 'string' ? title.slice(0, 120) : null,
+      message: typeof message === 'string' ? message.slice(0, 500) : null,
+      linkType: linkType || null,
+      linkId: linkId || null,
+      eventId: eventId || null,
+      read: false,
+      createdAt: now,
+      createdBy: uid,
+      isDeleted: false,
+    };
+
+    const ref = await db.collection('notifications').add(doc);
+    logger.log('[notifications] created', ref.id, 'for', recipientId);
+    return { ok: true, id: ref.id };
+  }
+);
+
+// -------------------- NEW: USER AND EVENT REPORTING --------------------
 
 // Callable: create a report (server-side write to /reports)
 exports.createReport = onCall(
@@ -842,6 +1005,182 @@ exports.createReport = onCall(
     } catch (err) {
       logger.error('[createReport] error', err?.message || err);
       throw new HttpsError('internal', 'Failed to create report');
+    }
+  }
+);
+
+// Callable: rate a user with server-side validation (mutual event required)
+exports.rateUser = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    cpu: 1,
+    timeoutSeconds: 45,
+  },
+  async (req) => {
+    const raterUid = req.auth?.uid || null;
+    const { targetUid, rating } = req.data || {};
+
+    if (!raterUid) throw new HttpsError('unauthenticated', 'Sign in required');
+    if (!targetUid)
+      throw new HttpsError('invalid-argument', 'targetUid required');
+    if (targetUid === raterUid)
+      throw new HttpsError('failed-precondition', 'Cannot rate yourself');
+
+    const r = Number(rating);
+    if (!Number.isFinite(r) || r < 1 || r > 5)
+      throw new HttpsError('invalid-argument', 'rating must be 1..5');
+
+    // Validate mutual event participation
+    const eventsCol = db.collection('events');
+
+    const [raterAtt, raterHost] = await Promise.all([
+      eventsCol.where('attendees', 'array-contains', raterUid).limit(400).get(),
+      eventsCol.where('ownerId', '==', raterUid).limit(400).get(),
+    ]);
+
+    const [targetAtt, targetHost] = await Promise.all([
+      eventsCol
+        .where('attendees', 'array-contains', targetUid)
+        .limit(400)
+        .get(),
+      eventsCol.where('ownerId', '==', targetUid).limit(400).get(),
+    ]);
+
+    const raterSet = new Set([
+      ...raterAtt.docs.map((d) => d.id),
+      ...raterHost.docs.map((d) => d.id),
+    ]);
+    const targetIds = [
+      ...targetAtt.docs.map((d) => d.id),
+      ...targetHost.docs.map((d) => d.id),
+    ];
+    const hasShared = targetIds.some((id) => raterSet.has(id));
+
+    if (!hasShared)
+      throw new HttpsError(
+        'permission-denied',
+        'You can only rate users from shared events'
+      );
+
+    // Update rating atomically
+    const userRef = db.doc(`users/${targetUid}`);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      if (!snap.exists) throw new HttpsError('not-found', 'User not found');
+      const data = snap.data() || {};
+      const ratings = Object.assign({}, data.ratings || {});
+      ratings[raterUid] = r;
+      const values = Object.values(ratings).map((x) => Number(x) || 0);
+      const ratingCount = values.length;
+      const avg = ratingCount
+        ? values.reduce((sum, v) => sum + v, 0) / ratingCount
+        : 0;
+
+      tx.update(userRef, {
+        ratings,
+        rating: avg,
+        ratingCount,
+      });
+    });
+
+    return { ok: true };
+  }
+);
+
+// Helper: build attendee snippet from user doc
+function buildSnippetFromUser(uid, user) {
+  const first = (user.firstName || '').toString().trim();
+  const last = (user.lastName || '').toString().trim();
+  const name =
+    `${first} ${last}`.trim() || user.displayName || user.username || 'User';
+  const photoURL = user.profileImage || user.avatarURL || user.photoURL || null;
+  const verified = !!user.verified;
+  const rating = typeof user.rating === 'number' ? user.rating : null;
+  return { uid, name, photoURL, verified, rating };
+}
+
+// Helper: compute age from Firestore Timestamp or ISO
+function getAgeFromDob(dob) {
+  try {
+    let d = null;
+    if (!dob) return null;
+    if (dob.toDate) d = dob.toDate();
+    else if (typeof dob.seconds === 'number') d = new Date(dob.seconds * 1000);
+    else if (dob instanceof Date) d = dob;
+    else if (typeof dob === 'string') d = new Date(dob);
+    if (!d || isNaN(d.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - d.getFullYear();
+    const m = today.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
+    return age;
+  } catch {
+    return null;
+  }
+}
+
+// Fanout: when user profile fields change, update attendee snippets across their events
+exports.onUserUpdateFanout = onDocumentUpdated(
+  'users/{userId}',
+  async (event) => {
+    try {
+      const before = event.data.before.data();
+      const after = event.data.after.data();
+      if (!before || !after) return;
+
+      // Only act if snippet-relevant fields changed
+      const fields = [
+        'firstName',
+        'lastName',
+        'displayName',
+        'username',
+        'profileImage',
+        'avatarURL',
+        'photoURL',
+        'verified',
+        'rating',
+      ];
+      const changed = fields.some(
+        (f) => (before[f] || null) !== (after[f] || null)
+      );
+      if (!changed) return;
+
+      const uid = event.params.userId;
+      const snippet = buildSnippetFromUser(uid, after);
+
+      // Find events where this user is an attendee
+      const q = db
+        .collection('events')
+        .where('attendees', 'array-contains', uid)
+        .limit(400);
+      const snap = await q.get();
+      if (snap.empty) return;
+
+      const batches = [];
+      let batch = db.batch();
+      let ops = 0;
+      snap.docs.forEach((d) => {
+        batch.update(d.ref, { [`attendeeSnippets.${uid}`]: snippet });
+        ops++;
+        if (ops >= 450) {
+          // stay under 500 ops
+          batches.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
+      });
+      batches.push(batch.commit());
+      await Promise.all(batches);
+      logger.log(
+        '[onUserUpdateFanout] updated attendee snippets for',
+        uid,
+        'in',
+        snap.size,
+        'events'
+      );
+    } catch (e) {
+      logger.error('[onUserUpdateFanout] error', e?.message || e);
     }
   }
 );

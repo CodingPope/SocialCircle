@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,8 @@ import {
   arrayRemove, // Added for attendee removal
   writeBatch, // Added for leave event batching
   serverTimestamp, // Added: ensure consistent timestamps for ordering
+  getDocs,
+  where,
 } from 'firebase/firestore';
 import {
   db,
@@ -154,8 +156,14 @@ const EventChatScreen = () => {
   // Recompute when event or param changes
   useEffect(() => {
     const label = getLocationLabel();
-    setResolvedLocationLabel(label);
-  }, [event, locationNameParam]);
+    setResolvedLocationLabel((prev) => (prev === label ? prev : label));
+  }, [
+    event?.id,
+    event?.address,
+    event?.locationName,
+    event?.location,
+    locationNameParam,
+  ]);
 
   // Debug (remove in production)
   useEffect(() => {
@@ -169,7 +177,100 @@ const EventChatScreen = () => {
         computed: getLocationLabel(),
       });
     }
-  }, [event, locationNameParam, eventId]);
+  }, [
+    event?.id,
+    event?.address,
+    event?.locationName,
+    locationNameParam,
+    eventId,
+  ]);
+
+  // Helper: map attendeeSnippets -> UI attendee shape
+  const mapSnippetsToAttendees = (snippets) => {
+    const arr = Array.isArray(snippets)
+      ? snippets
+      : Object.values(snippets || {});
+    return arr
+      .filter((s) => s && s.uid)
+      .map((s) => ({
+        id: s.uid,
+        displayName: s.name || 'User',
+        photoURL: s.photoURL || null,
+        rating: typeof s.rating === 'number' ? s.rating : null,
+      }));
+  };
+
+  // Helper: batch fetch minimal user fields for a list of uids (chunks of 10)
+  const batchFetchUsersAsAttendees = async (uids) => {
+    if (!Array.isArray(uids) || !uids.length) return [];
+    const chunks = [];
+    for (let i = 0; i < uids.length; i += 10)
+      chunks.push(uids.slice(i, i + 10));
+    const results = [];
+    for (const chunk of chunks) {
+      try {
+        const q = query(
+          collection(db, 'users'),
+          where('__name__', 'in', chunk)
+        );
+        const snap = await getDocs(q);
+        snap.docs.forEach((d) => {
+          const u = d.data() || {};
+          results.push({
+            id: d.id,
+            displayName:
+              u.displayName ||
+              `${u.firstName || ''} ${u.lastName || ''}`.trim() ||
+              'User',
+            photoURL: u.photoURL || u.profileImage || u.avatarURL || null,
+            rating:
+              typeof u.rating === 'number'
+                ? u.rating
+                : typeof u.ranking === 'number'
+                ? u.ranking
+                : null,
+          });
+        });
+      } catch (e) {
+        console.warn(
+          '[EventChat] batch user fetch failed chunk, falling back',
+          e?.message || e
+        );
+        // Fallback to individual gets for this chunk to avoid dropping users
+        const individuals = await Promise.all(
+          chunk.map(async (uid) => {
+            try {
+              const snap = await getDoc(doc(db, 'users', uid));
+              const u = snap.exists() ? snap.data() : {};
+              return {
+                id: uid,
+                displayName:
+                  u.displayName ||
+                  `${u.firstName || ''} ${u.lastName || ''}`.trim() ||
+                  'User',
+                photoURL: u.photoURL || u.profileImage || u.avatarURL || null,
+                rating:
+                  typeof u.rating === 'number'
+                    ? u.rating
+                    : typeof u.ranking === 'number'
+                    ? u.ranking
+                    : null,
+              };
+            } catch (err) {
+              return {
+                id: uid,
+                displayName: 'User',
+                photoURL: null,
+                rating: null,
+              };
+            }
+          })
+        );
+        results.push(...individuals);
+      }
+    }
+    return results;
+  };
 
   // Fetch event info + attendees
   useEffect(() => {
@@ -179,38 +280,74 @@ const EventChatScreen = () => {
       doc(db, 'events', eventId),
       async (snap) => {
         const data = snap.data();
-        setEvent(data);
+        setEvent((prev) => {
+          if (
+            prev &&
+            data &&
+            prev.updatedAt?.seconds === data.updatedAt?.seconds &&
+            prev.attendees?.length === data.attendees?.length
+          ) {
+            return prev;
+          }
+          return data;
+        });
 
-        if (data?.attendees?.length) {
-          const attendeePromises = data.attendees.map(async (uid) => {
-            const userDoc = await getDoc(doc(db, 'users', uid));
-            const userData = userDoc.exists() ? userDoc.data() : {};
-            return {
-              id: uid,
-              displayName:
-                userData.displayName ||
-                `${userData.firstName || ''} ${
-                  userData.lastName || ''
-                }`.trim() ||
-                'User',
-              photoURL:
-                userData.photoURL ||
-                userData.profileImage ||
-                userData.avatarURL ||
-                null,
-              // Rating: prefer 'rating' (current), fallback to legacy 'ranking'
-              rating:
-                typeof userData.rating === 'number'
-                  ? userData.rating
-                  : typeof userData.ranking === 'number'
-                  ? userData.ranking
-                  : null,
-            };
-          });
-          const attendeeData = await Promise.all(attendeePromises);
-          setAttendees(attendeeData);
-        } else {
-          setAttendees([]);
+        // Prefer denormalized attendeeSnippets, fallback to batched user fetch
+        try {
+          if (
+            data?.attendeeSnippets &&
+            (Array.isArray(data.attendeeSnippets) ||
+              typeof data.attendeeSnippets === 'object')
+          ) {
+            const mapped = mapSnippetsToAttendees(data.attendeeSnippets);
+            setAttendees((prev) => {
+              const same = prev.length === mapped.length;
+              return same ? prev : mapped;
+            });
+          } else if (Array.isArray(data?.attendees) && data.attendees.length) {
+            const attendeeData = await batchFetchUsersAsAttendees(
+              data.attendees
+            );
+            setAttendees((prev) => {
+              const same = prev.length === attendeeData.length;
+              return same ? prev : attendeeData;
+            });
+          } else {
+            setAttendees([]);
+          }
+        } catch (e) {
+          console.error('[EventChat] attendee hydrate error', e);
+          // Last-resort: previous per-uid approach (kept for safety)
+          if (Array.isArray(data?.attendees) && data.attendees.length) {
+            const attendeePromises = data.attendees.map(async (uid) => {
+              const userDoc = await getDoc(doc(db, 'users', uid));
+              const userData = userDoc.exists() ? userDoc.data() : {};
+              return {
+                id: uid,
+                displayName:
+                  userData.displayName ||
+                  `${userData.firstName || ''} ${
+                    userData.lastName || ''
+                  }`.trim() ||
+                  'User',
+                photoURL:
+                  userData.photoURL ||
+                  userData.profileImage ||
+                  userData.avatarURL ||
+                  null,
+                rating:
+                  typeof userData.rating === 'number'
+                    ? userData.rating
+                    : typeof userData.ranking === 'number'
+                    ? userData.ranking
+                    : null,
+              };
+            });
+            const attendeeData = await Promise.all(attendeePromises);
+            setAttendees(attendeeData);
+          } else {
+            setAttendees([]);
+          }
         }
       },
       (error) => {
@@ -479,15 +616,47 @@ const EventChatScreen = () => {
     }
   };
 
-  // Fetch requester details when event requests change
+  // Batch-fetch requester details when event requests change
   useEffect(() => {
     const fetchRequesters = async () => {
-      const requesterPromises = event?.requests?.map(async (userId) => {
-        const userDetails = await fetchRequesterDetails(userId);
-        return { userId, ...userDetails };
-      });
-      const resolvedRequesters = await Promise.all(requesterPromises || []);
-      setRequesters(resolvedRequesters);
+      const uids = Array.isArray(event?.requests) ? event.requests : [];
+      if (!uids.length) {
+        setRequesters([]);
+        return;
+      }
+      try {
+        const users = await batchFetchUsersAsAttendees(uids);
+        setRequesters(
+          users.map((u) => ({
+            id: u.id,
+            displayName: u.displayName,
+            photoURL: u.photoURL || smileDefault,
+            rating: typeof u.rating === 'number' ? u.rating : null,
+          }))
+        );
+      } catch (err) {
+        // Fallback to existing per-user detail fetch
+        const requesterPromises = uids.map(async (userId) => {
+          const userDoc = await getDoc(doc(db, 'users', userId));
+          const userData = userDoc.exists() ? userDoc.data() : {};
+          return {
+            id: userId,
+            displayName:
+              userData.displayName ||
+              `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
+              'User',
+            photoURL: userData.profileImage || smileDefault,
+            rating:
+              typeof userData.rating === 'number'
+                ? Number(userData.rating)
+                : typeof userData.ranking === 'number'
+                ? Number(userData.ranking)
+                : null,
+          };
+        });
+        const resolved = await Promise.all(requesterPromises);
+        setRequesters(resolved);
+      }
     };
     fetchRequesters();
   }, [event?.requests]);
