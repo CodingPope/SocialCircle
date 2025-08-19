@@ -24,6 +24,7 @@ import {
   where,
   deleteDoc,
   addDoc,
+  getDocs,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';

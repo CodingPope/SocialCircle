@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -42,11 +42,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-notifications",
-      "expo-video",
-      "sentry-expo"
-    ],
+    "plugins": ["expo-notifications", "expo-video", "sentry-expo"],
     "eas": {
       "projectId": "c51101fd-e7e7-47ff-925e-44799b9dbe12"
     },
@@ -57,6 +53,12 @@
       "sentryDsn": "",
       "sentryEnv": "beta"
     },
-    "owner": "joe1561"
+    "owner": "joe1561",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c51101fd-e7e7-47ff-925e-44799b9dbe12"
+    }
   }
 }
