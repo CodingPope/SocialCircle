@@ -13,7 +13,7 @@ module.exports = ({ config }) => {
     slug: 'socialcircle',
     scheme: 'socialcircle',
     version: '1.0.0',
-    newArchEnabled: true,
+    newArchEnabled: false,
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
