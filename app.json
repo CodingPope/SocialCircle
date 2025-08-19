@@ -25,6 +25,8 @@
         "NSCameraUsageDescription": "Allow camera access to take photos for events and your profile.",
         "NSPhotoLibraryUsageDescription": "Allow photo library access to choose images for events and your profile.",
         "NSPhotoLibraryAddUsageDescription": "Allow saving images from Social Circle to your photo library.",
+        "NSRemindersUsageDescription": "Allow reminders access if you choose to manage reminders in Social Circle.",
+        "NSCalendarsUsageDescription": "Social Circle uses your calendar to add events you join or host.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -42,7 +44,12 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-notifications", "expo-video", "sentry-expo"],
+    "plugins": [
+      "expo-notifications",
+      "expo-video",
+      "sentry-expo",
+      "expo-calendar"
+    ],
     "eas": {
       "projectId": "c51101fd-e7e7-47ff-925e-44799b9dbe12"
     },

@@ -37,6 +37,8 @@ module.exports = ({ config }) => {
           'We save event photos and profile pictures to your library on request.',
         NSCalendarsUsageDescription:
           'Allow calendar access so you can add events to your calendar.',
+        NSRemindersUsageDescription:
+          'Allow reminders access if you choose to manage reminders in Social Circle.',
       },
       config: {
         usesNonExemptEncryption: false,
