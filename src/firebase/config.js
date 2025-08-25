@@ -26,7 +26,11 @@ import {
   addDoc,
   getDocs,
 } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import {
+  getFunctions,
+  httpsCallable,
+  httpsCallable as callFn,
+} from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -367,4 +371,65 @@ export const rateUserCallable = async (targetUid, raterUid, rating) => {
   const fn = httpsCallable(functions, 'rateUser');
   const res = await fn({ targetUid, rating });
   return res?.data || { ok: true };
+};
+
+// ---------- Business Onboarding Callables ----------
+export const createBusinessDraft = async (type = 'single') => {
+  const fn = callFn(functions, 'createBusinessDraft');
+  const res = await fn({ type });
+  return res?.data; // { ok, bizId }
+};
+
+export const updateBusinessBasics = async (payload) => {
+  const fn = callFn(functions, 'updateBusinessBasics');
+  const res = await fn(payload);
+  return res?.data; // { ok }
+};
+
+export const updateBrandAssets = async (payload) => {
+  const fn = callFn(functions, 'updateBrandAssets');
+  const res = await fn(payload);
+  return res?.data;
+};
+
+export const addBusinessLocation = async (payload) => {
+  const fn = callFn(functions, 'addBusinessLocation');
+  const res = await fn(payload);
+  return res?.data; // { ok, locId }
+};
+
+export const updateAudiencePolicies = async (payload) => {
+  const fn = callFn(functions, 'updateAudiencePolicies');
+  const res = await fn(payload);
+  return res?.data;
+};
+
+export const startBusinessVerification = async (payload) => {
+  const fn = callFn(functions, 'startBusinessVerification');
+  const res = await fn(payload);
+  return res?.data; // { ok, devCode }
+};
+
+export const verifyBusinessCode = async (payload) => {
+  const fn = callFn(functions, 'verifyBusinessCode');
+  const res = await fn(payload);
+  return res?.data;
+};
+
+export const addBusinessMember = async (payload) => {
+  const fn = callFn(functions, 'addBusinessMember');
+  const res = await fn(payload);
+  return res?.data;
+};
+
+export const setBusinessPrivacy = async (payload) => {
+  const fn = callFn(functions, 'setBusinessPrivacy');
+  const res = await fn(payload);
+  return res?.data;
+};
+
+export const submitBusiness = async (payload) => {
+  const fn = callFn(functions, 'submitBusiness');
+  const res = await fn(payload);
+  return res?.data; // { ok, status }
 };

@@ -1,0 +1,792 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Image,
+  Alert,
+  StyleSheet,
+  KeyboardAvoidingView,
+  FlatList,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import * as ImagePicker from 'expo-image-picker';
+import MultiSlider from '@ptomasroos/react-native-multi-slider';
+import SegmentedControl from '@react-native-segmented-control/segmented-control';
+import { Ionicons } from '@expo/vector-icons';
+import { geohashForLocation } from 'geofire-common';
+import {
+  collection,
+  addDoc,
+  Timestamp,
+  updateDoc,
+  doc,
+  arrayUnion,
+  getDocs,
+  getDoc,
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage, auth } from '../../firebase/config';
+import { useUserStore } from '../profile/userStore';
+import { updateEventCount } from '../../firebase/config';
+import { GOOGLE_MAPS_API_KEY } from '@env';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import InterestSelector from '../profile/InterestSelector'; // Import the reusable InterestSelector
+import categoriesData from './categoriesData.json';
+import { track as trackClient } from '../../lib/analytics';
+
+// --- Date/Time constraints ---
+const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
+const MAX_LEAD_DAYS = 7; // hard limit: at most 7 days in the future
+const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
+const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
+
+// Description: Round UP to the next 5-minute boundary to avoid rounding backwards
+const roundUpToFiveMinutes = (inputDate) => {
+  const d = new Date(inputDate);
+  d.setSeconds(0);
+  d.setMilliseconds(0);
+  const minutes = d.getMinutes();
+  const remainder = minutes % 5;
+  if (remainder !== 0) d.setMinutes(minutes + (5 - remainder));
+  return d;
+};
+
+export default function CreateEventScreen({ location, onCancel, onSuccess }) {
+  // Description: Get current user from Zustand userStore
+  const user = useUserStore((state) => state.user);
+
+  // Debug: print Firebase runtime info to help diagnose permission errors
+  useEffect(() => {
+    try {
+      // console.log('DBG firebase auth.currentUser', auth?.currentUser || null);
+      // console.log('DBG user store.user', user || null);
+      // console.log('DBG firestore projectId', db?.app?.options?.projectId);
+      trackClient('create_event_screen_mount', {});
+    } catch (err) {
+      console.warn('DBG firebase info error', err);
+    }
+  }, [user]);
+
+  const [imageUri, setImageUri] = useState(null);
+  const [imageUrl, setImageUrl] = useState('');
+  // Missing states restored
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  // Default date: 30 minutes in the future, rounded up to next 5-minute slot
+  const [date, setDate] = useState(() =>
+    roundUpToFiveMinutes(new Date(Date.now() + MIN_MILLIS))
+  );
+  const [manualAddress, setManualAddress] = useState('');
+  const [manualLocation, setManualLocation] = useState(null);
+
+  const [interestOptions, setInterestOptions] = useState([]);
+  const [selectedInterest, setSelectedInterest] = useState(null);
+  const [isInterestPickerOpen, setIsInterestPickerOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(''); // State for search term
+
+  const [ageRange, setAgeRange] = useState([18, 99]);
+  const [privacyIndex, setPrivacyIndex] = useState(0);
+  const segments = [
+    'Public',
+    'RSVP',
+    `${user.sex === 'female' ? 'Women' : 'Men'} Only`,
+  ];
+  const privacyValues = [
+    'public',
+    'rsvp',
+    `${user.sex === 'female' ? 'female-only' : 'male-only'}`,
+  ];
+  const [placeInput, setPlaceInput] = useState('');
+
+  const [capacity, setCapacity] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
+  const showDatePicker = () => setIsDatePickerVisible(true);
+  const hideDatePicker = () => setIsDatePickerVisible(false);
+
+  const handleConfirmDate = (selectedDate) => {
+    // Clamp to [now + 30min, now + 7days] and round up to next 5-min slot
+    const now = new Date();
+    const min = new Date(now.getTime() + MIN_MILLIS);
+    const max = new Date(now.getTime() + MAX_MILLIS);
+
+    let picked = roundUpToFiveMinutes(selectedDate);
+    if (picked < min) picked = roundUpToFiveMinutes(min);
+    if (picked > max) picked = roundUpToFiveMinutes(max);
+
+    setDate(picked);
+    hideDatePicker();
+  };
+
+  const handleGeocode = async () => {
+    if (!manualAddress.trim()) return Alert.alert('Enter an address');
+    try {
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
+          manualAddress
+        )}&key=${GOOGLE_MAPS_API_KEY}`
+      );
+      const json = await res.json();
+      if (json.status === 'OK') {
+        const loc = json.results[0].geometry.location;
+        setManualLocation({ latitude: loc.lat, longitude: loc.lng });
+        Alert.alert('Location set', 'Pin will be placed on map.');
+      } else {
+        Alert.alert('Address not found');
+      }
+    } catch {
+      Alert.alert('Error geocoding address');
+    }
+  };
+
+  const pickImageAndUpload = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return Alert.alert('Permission required');
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+      if (!res.canceled) {
+        const uri = res.assets[0].uri;
+        // Description: Defer uploading until after the event document exists (so storage rules that require ownerId match succeed).
+        setImageUri(uri);
+      }
+    } catch (e) {
+      Alert.alert('Image pick error', e.message);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!title.trim()) return Alert.alert('Title is required');
+    if (title.trim().length > 40)
+      return Alert.alert('Title must not exceed 40 characters');
+    if (description.trim().length < 10)
+      return Alert.alert('Description must be at least 10 characters');
+
+    // Ensure user is authenticated and matches local store
+    const currentAuthUser = auth?.currentUser;
+    if (!currentAuthUser || !currentAuthUser.uid) {
+      return Alert.alert('Not authenticated', 'Please sign in and try again.');
+    }
+    if (currentAuthUser.uid !== user?.uid) {
+      console.warn('Auth UID mismatch', currentAuthUser.uid, user?.uid);
+      return Alert.alert(
+        'Authentication error',
+        'Signed-in user mismatch. Please re-login.'
+      );
+    }
+
+    // Description: Enforce 30 minutes minimum lead time and 7 days maximum
+    const now = new Date();
+    const minDate = new Date(now.getTime() + MIN_MILLIS); // 30 minutes buffer
+    const maxDate = new Date(now.getTime() + MAX_MILLIS);
+    if (date < minDate) {
+      return Alert.alert('Event must be at least 30 minutes in the future');
+    }
+    if (date > maxDate) {
+      return Alert.alert('Event cannot be more than 7 days in the future');
+    }
+
+    if (!manualLocation && !location) return Alert.alert('Address is required');
+    if (!selectedInterest) return Alert.alert('Select an interest');
+
+    const privacyValue = privacyValues[privacyIndex];
+    if (
+      (privacyValue === 'female-only' && user.gender !== 'female') ||
+      (privacyValue === 'male-only' && user.gender !== 'male')
+    ) {
+      return Alert.alert('Gender privacy mismatch');
+    }
+
+    const eventLocation = manualLocation || location;
+    const geohash = geohashForLocation([
+      eventLocation.latitude,
+      eventLocation.longitude,
+    ]);
+
+    const extractedCity = manualAddress?.split(',')?.[1]?.trim() || '';
+
+    // Description: Create event without image first. Upload image after we have an event ID so Storage rules (owner check) pass.
+    const newEvent = {
+      title: title.trim(),
+      description: description.trim(),
+      imageUrl: null, // upload later and update
+      location: eventLocation,
+      geohash,
+      address: manualAddress,
+      city: extractedCity,
+      // References for business context (optional, set by server or future UI)
+      businessId: null,
+      locationId: null,
+      date: Timestamp.fromDate(date),
+      createdAt: Timestamp.now(),
+      ageRange,
+      capacity: capacity ? parseInt(capacity, 10) : 0,
+      privacy: privacyValue,
+      genderFilter: 'any',
+      ownerId: user.uid,
+      interest: selectedInterest,
+      eventTags: [],
+      viewCount: 0,
+      joinCount: 0,
+      status: 'active',
+      isReported: false,
+      attendees: [],
+      isDeleted: false, // New field to mark the event as active
+      deletedAt: null, // New field to store deletion timestamp
+    };
+
+    setUploading(true);
+
+    let createdEventId = null;
+    try {
+      trackClient('event_create_attempt', {
+        auth_uid_present: !!auth?.currentUser?.uid,
+        owner_matches_auth: auth?.currentUser?.uid === newEvent.ownerId,
+        image_selected: !!imageUri,
+        has_location: !!newEvent?.location?.geohash,
+        interest: newEvent?.interest || null,
+        privacy: newEvent?.privacy || null,
+      });
+      const docRef = await addDoc(collection(db, 'events'), newEvent);
+      createdEventId = docRef.id;
+
+      // Wait for the event document to be readable by security rules (avoid storage.get() race)
+      const waitForEventDoc = async (id, attempts = 12, delayMs = 750) => {
+        for (let i = 0; i < attempts; i++) {
+          try {
+            const snap = await getDoc(doc(db, 'events', id));
+            if (
+              snap.exists() &&
+              snap.data()?.ownerId === auth?.currentUser?.uid
+            )
+              return true;
+          } catch (err) {
+            // ignore and retry
+          }
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        return false;
+      };
+
+      const ready = await waitForEventDoc(docRef.id);
+      if (!ready) {
+        console.warn(
+          'DBG event doc not readable yet or ownerId mismatch for',
+          docRef.id
+        );
+      }
+
+      // Extra delay to avoid any propagation timing issues before Storage rule get() lookup
+      await new Promise((res) => setTimeout(res, 500));
+
+      // If user selected an image, upload now to owner-scoped path so storage rules allow it
+      if (imageUri) {
+        try {
+          const resp = await fetch(imageUri);
+          const blob = await resp.blob();
+          const contentType = blob.type || 'image/jpeg';
+
+          // Retry upload a few times to avoid transient rule/propagation issues
+          const tryUpload = async () => {
+            const storageRef = ref(
+              storage,
+              `event-images/${docRef.id}/${Date.now()}.jpg`
+            );
+            const snap = await uploadBytes(storageRef, blob, { contentType });
+            return await getDownloadURL(snap.ref);
+          };
+
+          let downloadUrl = null;
+          let lastErr = null;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              downloadUrl = await tryUpload();
+              break;
+            } catch (e) {
+              lastErr = e;
+              console.warn(`Upload attempt ${attempt} failed:`, e?.code || e);
+              await new Promise((r) => setTimeout(r, 500 * attempt));
+            }
+          }
+
+          // Fallback: if Storage rule still denies under event-images, upload under user's profileImages (still public-read per rules)
+          if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
+            try {
+              const altRef = ref(
+                storage,
+                `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
+              );
+              const altSnap = await uploadBytes(altRef, blob, { contentType });
+              downloadUrl = await getDownloadURL(altSnap.ref);
+            } catch (altErr) {
+              console.warn('Fallback upload also failed:', altErr);
+            }
+          }
+
+          if (downloadUrl) {
+            // Update event document with the uploaded image URL
+            await updateDoc(doc(db, 'events', docRef.id), {
+              imageUrl: downloadUrl,
+            });
+            setImageUrl(downloadUrl);
+          } else if (lastErr) {
+            console.warn('Image upload failed:', lastErr);
+            Alert.alert(
+              'Image upload failed',
+              'Your event was created without a photo due to permissions.'
+            );
+          }
+        } catch (uploadErr) {
+          console.warn('Image upload unexpected error:', uploadErr);
+        }
+      }
+
+      // Success: navigate away / close creator BEFORE any non-critical updates
+      try {
+        onSuccess && onSuccess(eventLocation);
+      } catch (navErr) {
+        console.warn('onSuccess handler error:', navErr);
+      }
+
+      // Fire-and-forget: user doc updates should not block success UX
+      (async () => {
+        try {
+          await trackCreateEventSafe({
+            privacy: privacyValue,
+            hasImage: !!imageUri,
+            category: selectedInterest || 'unknown',
+          });
+        } catch {}
+        // Normalize deviceToken to satisfy Firestore rules on update
+        const safeToken =
+          typeof user?.deviceToken === 'string' &&
+          /^ExponentPushToken/.test(user.deviceToken)
+            ? user.deviceToken
+            : null;
+        try {
+          await updateDoc(doc(db, 'users', user.uid), {
+            createdEvents: arrayUnion(docRef.id),
+            // Ensure deviceToken is valid or null to pass rule validation
+            deviceToken: safeToken,
+          });
+        } catch (userUpdateErr) {
+          console.warn(
+            'Non-critical: failed to tag createdEvents on user',
+            userUpdateErr
+          );
+        }
+        try {
+          await updateEventCount(user.uid);
+        } catch (cntErr) {
+          console.warn('Non-critical: updateEventCount failed', cntErr);
+        }
+      })();
+    } catch (e) {
+      console.error('Create event failed', e?.code || '', e?.message || e);
+      // Only surface error for creation step (addDoc). If we got here, addDoc likely failed
+      Alert.alert(
+        'Creation failed',
+        e?.message || 'Missing or insufficient permissions.'
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Fetch categories (activities) from Firestore
+  useEffect(() => {
+    const fetchInterests = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, 'categories'));
+        const interests = snapshot.docs.flatMap((doc) => {
+          const data = doc.data();
+          return (data.interests || []).map((i) => ({
+            label: i.name,
+            value: i.name,
+          }));
+        });
+        if (interests && interests.length) {
+          setInterestOptions(JSON.parse(JSON.stringify(interests)));
+        } else {
+          // If Firestore returns empty, fall back to bundled categories
+          const fallback = (categoriesData || []).flatMap((c) =>
+            (c.interests || []).map((i) => ({ label: i.name, value: i.name }))
+          );
+          setInterestOptions(fallback);
+        }
+      } catch (err) {
+        console.warn('Error fetching interests (firestore):', err);
+        // Use bundled categories as a silent fallback to avoid spamming the user
+        const fallback = (categoriesData || []).flatMap((c) =>
+          (c.interests || []).map((i) => ({ label: i.name, value: i.name }))
+        );
+        if (fallback && fallback.length) {
+          setInterestOptions(fallback);
+        } else {
+          // Only surface an alert when we have no fallback data to show
+          Alert.alert('Failed to load interests');
+        }
+      }
+    };
+    fetchInterests();
+  }, []);
+
+  useEffect(() => {
+    if (location?.address) {
+      setManualAddress(location.address);
+      setManualLocation({
+        latitude: location.latitude,
+        longitude: location.longitude,
+      });
+    }
+  }, [location]);
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+      >
+        <FlatList
+          data={[]} // Dummy data to allow FlatList to render
+          keyExtractor={() => 'dummy'} // Required prop
+          ListHeaderComponent={
+            <View>
+              {/* Image Preview */}
+              {imageUri ? (
+                <Image source={{ uri: imageUri }} style={styles.preview} />
+              ) : (
+                <View style={styles.previewPlaceholder}>
+                  <Text>No Image</Text>
+                </View>
+              )}
+              <TouchableOpacity
+                style={styles.photoBtn}
+                onPress={pickImageAndUpload}
+              >
+                <Text style={styles.photoBtnText}>
+                  {imageUri ? 'Change Photo' : 'Add Photo'}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Title */}
+              <Text style={styles.label}>Title</Text>
+              <TextInput
+                style={styles.input}
+                value={title}
+                onChangeText={setTitle}
+                placeholder='Event title'
+                placeholderTextColor='grey' // Updated to a darker color
+              />
+
+              {/* Description */}
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder='What’s your event about?'
+                placeholderTextColor='grey' // Updated to a darker color
+                multiline
+              />
+
+              {/* Date & Time */}
+              <Text style={styles.label}>Date & Time</Text>
+              <TouchableOpacity style={styles.input} onPress={showDatePicker}>
+                <Text>
+                  {date.toLocaleString('en-US', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </Text>
+              </TouchableOpacity>
+              <DateTimePickerModal
+                isVisible={isDatePickerVisible}
+                mode='datetime'
+                date={date}
+                onConfirm={handleConfirmDate}
+                onCancel={hideDatePicker}
+                minimumDate={new Date(Date.now() + MIN_MILLIS)}
+                maximumDate={new Date(Date.now() + MAX_MILLIS)}
+                themeVariant='light' // Explicitly set theme to light
+                textColor='#000' // Ensure text is visible
+              />
+
+              {/* Address Input */}
+              <Text style={styles.label}>Location</Text>
+              <View style={{ zIndex: 10 }}>
+                <GooglePlacesAutocomplete
+                  placeholder='Enter address'
+                  placeholderTextColor='grey' // Updated to a darker color
+                  minLength={2}
+                  fetchDetails={true}
+                  debounce={300}
+                  enablePoweredByContainer={false}
+                  keyboardShouldPersistTaps='handled'
+                  predefinedPlaces={[]} // Prevents `.filter()` crash
+                  styles={{
+                    textInput: [styles.input, styles.flex],
+                    container: { flex: 1 },
+                    listView: {
+                      backgroundColor: '#fff',
+                      elevation: 5,
+                      position: 'absolute',
+                      top: 55,
+                      maxHeight: 200,
+                    },
+                  }}
+                  textInputProps={{
+                    value: placeInput,
+                    onChangeText: setPlaceInput,
+                  }}
+                  onPress={(data, details = null) => {
+                    if (details?.geometry?.location) {
+                      const { lat, lng } = details.geometry.location;
+                      setManualLocation({ latitude: lat, longitude: lng });
+                      setManualAddress(data?.description ?? '');
+                      Alert.alert('Location set', 'Pin will be placed on map.');
+                    }
+                  }}
+                  query={{
+                    key: GOOGLE_MAPS_API_KEY,
+                    language: 'en',
+                  }}
+                />
+              </View>
+              {manualLocation && (
+                <View style={styles.row}>
+                  <Ionicons
+                    name='location-outline'
+                    size={20}
+                    color='#666'
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.pinLocationText}>
+                    Pin Location: {manualAddress || 'Unknown'}
+                  </Text>
+                </View>
+              )}
+
+              {/* Interests */}
+              <Text style={styles.label}>Interest</Text>
+              <InterestSelector
+                selectedInterests={selectedInterest ? [selectedInterest] : []}
+                toggleInterest={(interest) => setSelectedInterest(interest)}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+              />
+
+              {/* Age Slider */}
+              <Text style={styles.label}>
+                Age Range: {ageRange[0]} - {ageRange[1]}
+              </Text>
+              <View style={styles.sliderWrapper}>
+                <MultiSlider
+                  values={ageRange}
+                  sliderLength={280}
+                  onValuesChange={setAgeRange}
+                  min={18}
+                  max={99}
+                  step={1}
+                  allowOverlap={false}
+                  snapped
+                />
+              </View>
+
+              {/* Privacy */}
+              <Text style={styles.label}>Privacy</Text>
+              {Platform.OS === 'ios' ? (
+                <SegmentedControl
+                  values={segments}
+                  selectedIndex={privacyIndex}
+                  onChange={(event) =>
+                    setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
+                  }
+                  style={styles.segment}
+                  backgroundColor='#f0f0f0'
+                  tintColor='#007AFF'
+                  fontStyle={{ color: '#333' }}
+                  activeFontStyle={{ color: '#fff' }}
+                />
+              ) : (
+                <View style={styles.androidPrivacyWrapper}>
+                  {segments.map((seg, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[
+                        styles.androidPrivacyBtn,
+                        privacyIndex === idx && styles.androidPrivacyBtnActive,
+                      ]}
+                      onPress={() => setPrivacyIndex(idx)}
+                    >
+                      <Text
+                        style={[
+                          styles.androidPrivacyTxt,
+                          privacyIndex === idx &&
+                            styles.androidPrivacyTxtActive,
+                        ]}
+                      >
+                        {seg}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Capacity */}
+              <Text style={styles.label}>Capacity (optional)</Text>
+              <TextInput
+                style={styles.input}
+                value={capacity}
+                onChangeText={setCapacity}
+                placeholder='Leave empty for unlimited'
+                placeholderTextColor='grey' // Updated to a darker color
+                keyboardType='numeric'
+              />
+
+              {/* Buttons */}
+              <TouchableOpacity
+                style={[styles.btn, uploading && styles.btnDis]}
+                onPress={handleCreate}
+                disabled={uploading}
+              >
+                <Text style={styles.btnTxt}>
+                  {uploading ? 'Creating...' : 'Create Event'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  container: {
+    padding: 20,
+    paddingBottom: 70,
+    backgroundColor: '#fff',
+    flex: 1,
+  },
+  preview: { width: '100%', height: 200, borderRadius: 8, marginBottom: 10 },
+  previewPlaceholder: {
+    width: '100%',
+    height: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  photoBtn: {
+    padding: 10,
+    backgroundColor: '#007AFF',
+    borderRadius: 6,
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  photoBtnText: { color: '#fff', fontWeight: 'bold' },
+  label: { fontWeight: 'bold', marginTop: 15 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    padding: 10,
+    marginTop: 5,
+    color: '#333',
+  },
+  textArea: { height: 80, textAlignVertical: 'top' },
+  row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  flex: { flex: 1 },
+  pinLocationText: { color: '#333', marginTop: 5 },
+  dropdownBox: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    height: 44,
+  },
+  dropdownInput: { color: '#444' },
+  dropdownList: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    maxHeight: 150,
+  },
+  dropdownItem: { paddingVertical: 12, paddingHorizontal: 10 },
+  dropdownText: { fontSize: 14 },
+  sliderWrapper: {
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  segment: { marginTop: 10, marginBottom: 20 },
+  androidPrivacyWrapper: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 10,
+  },
+  androidPrivacyBtn: {
+    flex: 1,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    marginHorizontal: 3,
+    alignItems: 'center',
+    backgroundColor: '#fff', // Ensure white background
+  },
+  androidPrivacyBtnActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  androidPrivacyTxt: {
+    color: '#333', // Dark text for better visibility
+  },
+  androidPrivacyTxtActive: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  btn: {
+    backgroundColor: '#007AFF',
+    padding: 15,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginTop: 15,
+  },
+  btnDis: { backgroundColor: '#99cfff' },
+  btnTxt: { color: '#fff', fontWeight: 'bold' },
+  cancelButton: {
+    marginTop: 15,
+    padding: 12,
+    borderRadius: 6,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#007AFF',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+});

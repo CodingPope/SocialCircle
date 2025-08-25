@@ -12,6 +12,10 @@ service cloud.firestore {
     function isValidDeviceToken(t) {
       return t == null || (t is string && t != '' && t.matches('^ExponentPushToken.*'));
     }
+    function allowUserSubcollection(uid, sub) {
+      // Whitelist safe subcollections a user can write to under their own user doc
+      return isOwner(uid) && (sub in ['profileviews']);
+    }
 
     // Helpers for safe list ops
     function asList(x) { return x is list ? x : []; }
@@ -24,10 +28,37 @@ service cloud.firestore {
       );
     }
 
+    // NEW: Disallow clients from updating premium/popularity/business fields directly
+    function userRestrictedKeysChanged() {
+      return request.resource.data.diff(resource.data).changedKeys().hasAny([
+        'premiumActive', 'premiumTier', 'premiumSince', 'premiumUntil',
+        'isPopular', 'popularScore',
+        'type', 'businessTier', 'plan'
+      ]);
+    }
+
     match /users/{uid} {
       allow read: if true;
-      allow create: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken);
-      allow update: if isOwner(uid);
+
+      // On create, enforce device token validity and sensible defaults for restricted flags
+      allow create: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&
+        // Prevent clients from self-assigning premium/popular/business on create
+        (
+          (request.resource.data.premiumActive == false || !(request.resource.data.keys().hasAny(['premiumActive']))) &&
+          (request.resource.data.isPopular == false || !(request.resource.data.keys().hasAny(['isPopular']))) &&
+          (request.resource.data.type == null || request.resource.data.type == 'user') &&
+          !(request.resource.data.keys().hasAny(['premiumTier','premiumSince','premiumUntil','popularScore','businessTier','plan']))
+        );
+
+      // Owners can update their profile, but not restricted fields
+      allow update: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&
+        !userRestrictedKeysChanged();
+
+      match /{sub=**}/{docId} {
+        allow create, update: if allowUserSubcollection(uid, sub);
+        allow read: if isOwner(uid);
+        allow delete: if false;
+      }
     }
 
     match /categories/{categoryId} {
@@ -80,6 +111,40 @@ service cloud.firestore {
           isAttendee(get(/databases/$(database)/documents/events/$(eventId))) ||
           isChatParticipant(eventId);
         allow update, delete: if false;
+      }
+    }
+
+    // Businesses: server-managed. Clients can read, writes go via Admin SDK/Cloud Functions.
+    match /businesses/{businessId} {
+      allow read: if true;
+      allow write: if false; // managed via Admin SDK/Cloud Functions only
+
+      // Child: locations
+      match /locations/{locId} {
+        allow read: if true;
+        allow write: if false; // managed via Admin SDK/Cloud Functions only
+      }
+
+      // Child: offers (future)
+      match /offers/{offerId} {
+        allow read: if true;
+        allow write: if false; // managed via Admin SDK/Cloud Functions only
+      }
+    }
+
+    // Business tiers: computed, server-only writes
+    match /businessTiers/{bizId} {
+      allow read: if true;
+      allow write: if false; // computed by backend only
+    }
+
+    // Membership mirror: allow each user to read their own memberships only
+    // Path structure uses a subcollection to keep a valid collection/doc alternation
+    match /businessMembers/{uid} {
+      allow read, write: if false; // no direct writes at this doc level
+      match /memberships/{bizId} {
+        allow read: if isOwner(uid);
+        allow write: if false; // created/updated by backend alongside businesses
       }
     }
 

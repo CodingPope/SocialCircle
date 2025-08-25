@@ -1,97 +1,32 @@
-// Description: Sentry initialization and global error capture for Expo managed workflow.
-// Usage: import { initErrorReporting } from './lib/errorReporting'; initErrorReporting({ dsn, environment, release })
-
-import * as Sentry from 'sentry-expo';
-import { Platform } from 'react-native';
-
-let initialized = false; // ensures init runs once per session
-let configured = false; // true only when Sentry.init succeeds (DSN provided)
-let defaultHandler = null;
-
-export function initErrorReporting({
-  dsn,
-  tracesSampleRate = 0.1,
-  debug = false,
-  environment = undefined,
-  release = undefined,
-} = {}) {
+// Minimal error reporting wrapper (Sentry-compatible API surface)
+let S = null;
+function isExpoGo() {
   try {
-    if (initialized) return;
-    if (!dsn || typeof dsn !== 'string' || dsn.trim().length === 0) {
-      // No-op init to avoid crashes when DSN not provided
-      initialized = true;
-      configured = false;
-      return;
-    }
-
-    Sentry.init({
-      dsn,
-      enableInExpoDevelopment: true,
-      debug: !!debug,
-      tracesSampleRate,
-      environment,
-      release,
-    });
-    configured = true;
-
-    // Capture global JS errors
-    if (
-      global.ErrorUtils &&
-      typeof global.ErrorUtils.getGlobalHandler === 'function'
-    ) {
-      defaultHandler =
-        global.ErrorUtils.getGlobalHandler &&
-        global.ErrorUtils.getGlobalHandler();
-      global.ErrorUtils.setGlobalHandler((error, isFatal) => {
-        try {
-          if (configured) {
-            Sentry.Native.captureException(error, {
-              level: 'error',
-              tags: { isFatal: String(!!isFatal) },
-            });
-          }
-        } catch {}
-        if (defaultHandler) {
-          try {
-            defaultHandler(error, isFatal);
-          } catch {}
-        }
-      });
-    }
-
-    // Capture unhandled promise rejections (best-effort)
-    const rejectionHandler = (event) => {
-      const reason = event?.reason || event;
-      try {
-        if (configured) {
-          Sentry.Native.captureException(reason);
-        }
-      } catch {}
-    };
-    if (typeof global.addEventListener === 'function') {
-      try {
-        global.addEventListener('unhandledrejection', rejectionHandler);
-      } catch {}
-    }
-
-    initialized = true;
-  } catch (e) {
-    // Never throw from init
-    initialized = true;
-    configured = false;
+    const Constants = require('expo-constants').default;
+    return Constants?.appOwnership === 'expo';
+  } catch {
+    return false;
   }
 }
+try {
+  if (!isExpoGo()) {
+    S = require('@sentry/react-native');
+  }
+} catch {
+  S = null;
+}
 
-export function captureError(err, context = {}) {
+export function initErrorReporting(options = {}) {
   try {
-    if (!configured) return;
-    Sentry.Native.captureException(err, { extra: context });
+    if (!S || !S.default || typeof S.default.init !== 'function') return;
+    S.default.init(options);
   } catch {}
 }
 
-export function captureMessage(msg, level = 'info', context = {}) {
+export function setUserInErrorReporting(user) {
   try {
-    if (!configured) return;
-    Sentry.Native.captureMessage(String(msg), { level, extra: context });
+    if (!S || !S.default || typeof S.default.setUser !== 'function') return;
+    if (user && user.uid) S.default.setUser({ id: user.uid });
+    else S.default.setUser(null);
   } catch {}
 }

@@ -13,6 +13,9 @@ module.exports = ({ config }) => {
     slug: 'socialcircle',
     scheme: 'socialcircle',
     version: '1.0.0',
+    runtimeVersion: {
+      policy: 'appVersion',
+    },
     newArchEnabled: false,
     orientation: 'portrait',
     icon: './assets/icon.png',
@@ -44,6 +47,7 @@ module.exports = ({ config }) => {
         usesNonExemptEncryption: false,
         googleMapsApiKey: googleMapsApiKey,
       },
+      useFrameworks: 'static',
     },
     android: {
       package: 'com.socialcirclellc.app',
@@ -67,6 +71,7 @@ module.exports = ({ config }) => {
       sentryEnv,
       googleMapsApiKey, // if you want to read via expo-constants
     },
+    useFrameworks: 'static',
     web: { favicon: './assets/favicon.png' },
     owner: 'joe1561',
   };

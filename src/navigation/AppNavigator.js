@@ -8,23 +8,41 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Radar } from 'lucide-react-native';
 
 // Import screens
-import AuthScreen from '../screens/Auth/AuthScreen';
-import NameDobScreen from '../screens/Auth/Onboarding/NameDobScreen';
-import SexScreen from '../screens/Auth/Onboarding/SexScreen';
-import InterestsScreen from '../screens/Auth/Onboarding/InterestsScreen';
-import ProfileScreen from '../screens/Main/ProfileScreen';
-import OtherUserProfileScreen from '../screens/Main/OtherUserProfileScreen';
-import MapScreen from '../screens/Main/MapScreen';
-import DiscoveryScreen from '../screens/Main/DiscoveryScreen';
-import MyCircle from '../screens/Main/MyCircle';
-import EventChatScreen from '../screens/Chat/EventChatScreen';
-import NotificationScreen from '../screens/Notification/NotificationScreen';
-import EventDetails from '../components/EventDetails';
-import ConfirmationScreen from '../screens/ConfirmationScreen';
-import ManageInterestsScreen from '../components/profile/ManageInterestsScreen';
+import AuthScreen from '../features/auth/screens/AuthScreen';
+import NameDobScreen from '../features/auth/screens/Onboarding/NameDobScreen';
+import SexScreen from '../features/auth/screens/Onboarding/SexScreen';
+import InterestsScreen from '../features/auth/screens/Onboarding/InterestsScreen';
+import ProfileScreen from '../features/events/ProfileScreen';
+import OtherUserProfileScreen from '../features/events/OtherUserProfileScreen';
+import MapScreen from '../features/events/MapScreen';
+import DiscoveryScreen from '../features/events/DiscoveryScreen';
+import MyCircle from '../features/events/MyCircle';
+import EventChatScreen from '../features/chat/EventChatScreen';
+import NotificationScreen from '../features/notifications/NotificationScreen';
+import EventDetails from '../features/events/EventDetails';
+import ConfirmationScreen from '../features/events/ConfirmationScreen';
+import ManageInterestsScreen from '../features/profile/ManageInterestsScreen';
+import PrivacyInfoScreen from '../features/profile/PrivacyInfoScreen';
+import InfoArticleScreen from '../features/profile/InfoArticleScreen';
+import {
+  Step0ChooseType,
+  Step1Basics,
+  Step2Brand,
+  Step3Location,
+  Step4Audience,
+  Step5Verify,
+  Step6Team,
+  Step7Privacy,
+  Step8Review,
+} from '../features/business/onboarding/screens';
+
+// Add imports for business onboarding container and home placeholder
+import BusinessOnboardingStack from '../features/business/onboarding/BusinessOnboardingStack';
+import BusinessHomePlaceholder from '../features/business/BusinessHomePlaceholder';
 
 // Zustand store
-import { useUserStore } from '../store/userStore';
+import { useUserStore } from '../features/profile/userStore';
+import { useSessionRole } from '../features/profile/sessionRoleStore';
 
 // --- Auth Stack ---
 const AuthStack = createNativeStackNavigator();
@@ -38,18 +56,18 @@ function AuthStackScreen() {
 
 // --- Onboarding Stack ---
 const OnboardingStack = createNativeStackNavigator();
-function OnboardingStackScreen() {
-  // Description: Add LocationScreen between SexScreen and InterestsScreen
-  const LocationScreen =
-    require('../screens/Auth/Onboarding/LocationScreen').default;
+function OnboardingStackScreen({ initialRouteName = 'NameDob' }) {
+  // Description: Add Location screen and align route names with getNextOnboardingStep
+  const Location =
+    require('../features/auth/screens/Onboarding/LocationScreen').default;
   return (
-    <OnboardingStack.Navigator screenOptions={{ headerShown: false }}>
+    <OnboardingStack.Navigator
+      screenOptions={{ headerShown: false }}
+      initialRouteName={initialRouteName}
+    >
       <OnboardingStack.Screen name='NameDob' component={NameDobScreen} />
       <OnboardingStack.Screen name='Sex' component={SexScreen} />
-      <OnboardingStack.Screen
-        name='LocationScreen'
-        component={LocationScreen}
-      />
+      <OnboardingStack.Screen name='Location' component={Location} />
       <OnboardingStack.Screen
         name='InterestsScreen'
         component={InterestsScreen}
@@ -131,12 +149,113 @@ function MainTabs() {
   );
 }
 
+// Business Tabs (separate root)
+const BizTab = createBottomTabNavigator();
+function BusinessTabs() {
+  return (
+    <BizTab.Navigator
+      initialRouteName='BizMap'
+      screenOptions={{ headerShown: false }}
+    >
+      <BizTab.Screen
+        name='BizMap'
+        component={
+          require('../features/business/screens/BusinessMapScreen').default
+        }
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Icon name='map-outline' color={color} size={size} />
+          ),
+          title: 'Map',
+        }}
+      />
+      <BizTab.Screen
+        name='BizDiscover'
+        component={
+          require('../features/business/screens/BusinessDiscoverScreen').default
+        }
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Icon name='search-outline' color={color} size={size} />
+          ),
+          title: 'Discover',
+        }}
+      />
+      <BizTab.Screen
+        name='BizCircle'
+        component={
+          require('../features/business/screens/BusinessCircleScreen').default
+        }
+        options={{
+          tabBarIcon: ({ color, size }) => <Radar color={color} size={size} />,
+          title: 'My Circle',
+        }}
+      />
+      <BizTab.Screen
+        name='BizProfile'
+        component={
+          require('../features/business/screens/BusinessProfileScreen').default
+        }
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Icon name='briefcase-outline' color={color} size={size} />
+          ),
+          title: 'Profile',
+        }}
+      />
+    </BizTab.Navigator>
+  );
+}
+
+const BusinessRoot = createNativeStackNavigator();
+function BusinessRootScreen() {
+  // Peek so we don't clear before navigator mounts
+  const peek = useSessionRole((s) => s.peekNextBusinessRoute);
+  const consume = useSessionRole((s) => s.consumeNextBusinessRoute);
+  const next = peek();
+  const initial =
+    next === 'BusinessOnboarding' ? 'BusinessOnboarding' : 'BusinessTabs';
+  return (
+    <BusinessRoot.Navigator
+      screenOptions={{ headerShown: false }}
+      initialRouteName={initial}
+    >
+      <BusinessRoot.Screen name='BusinessTabs' component={BusinessTabs} />
+      <BusinessRoot.Screen
+        name='BusinessOnboarding'
+        component={BusinessOnboardingStack}
+        listeners={{
+          focus: () => {
+            // Once focused first time, consume flag
+            try {
+              consume();
+            } catch {}
+          },
+        }}
+      />
+      <BusinessRoot.Screen
+        name='BusinessHome'
+        component={BusinessHomePlaceholder}
+      />
+    </BusinessRoot.Navigator>
+  );
+}
+
 // --- Root Stack (Wraps Tabs & Non-tab Screens) ---
 const RootStack = createNativeStackNavigator();
 function RootStackScreen() {
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       <RootStack.Screen name='MainTabs' component={MainTabs} />
+      {/* Business routes */}
+      <RootStack.Screen
+        name='BusinessOnboarding'
+        component={BusinessOnboardingStack}
+      />
+      <RootStack.Screen
+        name='BusinessHome'
+        component={BusinessHomePlaceholder}
+      />
       <RootStack.Screen
         name='EventChat'
         component={EventChatScreen}
@@ -172,24 +291,52 @@ function RootStackScreen() {
         component={ManageInterestsScreen}
         options={{ headerShown: false }}
       />
+      <RootStack.Screen
+        name='PrivacyInfo'
+        component={PrivacyInfoScreen}
+        options={{ headerShown: false }}
+      />
+      <RootStack.Screen
+        name='InfoArticle'
+        component={InfoArticleScreen}
+        options={{ headerShown: false }}
+      />
     </RootStack.Navigator>
   );
 }
 
 // --- AppNavigator ---
 
-// Description: AppNavigator now reads user and profileComplete directly from Zustand store
-function AppNavigator() {
-  const user = useUserStore((state) => state.user);
-  const profileComplete = useUserStore((state) => state.profileComplete);
+// Description: AppNavigator now accepts props from App.js to decide which stack to show
+function AppNavigator({ user, profileComplete, initialOnboardingStep }) {
+  // Fallback to Zustand store if props are not provided (backward compat)
+  const storeUser = useUserStore((state) => state.user);
+  const storeProfileComplete = useUserStore((state) => state.profileComplete);
 
-  if (!user) {
+  const effectiveUser = typeof user !== 'undefined' ? user : storeUser;
+  const effectiveProfileComplete =
+    typeof profileComplete !== 'undefined'
+      ? profileComplete
+      : storeProfileComplete;
+
+  const sessionRole = useSessionRole((s) => s.role);
+
+  if (!effectiveUser) {
     return <AuthStackScreen />;
   }
-  if (!profileComplete) {
-    return <OnboardingStackScreen />;
+  if (!effectiveProfileComplete && sessionRole !== 'business') {
+    return (
+      <OnboardingStackScreen
+        initialRouteName={initialOnboardingStep || 'NameDob'}
+      />
+    );
   }
-  return <RootStackScreen />;
+  // Choose root by session role
+  return sessionRole === 'business' ? (
+    <BusinessRootScreen />
+  ) : (
+    <RootStackScreen />
+  );
 }
 
 export default AppNavigator;

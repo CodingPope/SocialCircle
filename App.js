@@ -2,14 +2,21 @@ import React, { useEffect, useState, useRef } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef } from './src/navigation/RootNavigation';
-import { useUserStore } from './src/store/userStore';
+import { useUserStore } from './src/features/profile/userStore';
 import { db } from './src/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
-import { initPushForUser } from './src/lib/push';
+import { initPushForUser } from './src/features/notifications/services/pushService';
 import Constants from 'expo-constants';
-import { initErrorReporting } from './src/lib/errorReporting';
+import {
+  initErrorReporting,
+  setUserInErrorReporting,
+} from './src/lib/errorReporting';
+import {
+  init as analyticsInit,
+  setOptIn as analyticsSetOptIn,
+} from './src/services/analytics';
 
 // Initialize error reporting once at module load to capture early errors
 try {
@@ -43,12 +50,22 @@ function AppContent() {
   // Import onboarding router utility
   const { getNextOnboardingStep } = require('./src/utils/onboardingRouter');
 
-  // Tag Sentry with user context when it changes
+  // Tag Sentry and initialize analytics with privacy flag when user changes
   useEffect(() => {
     try {
       setUserInErrorReporting(user);
     } catch {}
-  }, [user?.uid]);
+    // Initialize analytics respecting opt-in; turn off when signed out
+    (async () => {
+      try {
+        if (user && user.uid) {
+          await analyticsInit(user);
+        } else {
+          await analyticsSetOptIn(false);
+        }
+      } catch {}
+    })();
+  }, [user?.uid, user?.analyticsOptIn]);
 
   // NEW: Start auth listener once on mount (since AuthProvider is not used)
   useEffect(() => {
@@ -83,7 +100,14 @@ function AppContent() {
   useEffect(() => {
     if (user?.uid && !initializedPushRef.current.has(user.uid)) {
       initializedPushRef.current.add(user.uid);
-      initPushForUser(user.uid).catch(() => {});
+      (async () => {
+        try {
+          const snap = await getDoc(doc(db, 'users', user.uid));
+          if (snap.exists()) {
+            await initPushForUser(user.uid);
+          }
+        } catch {}
+      })();
     }
   }, [user?.uid]);
 
