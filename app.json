@@ -48,7 +48,8 @@
       "expo-notifications",
       "expo-video",
       "sentry-expo",
-      "expo-calendar"
+      "expo-calendar",
+      "expo-font"
     ],
     "extra": {
       "eas": {

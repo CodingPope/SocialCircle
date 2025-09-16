@@ -8,15 +8,18 @@
     "allowSyntheticDefaultImports": true,
     "strict": false,
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
     "module": "esnext",
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "baseUrl": ".",
+    "paths": {
+      "@env": ["./env.d.ts"]
+    }
   },
-  "include": ["src", "App.js", "index.js"],
-  "exclude": ["node_modules", "ios", "android"],
-  "extends": "expo/tsconfig.base"
+  "include": ["src", "App.js", "index.js", "**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "ios", "android", "dist"]
 }

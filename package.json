@@ -10,6 +10,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@expo/vector-icons": "^14.1.0",
     "@gorhom/bottom-sheet": "^5.1.2",
     "@ptomasroos/react-native-multi-slider": "^2.2.2",
     "@react-native-async-storage/async-storage": "2.1.2",
@@ -33,6 +34,7 @@
     "expo-crypto": "~14.1.5",
     "expo-dev-client": "~5.2.4",
     "expo-device": "~7.1.4",
+    "expo-font": "~13.3.2",
     "expo-image-picker": "~16.1.4",
     "expo-linear-gradient": "~14.1.5",
     "expo-location": "~18.1.6",
@@ -94,12 +96,26 @@
       "^firebase/storage$": "<rootDir>/__tests__/__mocks__/firebaseStorage.js"
     }
   },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-keyboard-aware-scroll-view",
+          "react-native-swipe-list-view",
+          "@react-native-community/masked-view",
+          "firebase",
+          "firebase-admin",
+          "firebase-functions",
+          "geofire-common",
+          "react-native-vector-icons",
+          "sentry-expo"
+        ],
+        "listUnknownPackages": false
+      }
+    }
+  },
   "private": true,
   "eas-build": {
     "postInstall": "node ./scripts/write-env-from-secrets.cjs"
-  },
-  "overrides": {
-    "@sentry/browser": "^7.119.1",
-    "@sentry/react": "^7.119.1"
   }
 }

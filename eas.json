@@ -1,25 +1,56 @@
 {
-  "cli": { "version": ">= 13.0.0" },
+  "cli": {
+    "version": ">= 13.0.0",
+    "appVersionSource": "remote"
+  },
   "build": {
     "preview": {
       "distribution": "store",
       "channel": "preview",
-      "ios": { "resourceClass": "m-medium" },
+      "ios": {
+        "resourceClass": "m-medium",
+        "buildConfiguration": "Release"
+      },
       "node": "20.11.1",
-      "env": { "EXPO_PUBLIC_SENTRY_ENV": "beta" }
+      "env": {
+        "EXPO_PUBLIC_SENTRY_ENV": "beta",
+        "NODE_ENV": "production"
+      },
+      "cache": {
+        "disabled": false
+      }
     },
     "production": {
       "distribution": "store",
       "channel": "production",
-      "ios": { "resourceClass": "m-medium" },
+      "ios": {
+        "resourceClass": "m-medium",
+        "buildConfiguration": "Release"
+      },
       "node": "20.11.1",
-      "env": { "EXPO_PUBLIC_SENTRY_ENV": "production" }
+      "env": {
+        "EXPO_PUBLIC_SENTRY_ENV": "production",
+        "NODE_ENV": "production"
+      },
+      "cache": {
+        "disabled": false
+      }
     },
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "resourceClass": "m-medium" },
-      "node": "20.11.1"
+      "ios": {
+        "resourceClass": "m-medium",
+        "buildConfiguration": "Debug"
+      },
+      "node": "20.11.1",
+      "env": {
+        "EXPO_PUBLIC_SENTRY_ENV": "development",
+        "NODE_ENV": "development"
+      }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }
