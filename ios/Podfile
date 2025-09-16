@@ -11,9 +11,9 @@ platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
 install! 'cocoapods',
   :deterministic_uuids => false
 
-use_modular_headers!
-
 prepare_react_native_project!
+
+use_modular_headers!
 
 target 'SocialCircle' do
   use_expo_modules!
@@ -63,25 +63,6 @@ target 'SocialCircle' do
         resource_bundle_target.build_configurations.each do |config|
           config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         end
-      end
-    end
-
-    # Fix React Native 0.79+ module conflicts
-    puts "Fixing React Native module conflicts..."
-    
-    modulemap_files = [
-      "ios/Pods/Headers/Public/react_runtime/React-jsitooling.modulemap",
-      "ios/Pods/Headers/Public/react_runtime/React-RuntimeCore.modulemap"
-    ]
-
-    modulemap_files.each_with_index do |file_path, index|
-      full_path = File.join(__dir__, "../#{file_path}")
-      if File.exist?(full_path)
-        content = File.read(full_path)
-        new_module_name = "react_runtime_#{index}"
-        content.gsub!(/^module react_runtime/, "module #{new_module_name}")
-        File.write(full_path, content)
-        puts "Updated #{file_path} to use module name #{new_module_name}"
       end
     end
   end
