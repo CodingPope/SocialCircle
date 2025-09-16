@@ -71,6 +71,7 @@ module.exports = ({ config }) => {
       ['expo-location', {}],
       'expo-calendar',
       'expo-font',
+      'expo-asset',
     ],
     extra: {
       eas: { projectId },
