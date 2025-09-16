@@ -50,9 +50,6 @@
       "sentry-expo",
       "expo-calendar"
     ],
-    "eas": {
-      "projectId": "c51101fd-e7e7-47ff-925e-44799b9dbe12"
-    },
     "extra": {
       "eas": {
         "projectId": "c51101fd-e7e7-47ff-925e-44799b9dbe12"
@@ -60,12 +57,6 @@
       "sentryDsn": "",
       "sentryEnv": "beta"
     },
-    "owner": "joe1561",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/c51101fd-e7e7-47ff-925e-44799b9dbe12"
-    }
+    "owner": "joe1561"
   }
 }
