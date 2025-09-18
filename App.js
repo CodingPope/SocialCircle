@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ActivityIndicator } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef } from './src/navigation/RootNavigation';
 import { useUserStore } from './src/features/profile/userStore';
@@ -19,27 +20,9 @@ import {
 } from './src/services/analytics';
 
 // Initialize error reporting once at module load to capture early errors
-try {
-  const envDsn =
-    typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_SENTRY_DSN : '';
-  const expoCfg = Constants?.expoConfig || {};
-  const dsn = envDsn || expoCfg?.extra?.sentryDsn || '';
-  const environment =
-    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_SENTRY_ENV) ||
-    expoCfg?.extra?.sentryEnv ||
-    (__DEV__ ? 'development' : 'beta');
-  const bundleId = expoCfg?.ios?.bundleIdentifier || 'com.socialcirclellc.app';
-  const version = expoCfg?.version || '1.0.0';
-  const buildNumber = expoCfg?.ios?.buildNumber || version;
-  const release = `${bundleId}@${version}+${buildNumber}`;
-  initErrorReporting({
-    dsn,
-    tracesSampleRate: 0.1,
-    debug: false,
-    environment,
-    release,
-  });
-} catch {}
+// Sentry temporarily disabled until __extends error is resolved
+import LoadingOverlay from './src/components/ui/LoadingOverlay'; // Added LoadingOverlay import
+console.log('Sentry initialization disabled - troubleshooting __extends error');
 
 function AppContent() {
   // Description: Get user from Zustand store
@@ -131,10 +114,8 @@ function AppContent() {
   }, [user]);
 
   if (checking) {
-    return <ActivityIndicator style={{ flex: 1 }} />;
+    return <LoadingOverlay visible={true} />;
   }
-
-  // If user is not onboarded, route to correct onboarding step
   if (user && onboardingStep) {
     return (
       <NavigationContainer ref={navigationRef}>
@@ -157,5 +138,9 @@ function AppContent() {
 
 export default function App() {
   // Description: No longer wrap with AuthProvider
-  return <AppContent />;
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppContent />
+    </GestureHandlerRootView>
+  );
 }

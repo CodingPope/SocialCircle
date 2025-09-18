@@ -1,11 +1,7 @@
 {
   "compilerOptions": {
     "target": "esnext",
-    "lib": [
-      "esnext",
-      "dom",
-      "dom.iterable"
-    ],
+    "lib": ["esnext", "dom", "dom.iterable"],
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -21,23 +17,10 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@env": [
-        "./env.d.ts"
-      ]
+      "@env": ["./env.d.ts"]
     }
   },
-  "include": [
-    "src",
-    "App.js",
-    "index.js",
-    "**/*.ts",
-    "**/*.tsx"
-  ],
-  "exclude": [
-    "node_modules",
-    "ios",
-    "android",
-    "dist"
-  ],
+  "include": ["src", "App.js", "index.js", "**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "ios", "android", "dist"],
   "extends": "expo/tsconfig.base"
 }

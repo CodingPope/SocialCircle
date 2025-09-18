@@ -1,20 +1,10 @@
-// Description: Minimal error reporting facade supporting sentry-expo or @sentry/react-native.
+// Description: Minimal error reporting facade - temporarily disabled during troubleshooting
 let S = null; // module ref
 let initialized = false;
 
 function loadSentry() {
-  if (S) return S;
-  try {
-    // Prefer sentry-expo which wraps @sentry/react-native in Expo environment
-    S = require('sentry-expo');
-  } catch {
-    try {
-      S = require('@sentry/react-native');
-    } catch {
-      S = null;
-    }
-  }
-  return S;
+  // Temporarily disabled - returning null to prevent module resolution issues
+  return null;
 }
 
 export function initErrorReporting(options = {}) {

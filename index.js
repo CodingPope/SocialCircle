@@ -1,4 +1,7 @@
 import 'react-native-get-random-values';
+// Import tslib to provide TypeScript runtime helpers including __extends
+import 'tslib';
+
 import { registerRootComponent } from 'expo';
 import React from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';

@@ -49,7 +49,7 @@ const PREVIEW_WIDTH = Math.min(300, SCREEN_W - 16); // slightly narrower preview
 const PREVIEW_HEIGHT = 100; // reduced height estimate to position card a bit closer to the blip
 const POINTER_HEIGHT = 10; // must match BlipPreview triangle height
 const POINTER_MARGIN = 4; // distance between card and pointer
-const MARKER_VISUAL_OFFSET = 20; // additional px to account for blip height so pointer apex lands on marker, not center
+const MARKER_VISUAL_OFFSET = 6; // reduced offset so preview card sits closer to the marker
 const PREVIEW_IDLE_DELAY_MS = 1000;
 const PREVIEW_COOLDOWN_MS = 5000;
 const MIN_ANCHOR_DIST = 110; // px separation between previews
@@ -90,6 +90,11 @@ export default function MapScreen() {
   const [showListView, setShowListView] = useState(false);
   const [showFilterWindow, setShowFilterWindow] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+
+  // Debug selectedEvent changes
+  useEffect(() => {
+    // selectedEvent change monitored during debugging; removed verbose logging
+  }, [selectedEvent]);
   // NEW: previews state
   const [previewItems, setPreviewItems] = useState([]);
   const previewsIdleTimerRef = useRef(null);
@@ -154,7 +159,9 @@ export default function MapScreen() {
     setSelectedFilters(filters);
     const { date, interests, genderOnly } = filters;
     let filtered = [...events];
-    if (!events.length) return;
+    if (!events.length) {
+      return;
+    }
 
     const now = Date.now();
     filtered = filtered.filter((event) => {
@@ -217,15 +224,7 @@ export default function MapScreen() {
     if (genderOnly) {
       filtered = filtered.filter((e) => e.privacy === genderOnly);
     }
-    if (userInterests.length === 0) {
-      return (
-        <View
-          style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
-        >
-          <Text>You must select some interests to view events.</Text>
-        </View>
-      );
-    }
+    // Always set filtered events regardless of user interests
     setFilteredEvents(filtered);
   };
 
@@ -513,8 +512,15 @@ export default function MapScreen() {
   const onMarkerPress = useCallback(
     async (event) => {
       // Description: When a marker is pressed, enrich with host snippet via cache
+
       const ownerId = event?.ownerId || event?.ownerUID || event?.owner || null;
-      if (!ownerId) return;
+
+      if (!ownerId) {
+        // Fallback: show event without host enrichment if no owner ID
+        setSelectedEvent(event);
+        return;
+      }
+
       try {
         const map = await ensureSnippets([ownerId]);
         const host = map.get(ownerId);
@@ -535,10 +541,14 @@ export default function MapScreen() {
             setSelectedEvent({ ...event, user: userSnapshot.data() });
           } catch (error) {
             console.error('Error fetching user data:', error);
+            // Still set the event even if user fetch fails
+            setSelectedEvent(event);
           }
         }
       } catch (e) {
         console.error('Error ensuring snippets:', e);
+        // Always set the event as fallback if snippet loading fails
+        setSelectedEvent(event);
       }
     },
     [ensureSnippets]
@@ -595,6 +605,20 @@ export default function MapScreen() {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size='large' color='#007AFF' />
+      </View>
+    );
+  }
+
+  // Check if user has interests selected
+  if (userInterests.length === 0) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text
+          style={{ fontSize: 16, textAlign: 'center', marginHorizontal: 20 }}
+        >
+          You must select some interests to view events.{'\n'}
+          Please update your profile to get started.
+        </Text>
       </View>
     );
   }
@@ -688,13 +712,16 @@ export default function MapScreen() {
           {filteredEvents
             // Defensive: ensure marker has a valid location and isn't soft-deleted
             .filter((e) => e && e.location && !e.isDeleted)
-            .map((event) => (
-              <BlipMarker
-                key={event.id}
-                event={event}
-                onPress={onMarkerPress}
-              />
-            ))}
+            .map((event) => {
+              // Rendering BlipMarker for event
+              return (
+                <BlipMarker
+                  key={event.id}
+                  event={event}
+                  onPress={onMarkerPress}
+                />
+              );
+            })}
           {newEventLocation && (
             <Marker coordinate={newEventLocation}>
               <CustomDotMarker color='#007AFF' scale={1} />
@@ -803,14 +830,23 @@ export default function MapScreen() {
         />
       )}
 
-      {/* Event PopUpCard */}
+      {/* Event PopUpCard - wrapped in native Modal so it overlays MapView */}
       {selectedEvent && (
-        <EventPopUpCard
-          event={selectedEvent}
-          onClose={() => setSelectedEvent(null)}
-          source='pin'
-          surface='map'
-        />
+        <Modal
+          visible={true}
+          transparent={true}
+          animationType='slide'
+          onRequestClose={() => setSelectedEvent(null)}
+        >
+          <View style={{ flex: 1 }} pointerEvents='box-none'>
+            <EventPopUpCard
+              event={selectedEvent}
+              onClose={() => setSelectedEvent(null)}
+              source='pin'
+              surface='map'
+            />
+          </View>
+        </Modal>
       )}
     </View>
   );
@@ -921,6 +957,28 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 100,
+  },
+  debugOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  debugCard: {
+    width: 300,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 8,
   },
   listViewOverlay: {
     position: 'absolute',

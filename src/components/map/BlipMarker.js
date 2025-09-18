@@ -4,7 +4,10 @@ import { Marker } from 'react-native-maps';
 
 // Description: Red circular blip marker. Keeps API minimal for future extensibility.
 export default function BlipMarker({ event, onPress }) {
-  if (!event?.location) return null;
+  if (!event?.location) {
+    return null;
+  }
+
   return (
     <Marker coordinate={event.location} onPress={() => onPress?.(event)}>
       <View style={styles.blip} />

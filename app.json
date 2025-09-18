@@ -7,7 +7,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -31,6 +30,7 @@
       }
     },
     "android": {
+      "package": "com.socialcirclellc.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -47,7 +47,6 @@
     "plugins": [
       "expo-notifications",
       "expo-video",
-      "sentry-expo",
       "expo-calendar",
       "expo-font",
       "expo-asset"

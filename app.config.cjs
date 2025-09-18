@@ -66,7 +66,6 @@ module.exports = ({ config }) => {
       // match your dependencies
       ['expo-notifications', { icon: './assets/icon.png' }],
       'expo-video',
-      'sentry-expo',
       ['expo-location', {}],
       'expo-calendar',
       'expo-font',

@@ -13,37 +13,24 @@ import { useNavigation } from '@react-navigation/native';
 import {
   doc,
   getDoc,
-  updateDoc,
-  arrayUnion,
-  collection,
-  addDoc,
-  onSnapshot, // NEW: live updates for event doc
+  onSnapshot, // live updates for event doc
 } from 'firebase/firestore';
-// Do NOT import addDoc directly here; use sendNotification from config.js which handles notification creation
-import {
-  db,
-  updateUserData,
-  functions,
-  reportContent,
-} from '../../firebase/config';
-import { httpsCallable } from 'firebase/functions';
+import { db, reportContent } from '../../firebase/config';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useUserStore } from '../profile/userStore';
 import { useEventStore } from './eventStore';
 import { useUserSnippetStore } from '../profile/userSnippetStore';
 import joinEvent from './joinEvent';
-import {
-  trackOpenEvent,
-  trackReportContent,
-  trackShareEvent,
-  trackSaveEvent,
-} from '../../lib/analytics';
+import { trackOpenEvent, trackReportContent } from '../../lib/analytics';
 
 const screenHeight = Dimensions.get('window').height;
+// Clearance in pixels reserved at the top of the scroll content for the floating handle
+const HANDLE_CLEARANCE = 28;
 
 export default function EventPopUpCard({
   event,
@@ -53,25 +40,32 @@ export default function EventPopUpCard({
   surface = 'event_detail',
 }) {
   const bottomSheetRef = useRef(null);
-  // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
-  const snapPoints = useMemo(() => ['50%', '90%', '95%'], []);
+
+  const snapPoints = useMemo(() => {
+    const topOffsetPercent = Math.min(
+      6,
+      Math.round((insets.top / screenHeight) * 100)
+    );
+    return ['92%', '60%', `${98 - topOffsetPercent}%`];
+  }, [insets.top]);
+
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
 
-  // NEW: Keep a live copy of the event document
+  // Live event doc
   const [liveEvent, setLiveEvent] = useState(event || null);
   const openedForIdRef = useRef(null);
 
-  // Sync local when prop id changes (open from a different card)
   useEffect(() => {
     setLiveEvent(event || null);
   }, [event?.id]);
 
-  // Subscribe to Firestore event updates to reflect RSVP/attendee changes instantly
   useEffect(() => {
     if (!event?.id) return;
     const ref = doc(db, 'events', event.id);
@@ -84,7 +78,6 @@ export default function EventPopUpCard({
         }
         const data = { id: snap.id, ...snap.data() };
         setLiveEvent((prev) => {
-          // Skip update if nothing meaningful changed to avoid cascading renders
           if (
             prev &&
             prev.id === data.id &&
@@ -94,7 +87,6 @@ export default function EventPopUpCard({
           }
           return data;
         });
-        // Auto-close if soft-deleted
         if (data.isDeleted === true) onClose && onClose();
       },
       (err) => console.error('EventPopUpCard snapshot error:', err)
@@ -112,6 +104,7 @@ export default function EventPopUpCard({
       return;
     }
 
+    // address
     if (!liveEvent?.location) {
       setAddress('Location not specified');
     } else {
@@ -135,10 +128,9 @@ export default function EventPopUpCard({
       fetchAddress();
     }
 
+    // host snippet
     const ownerId = liveEvent.ownerId;
     if (!ownerId) return;
-
-    // Prefer cached/batched snippet over per-doc get
     const fetchHostSnippet = async () => {
       try {
         const map = await ensureSnippets([ownerId]);
@@ -156,7 +148,6 @@ export default function EventPopUpCard({
           });
         else setUserDetails(null);
       } catch (err) {
-        // Fallback to direct get as last resort to preserve behavior
         try {
           const ref = doc(db, 'users', ownerId);
           const snap = await getDoc(ref);
@@ -173,63 +164,11 @@ export default function EventPopUpCard({
     liveEvent?.location?.latitude,
     liveEvent?.location?.longitude,
     liveEvent?.ownerId,
+    onClose,
   ]);
 
   const isSoftDeleted = liveEvent?.isDeleted === true;
-  const isExpired = (() => {
-    const e = liveEvent;
-    if (!e) return false;
-    let eventTime = null;
-    if (e.endAt) {
-      if (e.endAt.toDate) eventTime = e.endAt.toDate().getTime();
-      else if (e.endAt.seconds) eventTime = e.endAt.seconds * 1000;
-    } else if (e.date) {
-      if (e.date.toDate) eventTime = e.date.toDate().getTime();
-      else if (e.date.seconds) eventTime = e.date.seconds * 1000;
-      else if (e.date instanceof Date) eventTime = e.date.getTime();
-    }
-    if (!eventTime) return false;
-    return eventTime + 60 * 60 * 1000 <= Date.now();
-  })();
 
-  const displayName =
-    userDetails?.name ||
-    (userDetails
-      ? `${userDetails.firstName || ''} ${userDetails.lastName || ''}`.trim() ||
-        userDetails.name ||
-        'Anonymous'
-      : 'Anonymous');
-
-  // Use fallback image for event image
-  const profileImageSource = userDetails?.photoURL
-    ? { uri: userDetails.photoURL }
-    : userDetails?.profileImage || userDetails?.avatarURL
-    ? { uri: userDetails.profileImage || userDetails.avatarURL }
-    : require('../../../assets/smileDefault.png');
-
-  const openInMaps = () => {
-    if (liveEvent?.location) {
-      const { latitude, longitude } = liveEvent.location;
-      Linking.openURL(`https://www.google.com/maps?q=${latitude},${longitude}`);
-    }
-  };
-
-  // --- Join Event Logic ---
-  // Track local request state to instantly reflect UI after sending a request
-  const [requestPendingLocal, setRequestPendingLocal] = useState(false);
-
-  // --- Live derived state ---
-  const attendees = Array.isArray(liveEvent?.attendees)
-    ? liveEvent.attendees
-    : [];
-  const requests = Array.isArray(liveEvent?.requests) ? liveEvent.requests : [];
-  const isOwner = liveEvent?.ownerId === user?.uid;
-  const isAttendee = attendees.includes(user?.uid);
-  const isMember = isOwner || isAttendee;
-  const hasRequested =
-    (requests.includes(user?.uid) || requestPendingLocal) && !isMember;
-
-  // Compute archived (read-only) state: >3 days after end, or soft-deleted
   const getEventEndMs = (e) => {
     if (!e) return null;
     let end = null;
@@ -245,6 +184,7 @@ export default function EventPopUpCard({
     }
     return end;
   };
+
   const endMs = useMemo(
     () => getEventEndMs(liveEvent),
     [liveEvent?.id, liveEvent?.date, liveEvent?.endAt]
@@ -258,7 +198,18 @@ export default function EventPopUpCard({
   );
   const isReadOnly = isSoftDeleted || archived;
 
-  // --- Join/Request/Chat Button Logic ---
+  // derived state
+  const attendees = Array.isArray(liveEvent?.attendees)
+    ? liveEvent.attendees
+    : [];
+  const requests = Array.isArray(liveEvent?.requests) ? liveEvent.requests : [];
+  const isOwner = liveEvent?.ownerId === user?.uid;
+  const isAttendee = attendees.includes(user?.uid);
+  const isMember = isOwner || isAttendee;
+  const [requestPendingLocal, setRequestPendingLocal] = useState(false);
+  const hasRequested =
+    (requests.includes(user?.uid) || requestPendingLocal) && !isMember;
+
   let actionButtonLabel = 'Join Event';
   if (isMember) {
     actionButtonLabel = 'Check Chat';
@@ -266,34 +217,38 @@ export default function EventPopUpCard({
     actionButtonLabel = hasRequested ? 'Requested' : 'Request To Join';
   }
 
-  // Disable only when:
-  // - RSVP already requested (non-member), or
-  // - Non-member and view-only (archived/soft-deleted)
   const joinDisabled =
     !isMember &&
     (isReadOnly ||
       ((liveEvent?.privacy || 'public') === 'rsvp' && hasRequested));
 
-  // --- Button Action Handler ---
+  const FloatingHandle = () => (
+    <View style={styles.handleWrap}>
+      <View style={styles.handlePill} />
+    </View>
+  );
+
   const handleActionButton = async () => {
     if (!user || !liveEvent?.id) return;
-
     const onShowMessage = (msg) => msg && alert(msg);
-
     const res = await joinEvent({
       event: liveEvent,
       user,
-      navigation, // allow helper to navigate to chat on join
+      navigation,
       stores: { eventStore: useEventStore.getState() },
       options: { onShowMessage },
     });
 
+    // If the join result navigates the user away to chat, close the popup first
     if (res?.status === 'owner' || res?.status === 'already-attending') {
-      // helper would navigate, but keep address param behavior consistent
-      navigation.navigate('EventChat', {
-        eventId: liveEvent.id,
-        locationName: address,
-      });
+      onClose && onClose();
+      // small timeout to allow the sheet to close smoothly before navigating
+      setTimeout(() => {
+        navigation.navigate('EventChat', {
+          eventId: liveEvent.id,
+          locationName: address,
+        });
+      }, 50);
       return;
     }
     if (res?.status === 'requested') {
@@ -330,12 +285,7 @@ export default function EventPopUpCard({
     }
   };
 
-  // TODO: Add Save/Share buttons here when feature ships.
-  // Example usage:
-  // onSaveToggle = (saved) => trackSaveEvent({ event_id: liveEvent.id, surface: 'event_detail', saved });
-  // onShare = (channel) => trackShareEvent({ event_id: liveEvent.id, channel, surface: 'event_detail' });
-
-  // Fire open_event once when this popup first shows a given event id
+  // analytics
   useEffect(() => {
     if (!liveEvent?.id) return;
     if (openedForIdRef.current === liveEvent.id) return;
@@ -359,12 +309,38 @@ export default function EventPopUpCard({
 
   if (!liveEvent) return null;
 
+  const displayName =
+    userDetails?.name ||
+    (userDetails
+      ? `${userDetails.firstName || ''} ${userDetails.lastName || ''}`.trim() ||
+        userDetails.name ||
+        'Anonymous'
+      : 'Anonymous');
+
+  const profileImageSource = userDetails?.photoURL
+    ? { uri: userDetails.photoURL }
+    : userDetails?.profileImage || userDetails?.avatarURL
+    ? { uri: userDetails.profileImage || userDetails.avatarURL }
+    : require('../../../assets/smileDefault.png');
+
+  const openInMaps = () => {
+    if (!liveEvent?.location) return;
+    const { latitude, longitude } = liveEvent.location;
+    Linking.openURL(`https://www.google.com/maps?q=${latitude},${longitude}`);
+  };
+
   return (
     <BottomSheet
       ref={bottomSheetRef}
       snapPoints={snapPoints}
+      index={0}
       enablePanDownToClose
-      onClose={onClose}
+      enableOverDrag={false}
+      topInset={0}
+      style={styles.bottomSheet}
+      backgroundStyle={styles.sheetBackground}
+      handleComponent={FloatingHandle}
+      onClose={() => onClose && onClose()}
       backdropComponent={(props) => (
         <BottomSheetBackdrop
           {...props}
@@ -373,32 +349,84 @@ export default function EventPopUpCard({
           pressBehavior='close'
         />
       )}
-      style={[styles.bottomSheet, { maxHeight: screenHeight }]}
     >
       <BottomSheetScrollView
         showsVerticalScrollIndicator
-        contentContainerStyle={{ padding: 10, flexGrow: 1 }}
+        contentContainerStyle={{
+          paddingTop: HANDLE_CLEARANCE,
+          paddingHorizontal: 16,
+          paddingBottom: Math.max(insets.bottom, 16),
+          flexGrow: 1,
+        }}
       >
-        {/* TODO: Insert Save/Share action row near the top image/title when feature ships */}
-        {(liveEvent.imageUri || liveEvent.imageUrl) && (
-          <Image
-            source={{ uri: liveEvent.imageUri || liveEvent.imageUrl }}
-            style={styles.image}
-            resizeMode='cover'
-          />
-        )}
-        <Text style={styles.title}>{liveEvent.title || 'Untitled Event'}</Text>
-        {liveEvent.category && (
-          <Text style={styles.categoryTag}>{liveEvent.category}</Text>
-        )}
+        {/* Full-bleed header image */}
+        <View style={styles.headerFullBleed}>
+          {liveEvent.imageUri || liveEvent.imageUrl ? (
+            <Image
+              source={{ uri: liveEvent.imageUri || liveEvent.imageUrl }}
+              style={styles.headerImage}
+              resizeMode='cover'
+            />
+          ) : (
+            <View style={styles.headerImagePlaceholder}>
+              <Text style={styles.placeholderText}>No image</Text>
+            </View>
+          )}
+        </View>
 
-        <Text style={styles.label}>Description:</Text>
-        <Text style={styles.description}>
+        {/* Title + chips */}
+        <Text style={styles.title}>{liveEvent.title || 'Untitled Event'}</Text>
+
+        <View style={styles.metaRow}>
+          {!!liveEvent?.privacy && (
+            <View
+              style={[
+                styles.chip,
+                (liveEvent.privacy || 'public') === 'rsvp' && styles.chipWarn,
+              ]}
+            >
+              <Ionicons
+                name={
+                  (liveEvent.privacy || 'public') === 'rsvp'
+                    ? 'lock-closed'
+                    : 'people'
+                }
+                size={14}
+                color='#111827'
+              />
+              <Text style={styles.chipText}>
+                {(liveEvent.privacy || 'public').toUpperCase()}
+              </Text>
+            </View>
+          )}
+
+          {typeof liveEvent.capacity === 'number' && (
+            <View style={styles.chip}>
+              <Ionicons name='person-add' size={14} color='#111827' />
+              <Text style={styles.chipText}>
+                {attendees.length}/{liveEvent.capacity}
+              </Text>
+            </View>
+          )}
+
+          {!!liveEvent?.interest && (
+            <View style={styles.chip}>
+              <Ionicons name='pricetag' size={14} color='#111827' />
+              <Text style={styles.chipText}>{liveEvent.interest}</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Description */}
+        <Text style={styles.sectionLabel}>Description</Text>
+        <Text style={styles.bodyText}>
           {showFullDescription
             ? liveEvent.description
             : liveEvent.description?.length > 300
             ? `${liveEvent.description.slice(0, 300)}...`
-            : liveEvent.description}
+            : liveEvent.description || 'No description'}
         </Text>
         {liveEvent.description && liveEvent.description.length > 300 && (
           <TouchableOpacity
@@ -410,8 +438,11 @@ export default function EventPopUpCard({
           </TouchableOpacity>
         )}
 
-        <Text style={styles.label}>Date:</Text>
-        <Text style={styles.subText}>
+        <View style={styles.divider} />
+
+        {/* When */}
+        <Text style={styles.sectionLabel}>When</Text>
+        <Text style={styles.bodyText}>
           {liveEvent.date
             ? new Date(liveEvent.date.seconds * 1000).toLocaleString('en-US', {
                 weekday: 'long',
@@ -423,67 +454,90 @@ export default function EventPopUpCard({
               })
             : 'Date not specified'}
         </Text>
-        <Text style={styles.label}>Address:</Text>
-        <TouchableOpacity style={styles.addressContainer} onPress={openInMaps}>
-          <Ionicons name='pin' size={20} color='blue' />
-          <Text style={[styles.subText, { color: 'blue' }]}>{address}</Text>
+
+        {/* Where */}
+        <Text style={[styles.sectionLabel, { marginTop: 12 }]}>Where</Text>
+        <TouchableOpacity
+          style={styles.inlineButton}
+          onPress={openInMaps}
+          accessibilityRole='button'
+          accessibilityLabel='Open in maps'
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name='pin' size={18} color='#2563EB' />
+          <Text style={styles.linkText}>{address}</Text>
         </TouchableOpacity>
 
+        {/* Host card */}
         {userDetails && (
           <TouchableOpacity
-            style={styles.userContainer}
+            activeOpacity={0.9}
+            style={styles.hostCard}
             onPress={() => {
+              // Close the popup and navigate to the host profile
+              onClose && onClose();
               if (userDetails.id === user?.uid) {
-                navigation.navigate('MainTabs', { screen: 'ProfileStack' });
+                setTimeout(() => {
+                  navigation.navigate('MainTabs', { screen: 'ProfileStack' });
+                }, 50);
               } else {
-                navigation.navigate('OtherUserProfile', {
-                  userId: userDetails.id,
-                });
+                setTimeout(() => {
+                  navigation.navigate('OtherUserProfile', {
+                    userId: userDetails.id,
+                  });
+                }, 50);
               }
             }}
           >
-            <Image source={profileImageSource} style={styles.userImage} />
-            <View>
-              <Text style={styles.userName}>{displayName}</Text>
-              <Text style={styles.userRating}>
+            <Image source={profileImageSource} style={styles.hostAvatar} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.hostName}>{displayName}</Text>
+              <Text style={styles.hostSub}>
                 {typeof userDetails.rating === 'number' &&
                 userDetails.rating > 0
                   ? `⭐ ${Number(userDetails.rating).toFixed(1)}`
-                  : 'No Rating'}
+                  : 'New host'}
               </Text>
+            </View>
+            <View style={styles.smallGhostBtn} accessible={false}>
+              <Text style={styles.smallGhostBtnText}>View</Text>
             </View>
           </TouchableOpacity>
         )}
 
-        <View style={styles.actionsContainer}>
-          {typeof liveEvent.capacity === 'number' && liveEvent.capacity > 0 ? (
-            <Text style={styles.capacityText}>
-              {attendees.length} / {liveEvent.capacity} Joined
-            </Text>
-          ) : (
-            <Text style={styles.capacityText}>{attendees.length} joined</Text>
-          )}
+        {/* Capacity text */}
+        <Text style={styles.capacityText}>
+          {typeof liveEvent.capacity === 'number' && liveEvent.capacity > 0
+            ? `${attendees.length} / ${liveEvent.capacity} joined`
+            : `${attendees.length} joined`}
+        </Text>
+
+        {/* CTAs */}
+        <View style={styles.ctaStack}>
           <TouchableOpacity
             style={[
-              styles.joinButton,
+              styles.primaryBtn,
               (joinDisabled || (isMember && isReadOnly)) &&
-                styles.joinButtonDisabled,
+                styles.primaryBtnDisabled,
             ]}
             onPress={handleActionButton}
             disabled={joinDisabled}
+            accessibilityRole='button'
+            accessibilityLabel={actionButtonLabel}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text
-              style={[
-                styles.joinButtonText,
-                (joinDisabled || (isMember && isReadOnly)) &&
-                  styles.joinButtonTextDisabled,
-              ]}
-            >
-              {actionButtonLabel}
-            </Text>
+            <Text style={styles.primaryBtnText}>{actionButtonLabel}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.reportButton} onPress={handleReport}>
-            <Text style={styles.reportButtonText}>Report</Text>
+
+          <TouchableOpacity
+            style={styles.ghostBtn}
+            onPress={handleReport}
+            accessibilityRole='button'
+            accessibilityLabel='Report event'
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name='flag' size={16} color='#111827' />
+            <Text style={styles.ghostBtnText}>Report</Text>
           </TouchableOpacity>
         </View>
       </BottomSheetScrollView>
@@ -492,117 +546,182 @@ export default function EventPopUpCard({
 }
 
 const styles = StyleSheet.create({
+  // Sheet container (shadow only)
   bottomSheet: {
+    zIndex: 100,
+    elevation: 100,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -2 },
+  },
+  // Rounded card + clipping
+  sheetBackground: {
+    backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    zIndex: 100, // Ensure BottomSheet overlays FABs
-    elevation: 100, // For Android overlay
+    overflow: 'hidden',
   },
 
-  image: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    marginBottom: 10,
+  // Floating handle
+  handleWrap: {
+    position: 'absolute',
+    top: 8,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 10,
+    pointerEvents: 'none',
   },
-  imagePlaceholder: {
+  handlePill: {
+    width: 60,
+    height: 6,
+    borderRadius: 4,
+    backgroundColor: '#CFCFCF',
+  },
+
+  // Full-bleed header
+  headerFullBleed: {
+    marginTop: -HANDLE_CLEARANCE, // tuck under handle
+    marginHorizontal: -16, // cancel scroll padding to go edge-to-edge
+  },
+  headerImage: {
     width: '100%',
-    height: 200,
+    aspectRatio: 16 / 9,
+  },
+  headerImagePlaceholder: {
+    width: '100%',
+    aspectRatio: 16 / 9,
     backgroundColor: '#f0f0f0',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
-    marginBottom: 10,
   },
-  placeholderText: { fontSize: 16, color: '#888' },
+
+  // Typography + layout
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 5,
+    fontSize: 24,
+    fontWeight: '800',
+    marginTop: 12,
+    marginBottom: 6,
   },
-  categoryTag: {
-    fontSize: 14,
-    color: '#007BFF',
-    fontWeight: 'bold',
+
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+    letterSpacing: 0.3,
+    marginBottom: 6,
+    marginTop: 10,
+  },
+
+  bodyText: {
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 22,
+  },
+
+  showMore: {
+    color: '#2563EB',
+    marginTop: 6,
+    fontWeight: '700',
+  },
+
+  // Chips / meta
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     marginBottom: 8,
   },
-  label: { fontSize: 14, color: '#333', fontWeight: 'bold', marginBottom: 4 },
-  description: { fontSize: 14, color: '#555', marginBottom: 12 },
-  showMore: {
-    color: 'blue',
-    marginBottom: 10,
-    fontWeight: 'bold',
-  },
-  subText: { fontSize: 14, color: '#666', marginBottom: 8 },
-  addressContainer: {
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#F2F4F7',
+    marginRight: 8,
+    marginBottom: 8,
   },
-  userContainer: {
+  chipWarn: {
+    backgroundColor: '#FFF4E5',
+  },
+  chipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#111827',
+    marginLeft: 6,
+  },
+
+  // Dividers
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 10,
+  },
+
+  // Address row
+  inlineButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 4,
+  },
+  linkText: {
+    fontSize: 16,
+    color: '#2563EB',
+    marginLeft: 6,
+  },
+
+  // Host card
+  hostCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
     marginTop: 12,
   },
-  userImage: { width: 40, height: 40, borderRadius: 10, marginRight: 8 },
-  userName: { fontSize: 16, fontWeight: 'bold' },
-  userRating: {
-    fontSize: 14,
-    color: '#FFB300', // Description: Gold color to match PostCard rating star
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  actionsContainer: {
-    flexDirection: 'column', // Stack buttons vertically
-    marginTop: 16,
-  },
-  joinButton: {
-    backgroundColor: '#007BFF',
-    padding: 10,
-    borderRadius: 5,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  joinButtonDisabled: {
-    backgroundColor: '#C9CCD1', // dull/grey when disabled for requested or read-only state
-  },
-  joinButtonText: { color: '#fff', fontWeight: 'bold' },
-  joinButtonTextDisabled: { color: '#f2f2f2' },
-  reportButton: {
-    backgroundColor: '#FFB300',
-    padding: 8,
-    borderRadius: 5,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  reportButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  secondaryActionsContainer: {
-    flexDirection: 'row', // Place cancel and share buttons side by side
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#FF3B30',
-    paddingVertical: 6,
+  hostAvatar: { width: 44, height: 44, borderRadius: 12, marginRight: 10 },
+  hostName: { fontSize: 16, fontWeight: '700' },
+  hostSub: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  smallGhostBtn: {
     paddingHorizontal: 12,
-    borderRadius: 5,
-    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
-  cancelButtonText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  shareIconButton: {
-    padding: 6,
-    borderRadius: 5,
-    backgroundColor: '#E0E0E0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  smallGhostBtnText: { fontSize: 13, fontWeight: '700', color: '#111827' },
+
+  // Capacity text
   capacityText: {
     fontSize: 14,
-    color: '#007BFF',
-    fontWeight: 'bold',
-    marginBottom: 8,
+    color: '#2563EB',
+    fontWeight: '700',
+    marginTop: 14,
   },
+
+  // CTAs
+  ctaStack: { marginTop: 12 },
+  primaryBtn: {
+    backgroundColor: '#2563EB',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  primaryBtnDisabled: {
+    backgroundColor: '#9DB6F2',
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+
+  ghostBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  ghostBtnText: { fontWeight: '700', color: '#111827', marginLeft: 8 },
 });

@@ -378,7 +378,9 @@ const styles = StyleSheet.create({
   pointerContainer: {
     position: 'absolute',
     top: '100%',
-    marginTop: 4,
+    // pull the pointer down so the teardrop touches the map marker blip
+    // pull the pointer down so the teardrop touches the map marker blip
+    marginTop: 0,
     width: 12,
     height: 12,
     alignItems: 'center',
@@ -387,7 +389,8 @@ const styles = StyleSheet.create({
   },
   pointerShadow: {
     position: 'absolute',
-    top: 3,
+    // slightly reduce the shadow offset so it sits closer to the marker
+    top: 1,
     width: 8,
     height: 8,
     borderRadius: 4,
@@ -397,9 +400,10 @@ const styles = StyleSheet.create({
   pointer: {
     width: 0,
     height: 0,
+    // make the teardrop a little taller so the tip reaches the marker
     borderLeftWidth: 6,
     borderRightWidth: 6,
-    borderTopWidth: 10,
+    borderTopWidth: 12,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     borderTopColor: '#fff',
