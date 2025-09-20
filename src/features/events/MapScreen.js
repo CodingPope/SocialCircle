@@ -53,6 +53,7 @@ const MARKER_VISUAL_OFFSET = 6; // reduced offset so preview card sits closer to
 const PREVIEW_IDLE_DELAY_MS = 1000;
 const PREVIEW_COOLDOWN_MS = 5000;
 const MIN_ANCHOR_DIST = 110; // px separation between previews
+const MAX_EVENT_PREVIEWS = 1; // limit to a single event preview; reserve space for ads later
 
 const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
 
@@ -334,13 +335,21 @@ export default function MapScreen() {
 
   // Simple utilities
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-  const shuffle = (arr) => {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
+  const isBoostedEvent = (event) => {
+    if (!event) return false;
+    if (typeof event.isBoosted === 'boolean') return event.isBoosted;
+    if (typeof event.boosted === 'boolean') return event.boosted;
+    if (typeof event.boostLevel === 'number') return event.boostLevel > 0;
+    if (typeof event.priority === 'string')
+      return event.priority.toLowerCase() === 'boosted';
+    return false;
+  };
+  const getPopularityScore = (event) => {
+    if (!event) return 0;
+    if (typeof event.popularity === 'number') return event.popularity;
+    if (typeof event.attendeesCount === 'number') return event.attendeesCount;
+    if (Array.isArray(event.attendees)) return event.attendees.length;
+    return 0;
   };
   const milesBetween = (a, b) => {
     if (!a || !b) return null;
@@ -397,11 +406,24 @@ export default function MapScreen() {
         return;
       }
 
-      const shuffled = shuffle(candidates);
+      const prioritized = candidates
+        .map((event) => ({
+          event,
+          isBoosted: isBoostedEvent(event),
+          popularity: getPopularityScore(event),
+          seq: Math.random(),
+        }))
+        .sort((a, b) => {
+          if (a.isBoosted !== b.isBoosted) return a.isBoosted ? -1 : 1;
+          if (b.popularity !== a.popularity) return b.popularity - a.popularity;
+          return a.seq - b.seq;
+        })
+        .map((entry) => entry.event);
+
       const anchors = [];
       const items = [];
-      for (let i = 0; i < shuffled.length && items.length < 3; i++) {
-        const ev = shuffled[i];
+      for (let i = 0; i < prioritized.length && items.length < MAX_EVENT_PREVIEWS; i++) {
+        const ev = prioritized[i];
         try {
           const pt = await mapRef.current.pointForCoordinate(ev.location);
           if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number')
@@ -475,20 +497,76 @@ export default function MapScreen() {
   }, []);
 
   const handlePreviewJoin = useCallback(
-    async (ev) => {
-      if (!ev) return;
-      const onShowMessage = (msg) => msg && Alert.alert('Info', msg);
-      const res = await joinEvent({
-        event: ev,
-        user,
-        navigation,
-        stores: { eventStore: eventStoreRef.current },
-        options: { onShowMessage },
-      });
+    async (ev, helpers = {}) => {
+      if (!ev) return null;
 
-      // If member, route to chat immediately
-      if (res?.status === 'owner' || res?.status === 'already-attending') {
-        navigation.navigate('EventChat', { eventId: ev.id });
+      let capturedMessage = null;
+
+      try {
+        const res = await joinEvent({
+          event: ev,
+          user,
+          navigation,
+          stores: { eventStore: eventStoreRef.current },
+          options: {
+            onShowMessage: (msg) => {
+              if (typeof msg === 'string') {
+                capturedMessage = msg;
+                helpers.captureMessage?.(msg);
+              }
+            },
+          },
+        });
+
+        if (res?.status === 'owner' || res?.status === 'already-attending') {
+          navigation.navigate('EventChat', { eventId: ev.id });
+          return { status: res.status };
+        }
+
+        if (res?.status === 'joined') {
+          navigation.navigate('EventChat', { eventId: ev.id });
+          return { status: 'joined' };
+        }
+
+        if (res?.status === 'requested') {
+          helpers.onRequested?.();
+          return {
+            status: 'requested',
+            message: "Request sent. We'll notify you once the host responds.",
+            tone: 'success',
+          };
+        }
+
+        if (res?.status === 'waitlisted') {
+          return {
+            status: 'waitlisted',
+            message:
+              capturedMessage ||
+              'Added to the waitlist. We will reach out if a spot opens.',
+            tone: 'info',
+          };
+        }
+
+        const fallback = capturedMessage || res?.message;
+        if (fallback) {
+          return {
+            status: res?.status || 'info',
+            message: fallback,
+            tone:
+              res?.status === 'error' || res?.status === 'denied'
+                ? 'error'
+                : 'info',
+          };
+        }
+
+        return { status: res?.status || 'unknown' };
+      } catch (err) {
+        console.error('[MapScreen] join failed:', err);
+        return {
+          status: 'error',
+          message: err?.message || 'Join failed. Please try again.',
+          tone: 'error',
+        };
       }
     },
     [user, navigation]

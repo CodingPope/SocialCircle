@@ -970,7 +970,7 @@ exports.createReport = onCall(
         ? data.context
         : {};
 
-    if (!['event', 'user'].includes(type))
+    if (!['event', 'user', 'interest_post', 'interest_comment'].includes(type))
       throw new HttpsError('invalid-argument', 'Invalid type');
     if (!targetId || typeof targetId !== 'string')
       throw new HttpsError('invalid-argument', 'Missing targetId');
@@ -996,6 +996,9 @@ exports.createReport = onCall(
         eventId: typeof context.eventId === 'string' ? context.eventId : null,
         messageId:
           typeof context.messageId === 'string' ? context.messageId : null,
+        postId: typeof context.postId === 'string' ? context.postId : null,
+        commentId:
+          typeof context.commentId === 'string' ? context.commentId : null,
       },
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };

@@ -24,6 +24,15 @@ service firebase.storage {
         && get(/databases/(default)/documents/events/$(eventId)).data.ownerId == request.auth.uid;
     }
 
+    // Interest post media: interest-posts/{uid}/{postId}/...
+    match /interest-posts/{uid}/{file=**} {
+      allow read: if true;
+      allow write: if signedIn()
+        && request.auth.uid == uid
+        && isImage()
+        && maxSize(10 * 1024 * 1024);
+    }
+
     // Deny everything else explicitly
     match /{path=**} {
       allow read, write: if false;

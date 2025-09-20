@@ -14,6 +14,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../../firebase/config';
 import AnimatedGradientBackground from '../../../../components/ui/AnimatedGradientBackground';
 import { Ionicons } from '@expo/vector-icons';
+import { logOnboardingStepComplete } from '../../../../services/onboardingAnalytics';
 
 const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary'];
 
@@ -51,6 +52,9 @@ export default function SexScreen({ navigation }) {
     setLoading(true);
     try {
       await updateDoc(doc(db, 'users', user.uid), { sex: selectedSex });
+      await logOnboardingStepComplete('sex', {
+        choice: selectedSex?.toLowerCase?.() || 'unknown',
+      });
       setLocationModalVisible(true);
     } finally {
       setLoading(false);
@@ -74,6 +78,10 @@ export default function SexScreen({ navigation }) {
       };
       await updateDoc(doc(db, 'users', user.uid), { location: coords });
       useUserStore.getState().setUser({ ...user, location: coords });
+      await logOnboardingStepComplete('location', {
+        method: 'gps_prompt',
+        granted: true,
+      });
       setLocationModalVisible(false);
       navigation.navigate('InterestsScreen');
     } catch (err) {

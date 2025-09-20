@@ -15,6 +15,10 @@ import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../../firebase/config';
 import { useUserStore } from '../../../../features/profile/userStore';
 import AnimatedGradientBackground from '../../../../components/ui/AnimatedGradientBackground';
+import {
+  logOnboardingStepComplete,
+  logOnboardingDone,
+} from '../../../../services/onboardingAnalytics';
 
 function InterestsScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
@@ -85,6 +89,10 @@ function InterestsScreen({ navigation }) {
         return;
       }
       await updateDoc(doc(db, 'users', user.uid), { interests: selected });
+      await logOnboardingStepComplete('interests', {
+        selected_count: selected.length,
+      });
+      await logOnboardingDone({ source: 'core_onboarding' });
       useUserStore.getState().setProfileComplete(true);
     } catch (e) {
       setError(e.message);

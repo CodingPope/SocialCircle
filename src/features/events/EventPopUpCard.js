@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useNavigation } from '@react-navigation/native';
@@ -27,6 +28,7 @@ import { useEventStore } from './eventStore';
 import { useUserSnippetStore } from '../profile/userSnippetStore';
 import joinEvent from './joinEvent';
 import { trackOpenEvent, trackReportContent } from '../../lib/analytics';
+import { navigateToOtherUserProfile } from '../../navigation/RootNavigation';
 
 const screenHeight = Dimensions.get('window').height;
 // Clearance in pixels reserved at the top of the scroll content for the floating handle
@@ -47,6 +49,10 @@ export default function EventPopUpCard({
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
   const [userDetails, setUserDetails] = useState(null);
+  const joinFeedbackTimeoutRef = useRef(null);
+  const lastJoinMessageRef = useRef(null);
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinFeedback, setJoinFeedback] = useState(null);
 
   const snapPoints = useMemo(() => {
     const topOffsetPercent = Math.min(
@@ -65,6 +71,51 @@ export default function EventPopUpCard({
   useEffect(() => {
     setLiveEvent(event || null);
   }, [event?.id]);
+
+  useEffect(() => {
+    if (joinFeedbackTimeoutRef.current) {
+      clearTimeout(joinFeedbackTimeoutRef.current);
+      joinFeedbackTimeoutRef.current = null;
+    }
+    setJoinFeedback(null);
+    setJoinLoading(false);
+    lastJoinMessageRef.current = null;
+  }, [liveEvent?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (joinFeedbackTimeoutRef.current) {
+        clearTimeout(joinFeedbackTimeoutRef.current);
+        joinFeedbackTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const showJoinFeedback = useCallback((payload) => {
+    const normalized =
+      typeof payload === 'string'
+        ? { message: payload, tone: 'info' }
+        : payload && typeof payload === 'object'
+        ? {
+            message: payload.message || '',
+            tone: payload.tone || 'info',
+          }
+        : null;
+
+    if (!normalized || !normalized.message) return;
+
+    if (joinFeedbackTimeoutRef.current) {
+      clearTimeout(joinFeedbackTimeoutRef.current);
+      joinFeedbackTimeoutRef.current = null;
+    }
+
+    setJoinFeedback(normalized);
+
+    joinFeedbackTimeoutRef.current = setTimeout(() => {
+      setJoinFeedback(null);
+      joinFeedbackTimeoutRef.current = null;
+    }, 3500);
+  }, []);
 
   useEffect(() => {
     if (!event?.id) return;
@@ -221,6 +272,9 @@ export default function EventPopUpCard({
     !isMember &&
     (isReadOnly ||
       ((liveEvent?.privacy || 'public') === 'rsvp' && hasRequested));
+  const buttonDisabled = joinDisabled || joinLoading;
+  const showDisabledStyle =
+    buttonDisabled || (isMember && isReadOnly && !joinLoading);
 
   const FloatingHandle = () => (
     <View style={styles.handleWrap}>
@@ -228,33 +282,100 @@ export default function EventPopUpCard({
     </View>
   );
 
-  const handleActionButton = async () => {
-    if (!user || !liveEvent?.id) return;
-    const onShowMessage = (msg) => msg && alert(msg);
-    const res = await joinEvent({
-      event: liveEvent,
-      user,
-      navigation,
-      stores: { eventStore: useEventStore.getState() },
-      options: { onShowMessage },
-    });
+  const handleActionButton = useCallback(async () => {
+    if (!user || !liveEvent?.id || joinLoading) return;
 
-    // If the join result navigates the user away to chat, close the popup first
-    if (res?.status === 'owner' || res?.status === 'already-attending') {
-      onClose && onClose();
-      // small timeout to allow the sheet to close smoothly before navigating
-      setTimeout(() => {
-        navigation.navigate('EventChat', {
-          eventId: liveEvent.id,
-          locationName: address,
+    setJoinLoading(true);
+    lastJoinMessageRef.current = null;
+
+    try {
+      const res = await joinEvent({
+        event: liveEvent,
+        user,
+        navigation,
+        stores: { eventStore: useEventStore.getState() },
+        options: {
+          onShowMessage: (msg) => {
+            if (typeof msg === 'string') {
+              lastJoinMessageRef.current = msg;
+            }
+          },
+        },
+      });
+
+      const capturedMessage = lastJoinMessageRef.current;
+      lastJoinMessageRef.current = null;
+
+      // Owner or attendee -> navigate after closing sheet
+      if (res?.status === 'owner' || res?.status === 'already-attending') {
+        onClose && onClose();
+        setTimeout(() => {
+          navigation.navigate('EventChat', {
+            eventId: liveEvent.id,
+            locationName: address,
+          });
+        }, 50);
+        return;
+      }
+
+      if (res?.status === 'joined') {
+        onClose && onClose();
+        setTimeout(() => {
+          navigation.navigate('EventChat', {
+            eventId: liveEvent.id,
+            locationName: address,
+          });
+        }, 50);
+        return;
+      }
+
+      if (res?.status === 'requested') {
+        setRequestPendingLocal(true);
+        showJoinFeedback({
+          message: 'Request sent. We will notify you once the host responds.',
+          tone: 'success',
         });
-      }, 50);
-      return;
+        return;
+      }
+
+      if (res?.status === 'waitlisted') {
+        showJoinFeedback({
+          message:
+            capturedMessage ||
+            'Added to the waitlist. We will reach out if a spot opens.',
+          tone: 'info',
+        });
+        return;
+      }
+
+      const fallbackMessage = capturedMessage || res?.message;
+      if (fallbackMessage) {
+        showJoinFeedback({
+          message: fallbackMessage,
+          tone:
+            res?.status === 'error' || res?.status === 'denied'
+              ? 'error'
+              : 'info',
+        });
+      }
+    } catch (err) {
+      console.error('[EventPopUpCard] join failed:', err);
+      showJoinFeedback({
+        message: err?.message || 'Join failed. Please try again.',
+        tone: 'error',
+      });
+    } finally {
+      setJoinLoading(false);
     }
-    if (res?.status === 'requested') {
-      setRequestPendingLocal(true);
-    }
-  };
+  }, [
+    user,
+    liveEvent,
+    joinLoading,
+    navigation,
+    address,
+    onClose,
+    showJoinFeedback,
+  ]);
 
   const handleReport = async () => {
     if (!user || !liveEvent?.id) return;
@@ -482,9 +603,7 @@ export default function EventPopUpCard({
                 }, 50);
               } else {
                 setTimeout(() => {
-                  navigation.navigate('OtherUserProfile', {
-                    userId: userDetails.id,
-                  });
+                  navigateToOtherUserProfile(userDetails.id);
                 }, 50);
               }
             }}
@@ -517,17 +636,34 @@ export default function EventPopUpCard({
           <TouchableOpacity
             style={[
               styles.primaryBtn,
-              (joinDisabled || (isMember && isReadOnly)) &&
-                styles.primaryBtnDisabled,
+              showDisabledStyle && styles.primaryBtnDisabled,
             ]}
             onPress={handleActionButton}
-            disabled={joinDisabled}
+            disabled={buttonDisabled}
             accessibilityRole='button'
             accessibilityLabel={actionButtonLabel}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text style={styles.primaryBtnText}>{actionButtonLabel}</Text>
+            {joinLoading ? (
+              <ActivityIndicator color='#fff' />
+            ) : (
+              <Text style={styles.primaryBtnText}>{actionButtonLabel}</Text>
+            )}
           </TouchableOpacity>
+
+          {joinFeedback && (
+            <View
+              style={[
+                styles.joinFeedbackContainer,
+                joinFeedback.tone === 'success' && styles.joinFeedbackSuccess,
+                joinFeedback.tone === 'error' && styles.joinFeedbackError,
+              ]}
+            >
+              <Text style={styles.joinFeedbackText}>
+                {joinFeedback.message}
+              </Text>
+            </View>
+          )}
 
           <TouchableOpacity
             style={styles.ghostBtn}
@@ -713,6 +849,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#9DB6F2',
   },
   primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  joinFeedbackContainer: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#E8F1FF',
+    marginBottom: 12,
+  },
+  joinFeedbackSuccess: {
+    backgroundColor: '#E4F7E7',
+  },
+  joinFeedbackError: {
+    backgroundColor: '#FDE8E8',
+  },
+  joinFeedbackText: {
+    textAlign: 'center',
+    color: '#1F2937',
+    fontSize: 13,
+    fontWeight: '500',
+  },
 
   ghostBtn: {
     flexDirection: 'row',

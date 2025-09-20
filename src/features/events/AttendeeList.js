@@ -28,6 +28,7 @@ import { useUserSnippetStore } from '../profile/userSnippetStore';
 import smileDefault from '../../../assets/smileDefault.png';
 import * as Haptics from 'expo-haptics';
 import { track as trackClient } from '../../lib/analytics';
+import { navigateToOtherUserProfile } from '../../navigation/RootNavigation';
 
 export default function AttendeeList({
   attendees = [],
@@ -184,7 +185,7 @@ export default function AttendeeList({
           },
           (buttonIndex) => {
             if (buttonIndex === 0) {
-              navigation.navigate('OtherUserProfile', { userId: user.id });
+              navigateToOtherUserProfile(user.id);
             } else if (buttonIndex === 1 && isCreator) {
               // Confirm removal for safety
               Alert.alert(
@@ -240,7 +241,7 @@ export default function AttendeeList({
     if (!selectedUser) return;
 
     if (action === 'view') {
-      navigation.navigate('OtherUserProfile', { userId: selectedUser.id });
+      navigateToOtherUserProfile(selectedUser.id);
     } else if (action === 'remove' && isCreator) {
       if (readOnly) {
         Alert.alert('Action unavailable', 'This event is archived or ended.');
@@ -265,9 +266,7 @@ export default function AttendeeList({
   const renderItem = ({ item }) => (
     <TouchableOpacity
       style={styles.attendee}
-      onPress={() =>
-        navigation.navigate('OtherUserProfile', { userId: item.id })
-      }
+      onPress={() => navigateToOtherUserProfile(item.id)}
       onLongPress={() => openOptions(item)}
       delayLongPress={400}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

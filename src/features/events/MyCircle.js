@@ -8,6 +8,7 @@ import {
   Image,
   FlatList,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import {
   collection,
@@ -22,6 +23,8 @@ import { db } from '../../firebase/config';
 import { useUserStore } from '../profile/userStore';
 import { useUserSnippetStore } from '../profile/userSnippetStore';
 import EventPopUpCard from './EventPopUpCard';
+import UpcomingEventCard from './UpcomingEventCard';
+import { navigateToOtherUserProfile } from '../../navigation/RootNavigation';
 
 export default function MyCircle({ navigation }) {
   // Description: Get current user from Zustand userStore
@@ -36,6 +39,22 @@ export default function MyCircle({ navigation }) {
   const [followingIds, setFollowingIds] = useState(
     Array.isArray(user?.following) ? user.following : []
   );
+  const { width: windowWidth } = useWindowDimensions();
+
+  // Layout hint for upcoming events carousel to keep cards centered across devices
+  const { cardWidth, cardSpacing, sidePadding, snapInterval } = useMemo(() => {
+    const safeWidth = windowWidth || 360;
+    const width = Math.max(Math.min(safeWidth * 0.6, 224), 196);
+    const spacing = 14;
+    const rawPadding = (safeWidth - width) / 2;
+    const padding = Math.max(Math.min(rawPadding, 28), 18);
+    return {
+      cardWidth: width,
+      cardSpacing: spacing,
+      sidePadding: padding,
+      snapInterval: width + spacing,
+    };
+  }, [windowWidth]);
 
   // Helper: Enhance event with host data (cached snippets)
   const enhanceWithHostData = useCallback(
@@ -235,27 +254,68 @@ export default function MyCircle({ navigation }) {
     };
   }, [JSON.stringify(followingIds), enhanceWithHostData]);
 
-  const renderEventCard = (event) => (
-    <TouchableOpacity
-      key={event.id}
-      style={styles.eventCard}
-      onPress={() => setSelectedEvent(event)}
-    >
-      <Image
-        source={{ uri: event.imageUrl || 'https://via.placeholder.com/200' }}
-        style={styles.eventImage}
-      />
-      <View style={styles.eventBadge}>
-        <Text style={styles.eventBadgeText}>
-          {event.date?.seconds
-            ? new Date(event.date.seconds * 1000).toLocaleDateString()
-            : event.date?.toLocaleDateString?.() || 'Date TBD'}
-        </Text>
+  const getEventStartMs = useCallback((event) => {
+    if (!event?.date) return Number.MAX_SAFE_INTEGER;
+    const { date } = event;
+    if (typeof date?.seconds === 'number') return date.seconds * 1000;
+    if (typeof date?.toDate === 'function') return date.toDate().getTime();
+    if (date instanceof Date) return date.getTime();
+    return Number.MAX_SAFE_INTEGER;
+  }, []);
+
+  // Merge hosting and attending sets without duplicates for the carousel
+  const upcomingEvents = useMemo(() => {
+    const unique = new Map();
+    hostingEvents.forEach((event) => {
+      if (!event?.id) return;
+      unique.set(event.id, { ...event, viewerStatus: 'hosting' });
+    });
+    attendingEvents.forEach((event) => {
+      if (!event?.id) return;
+      if (unique.has(event.id)) return;
+      unique.set(event.id, { ...event, viewerStatus: 'attending' });
+    });
+    return Array.from(unique.values()).sort(
+      (a, b) => getEventStartMs(a) - getEventStartMs(b)
+    );
+  }, [attendingEvents, hostingEvents, getEventStartMs]);
+
+  const hasUpcomingEvents = upcomingEvents.length > 0;
+
+  const handleEventPress = useCallback(
+    (event, targetScreen) => {
+      if (targetScreen && navigation?.navigate) {
+        navigation.navigate(targetScreen, { eventId: event.id, event });
+        return;
+      }
+      setSelectedEvent(event);
+    },
+    [navigation]
+  );
+
+  const handleEventPrimaryAction = useCallback(
+    (event) => {
+      handleEventPress(event, 'EventChat');
+    },
+    [handleEventPress]
+  );
+
+  const renderUpcomingCarouselItem = useCallback(
+    ({ item }) => (
+      <View style={[styles.carouselCard, { width: cardWidth }]}>
+        <UpcomingEventCard
+          event={item}
+          onOpen={handleEventPress}
+          onPrimaryAction={handleEventPrimaryAction}
+        />
       </View>
-      <Text style={styles.eventTitle} numberOfLines={2}>
-        {event.title || 'Untitled Event'}
-      </Text>
-    </TouchableOpacity>
+    ),
+    [cardWidth, handleEventPress, handleEventPrimaryAction]
+  );
+
+  const renderCarouselSeparator = useCallback(
+    () => <View style={{ width: cardSpacing }} />,
+    [cardSpacing]
   );
 
   const renderFriendActivity = ({ item }) => (
@@ -321,13 +381,23 @@ export default function MyCircle({ navigation }) {
         {/* Upcoming Events */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📅 Your Upcoming Events</Text>
-          {hostingEvents.length > 0 || attendingEvents.length > 0 ? (
+          {hasUpcomingEvents ? (
             <FlatList
               horizontal
-              data={[...hostingEvents, ...attendingEvents]}
-              renderItem={({ item }) => renderEventCard(item)}
+              data={upcomingEvents}
+              renderItem={renderUpcomingCarouselItem}
+              ItemSeparatorComponent={renderCarouselSeparator}
               keyExtractor={(item) => item.id}
               showsHorizontalScrollIndicator={false}
+              snapToInterval={snapInterval}
+              snapToAlignment='start'
+              decelerationRate='fast'
+              bounces={false}
+              overScrollMode='never'
+              contentContainerStyle={[
+                styles.carouselContent,
+                { paddingLeft: sidePadding, paddingRight: sidePadding },
+              ]}
             />
           ) : (
             <Text style={styles.emptyState}>
@@ -369,9 +439,7 @@ export default function MyCircle({ navigation }) {
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.friendAvatarWrapper}
-                  onPress={() =>
-                    navigation.navigate('OtherUserProfile', { userId: item.id })
-                  }
+                  onPress={() => navigateToOtherUserProfile(item.id)}
                 >
                   <Image
                     source={{
@@ -440,40 +508,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontStyle: 'italic',
   },
-  eventCard: {
-    width: 160,
-    marginRight: 14,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 3,
-    overflow: 'hidden',
+  carouselContent: {
+    paddingVertical: 4,
   },
-  eventImage: {
-    width: '100%',
-    height: 110,
-  },
-  eventBadge: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-    backgroundColor: '#4da6ff',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  eventBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  eventTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#222',
-    margin: 8,
+  carouselCard: {
+    flexShrink: 0,
   },
   activityCard: {
     flexDirection: 'row',

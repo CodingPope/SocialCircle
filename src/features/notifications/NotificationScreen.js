@@ -12,6 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
+import { navigateToOtherUserProfile } from '../../navigation/RootNavigation';
 import { SwipeListView } from 'react-native-swipe-list-view';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -112,7 +113,7 @@ const NotificationCard = memo(
     const onPressAvatar = () => {
       if (item.type === 'rsvp_request' && requesterId) {
         markAsRead && markAsRead(item.id);
-        navigation.navigate('OtherUserProfile', { userId: requesterId });
+        navigateToOtherUserProfile(requesterId);
       }
     };
 
@@ -127,9 +128,7 @@ const NotificationCard = memo(
         return;
       }
       if (item.type === 'friend_request' && (item.fromUserId || item.userId)) {
-        navigation.navigate('OtherUserProfile', {
-          userId: item.fromUserId || item.userId,
-        });
+        navigateToOtherUserProfile(item.fromUserId || item.userId);
         return;
       }
       // Fallback: if notification has an eventId, go to chat

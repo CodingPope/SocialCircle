@@ -26,6 +26,13 @@ import {
   fetchGenericEvents,
 } from './discoveryQueries';
 import PostCard from './PostCard';
+import InterestPostCard from '../interestPosts/InterestPostCard';
+import CreateInterestPostModal from '../interestPosts/CreateInterestPostModal';
+import {
+  fetchInterestPostsByInterest,
+  fetchInterestPostsForInterests,
+  InterestTimeframes,
+} from '../interestPosts/interestPostService';
 import { fetchUserInterests } from '../profile/userQueries';
 import EventPopupCard from './EventPopUpCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -36,26 +43,101 @@ import {
   event as trackEvent,
 } from '../../services/analytics';
 import { trackCardClick } from '../../lib/analytics';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import { useNavigation } from '@react-navigation/native';
+
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return 0;
+}
+
+function getItemTimestamp(item) {
+  if (!item) return 0;
+  if (item.type === 'post') return toMillis(item.post?.createdAt);
+  if (item.type === 'event')
+    return (
+      toMillis(item.event?.createdAt) ||
+      toMillis(item.event?.date) ||
+      toMillis(item.event?.startAt)
+    );
+  return 0;
+}
+
+const TAB_TO_TIMEFRAME = {
+  New: InterestTimeframes.NEW,
+  Today: InterestTimeframes.TODAY,
+  'This Week': InterestTimeframes.WEEK,
+};
 
 export default function DiscoveryScreen() {
   const [popupEvent, setPopupEvent] = useState(null);
   const [activeTab, setActiveTab] = useState('Hot');
   const [selectedInterest, setSelectedInterest] = useState(null);
   const [events, setEvents] = useState([]);
+  const [posts, setPosts] = useState([]);
   const [userLocation, setUserLocation] = useState(null);
   const [userCity, setUserCity] = useState('');
   const [userInterests, setUserInterests] = useState([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [lastDoc, setLastDoc] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showCreatePost, setShowCreatePost] = useState(false);
 
   const chipScrollViewRef = useRef(null);
   const scrollViewRef = useRef(null);
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
   const user = useUserStore((s) => s.user);
   const personalizationEnabled = !!user?.analyticsOptIn;
+  const navigation = useNavigation();
 
   const ALL_LABEL = 'All';
+
+  const feedItems = useMemo(() => {
+    const eventItems = (events || []).map((event) => ({
+      type: 'event',
+      id: `event-${event.id}`,
+      event,
+    }));
+    const postItems = (posts || []).map((post) => ({
+      type: 'post',
+      id: `post-${post.id}`,
+      post,
+    }));
+    const seen = new Set();
+    return [...eventItems, ...postItems]
+      .filter((item) => {
+        if (!item.id || seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .sort((a, b) => getItemTimestamp(b) - getItemTimestamp(a));
+  }, [events, posts]);
+
+  const handlePostDeleted = useCallback((postId) => {
+    setPosts((prev) => prev.filter((post) => post.id !== postId));
+  }, []);
+
+  const openPost = useCallback(
+    (post) => {
+      if (!post?.id) return;
+      try {
+        trackEvent('post_open', {
+          post_id: post.id,
+          interest: post.interestId || null,
+          surface: 'discover',
+        });
+      } catch {}
+      navigation.navigate('InterestPost', {
+        postId: post.id,
+        initialPost: post,
+      });
+    },
+    [navigation]
+  );
 
   // Track screen and tab selection (no-op if analytics disabled)
   useEffect(() => {
@@ -76,6 +158,7 @@ export default function DiscoveryScreen() {
           // Load a generic set of upcoming events
           const generic = await fetchGenericEvents(20);
           setEvents(generic.filter((e) => e.isDeleted !== true));
+          setPosts([]);
           return;
         }
 
@@ -119,6 +202,7 @@ export default function DiscoveryScreen() {
           const filtered = generic.filter((e) => !e.isDeleted);
           setEvents(filtered);
           await AsyncStorage.setItem('genericEvents', JSON.stringify(filtered));
+          setPosts([]);
           return;
         }
 
@@ -211,6 +295,7 @@ export default function DiscoveryScreen() {
     if (!userLocation || (activeTab !== 'Hot' && !selectedInterest)) return;
 
     let newEvents = [];
+    let fetchedPosts = [];
 
     if (activeTab === 'Hot') {
       newEvents = await fetchHotEvents(userInterests, userLocation);
@@ -271,6 +356,37 @@ export default function DiscoveryScreen() {
       }
     }
 
+    if (
+      personalizationEnabled &&
+      activeTab !== 'Hot' &&
+      (selectedInterest || selectedInterest === ALL_LABEL)
+    ) {
+      const timeframe = TAB_TO_TIMEFRAME[activeTab] || InterestTimeframes.WEEK;
+      try {
+        if (selectedInterest === ALL_LABEL) {
+          const interestIds = (userInterests || []).slice(0, 10);
+          if (interestIds.length) {
+            fetchedPosts = await fetchInterestPostsForInterests({
+              interestIds,
+              timeframe,
+              pageSizePerInterest: 6,
+            });
+          }
+        } else if (selectedInterest) {
+          const result = await fetchInterestPostsByInterest({
+            interestId: selectedInterest,
+            timeframe,
+            pageSize: 20,
+          });
+          fetchedPosts = result.posts || [];
+        }
+      } catch (err) {
+        console.warn('Failed to fetch interest posts', err);
+      }
+    } else if (!personalizationEnabled) {
+      fetchedPosts = [];
+    }
+
     const enriched = await enrichEventsWithHosts(newEvents);
     setEvents((prevEvents) => {
       const merged = reset ? enriched : [...prevEvents, ...enriched];
@@ -280,6 +396,8 @@ export default function DiscoveryScreen() {
       );
       return uniqueById;
     });
+
+    setPosts(fetchedPosts.filter((post) => post?.isDeleted !== true));
   }
 
   const handleScroll = ({ nativeEvent }) => {
@@ -407,6 +525,7 @@ export default function DiscoveryScreen() {
 
       <ScrollView
         style={[styles.container, { minHeight: 400 }]}
+        contentContainerStyle={styles.feedContent}
         onScroll={handleScroll}
         scrollEventThrottle={400}
         ref={scrollViewRef}
@@ -414,49 +533,62 @@ export default function DiscoveryScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {events.length === 0 ? (
-          <Text style={styles.emptyMessage}>No events found</Text>
+        {feedItems.length === 0 ? (
+          <Text style={styles.emptyMessage}>No events or posts found</Text>
         ) : (
-          events.map((event) => (
-            <PostCard
-              key={
-                event.id ||
-                `${event.ownerId}-${event.createdAt?.seconds || Math.random()}`
-              }
-              event={{
-                ...event,
-                location: {
-                  address: event.address,
-                  latitude: event.location?.latitude,
-                  longitude: event.location?.longitude,
-                },
-                hostName: event.hostName || 'Unknown Host',
-                hostPhoto:
-                  event.hostPhoto ||
-                  require('../../../assets/smileDefault.png'),
-                hostRating:
-                  typeof event.hostRating === 'number'
-                    ? event.hostRating
-                    : null,
-                formattedDate: event.formattedDate,
-                interest: event.interest,
-                attendees: event.attendees,
-              }}
-              onPress={() => {
-                try {
-                  trackCardClick({
-                    card_type: 'event',
-                    card_id: event.id,
-                    surface: 'discover',
-                    interest: event?.interest,
-                    category: event?.category,
-                  });
-                } catch {}
-                setPopupEvent(event);
-              }}
-              onJoinPress={() => setPopupEvent(event)}
-            />
-          ))
+          feedItems.map((item) => {
+            if (item.type === 'post') {
+              return (
+                <InterestPostCard
+                  key={item.id}
+                  post={item.post}
+                  onPress={() => openPost(item.post)}
+                  onDeleted={() => handlePostDeleted(item.post.id)}
+                />
+              );
+            }
+
+            const event = item.event;
+            if (!event) return null;
+
+            return (
+              <PostCard
+                key={item.id}
+                event={{
+                  ...event,
+                  location: {
+                    address: event.address,
+                    latitude: event.location?.latitude,
+                    longitude: event.location?.longitude,
+                  },
+                  hostName: event.hostName || 'Unknown Host',
+                  hostPhoto:
+                    event.hostPhoto ||
+                    require('../../../assets/smileDefault.png'),
+                  hostRating:
+                    typeof event.hostRating === 'number'
+                      ? event.hostRating
+                      : null,
+                  formattedDate: event.formattedDate,
+                  interest: event.interest,
+                  attendees: event.attendees,
+                }}
+                onPress={() => {
+                  try {
+                    trackCardClick({
+                      card_type: 'event',
+                      card_id: event.id,
+                      surface: 'discover',
+                      interest: event?.interest,
+                      category: event?.category,
+                    });
+                  } catch {}
+                  setPopupEvent(event);
+                }}
+                onJoinPress={() => setPopupEvent(event)}
+              />
+            );
+          })
         )}
       </ScrollView>
 
@@ -468,6 +600,27 @@ export default function DiscoveryScreen() {
           surface='discover'
         />
       )}
+
+      <TouchableOpacity
+        style={styles.createPostFab}
+        onPress={() => setShowCreatePost(true)}
+        activeOpacity={0.85}
+      >
+        <Ionicons name='create-outline' size={26} color='#fff' />
+      </TouchableOpacity>
+
+      <CreateInterestPostModal
+        visible={showCreatePost}
+        onClose={() => setShowCreatePost(false)}
+        onCreated={(created) => {
+          setShowCreatePost(false);
+          if (created?.interestId) {
+            setSelectedInterest((prev) => prev || created.interestId);
+          }
+          setPosts((prev) => [created, ...prev]);
+          setTimeout(() => loadEvents(true), 200);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -494,6 +647,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     paddingHorizontal: 10,
+  },
+  feedContent: {
+    paddingBottom: 120,
   },
   tabRow: {
     flexDirection: 'row',
@@ -549,5 +705,21 @@ const styles = StyleSheet.create({
     marginTop: 20,
     fontSize: 16,
     color: '#666',
+  },
+  createPostFab: {
+    position: 'absolute',
+    right: 24,
+    bottom: 32,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
+    elevation: 6,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -35,7 +35,11 @@ import {
   serverTimestamp, // Added: ensure consistent timestamps for ordering
   getDocs,
   where,
+  Timestamp,
 } from 'firebase/firestore';
+import { getApp } from 'firebase/app';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { geohashForLocation } from 'geofire-common';
 import {
   db,
   auth,
@@ -47,6 +51,10 @@ import smileDefault from '../../../assets/smileDefault.png';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import ReportModal from '../../features/events/ReportModal'; // Import reusable modal component
 import { track as trackClient, trackReportContent } from '../../lib/analytics';
+import { navigateToOtherUserProfile } from '../../navigation/RootNavigation';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import { GOOGLE_MAPS_API_KEY } from '@env';
 
 const EventChatScreen = () => {
   const route = useRoute();
@@ -66,6 +74,14 @@ const EventChatScreen = () => {
   const [requesters, setRequesters] = useState([]); // Add state for requesters
   const [isReportModalVisible, setIsReportModalVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [isEditingEvent, setIsEditingEvent] = useState(false);
+  const [editLocation, setEditLocation] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editDate, setEditDate] = useState(null);
+  const [isEditDatePickerVisible, setIsEditDatePickerVisible] = useState(false);
+  const [isSavingEvent, setIsSavingEvent] = useState(false);
+  const [editPlaceDetails, setEditPlaceDetails] = useState(null);
+  const [editLocationCoords, setEditLocationCoords] = useState(null);
   const flatListRef = useRef(null);
 
   // Track listener unsubscribes so we can stop them immediately on leave
@@ -92,6 +108,29 @@ const EventChatScreen = () => {
       if (endMs) endMs += 60 * 60 * 1000;
     }
     return endMs;
+  };
+
+  const toDateOrNull = (value) => {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value.toDate === 'function') return value.toDate();
+    if (typeof value.seconds === 'number')
+      return new Date(value.seconds * 1000);
+    if (typeof value === 'number') return new Date(value);
+    return null;
+  };
+
+  const formatEventDate = (value) => {
+    const dateObj = toDateOrNull(value);
+    return dateObj
+      ? dateObj.toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : 'Date not specified';
   };
 
   const endMs = getEventEndMs(event);
@@ -176,6 +215,19 @@ const EventChatScreen = () => {
     locationNameParam,
     eventId,
   ]);
+
+  useEffect(() => {
+    if (!isModalVisible) {
+      setIsEditingEvent(false);
+      setIsEditDatePickerVisible(false);
+      setIsSavingEvent(false);
+      setEditLocation('');
+      setEditDescription('');
+      setEditDate(null);
+      setEditLocationCoords(null);
+      setEditPlaceDetails(null);
+    }
+  }, [isModalVisible]);
 
   // Helper: map attendeeSnippets -> UI attendee shape
   const mapSnippetsToAttendees = (snippets) => {
@@ -669,7 +721,7 @@ const EventChatScreen = () => {
           text: 'View Profile',
           onPress: () => {
             setIsModalVisible(false);
-            navigation.navigate('OtherUserProfile', { userId: attendee.id });
+            navigateToOtherUserProfile(attendee.id);
           },
         },
         {
@@ -845,6 +897,173 @@ const EventChatScreen = () => {
       .finally(() => setIsReportModalVisible(false));
   };
 
+  const handleStartEdit = () => {
+    if (!event) return;
+    const locationLabel = getLocationLabel(event);
+    const sanitizedLocation =
+      locationLabel && locationLabel !== 'Location not available'
+        ? locationLabel
+        : '';
+    setEditLocation(sanitizedLocation);
+    setEditDescription(event?.description || '');
+    setEditDate(toDateOrNull(event?.date) || new Date());
+    const loc = event?.location || {};
+    const lat =
+      typeof loc.latitude === 'number'
+        ? loc.latitude
+        : typeof loc.lat === 'number'
+        ? loc.lat
+        : typeof loc._lat === 'number'
+        ? loc._lat
+        : null;
+    const lng =
+      typeof loc.longitude === 'number'
+        ? loc.longitude
+        : typeof loc.lng === 'number'
+        ? loc.lng
+        : typeof loc._long === 'number'
+        ? loc._long
+        : typeof loc.lon === 'number'
+        ? loc.lon
+        : null;
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      setEditLocationCoords({ latitude: lat, longitude: lng });
+    } else {
+      setEditLocationCoords(null);
+    }
+    setEditPlaceDetails(
+      loc && (lat || lng)
+        ? {
+            name:
+              loc.name || loc.label || loc.address || sanitizedLocation || null,
+            address: loc.address || sanitizedLocation || null,
+            placeId: loc.placeId || loc.place_id || null,
+            latitude: lat || null,
+            longitude: lng || null,
+          }
+        : null
+    );
+    setIsEditDatePickerVisible(false);
+    setIsEditingEvent(true);
+    trackClient('event_edit_start', { event_id_present: !!eventId });
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingEvent(false);
+    setIsEditDatePickerVisible(false);
+    setEditLocation('');
+    setEditDescription('');
+    setEditDate(null);
+    setEditLocationCoords(null);
+    setEditPlaceDetails(null);
+  };
+
+  const handleEditDateConfirm = (pickedDate) => {
+    setEditDate(pickedDate || new Date());
+    setIsEditDatePickerVisible(false);
+  };
+
+  const handleSaveEventEdits = async () => {
+    if (!eventId) return;
+    const trimmedDescription = editDescription.trim();
+    if (!trimmedDescription) {
+      Alert.alert('Description needed', 'Please enter a description.');
+      return;
+    }
+    if (!editDate) {
+      Alert.alert('Date required', 'Please select a date and time.');
+      return;
+    }
+
+    const trimmedLocation = editLocation.trim();
+    const placeSnapshot = editPlaceDetails;
+    const displayAddress =
+      placeSnapshot?.address || trimmedLocation || event?.address || null;
+    const displayName =
+      placeSnapshot?.name || trimmedLocation || event?.locationName || null;
+
+    const updates = {
+      description: trimmedDescription,
+      locationName: displayName || null,
+      address: displayAddress || null,
+      updatedAt: serverTimestamp(),
+    };
+
+    const normalizedDate =
+      editDate instanceof Date ? editDate : toDateOrNull(editDate);
+    if (normalizedDate) {
+      updates.date = Timestamp.fromDate(normalizedDate);
+    }
+
+    const latitudeCandidate =
+      placeSnapshot?.latitude ?? editLocationCoords?.latitude;
+    const longitudeCandidate =
+      placeSnapshot?.longitude ?? editLocationCoords?.longitude;
+    const hasCoords =
+      typeof latitudeCandidate === 'number' &&
+      typeof longitudeCandidate === 'number';
+
+    if (placeSnapshot || hasCoords || trimmedLocation) {
+      updates.location = {
+        ...(event?.location || {}),
+        ...(hasCoords
+          ? { latitude: latitudeCandidate, longitude: longitudeCandidate }
+          : {}),
+        ...(displayAddress ? { address: displayAddress } : {}),
+        ...(displayName ? { name: displayName, label: displayName } : {}),
+        ...(placeSnapshot?.placeId ? { placeId: placeSnapshot.placeId } : {}),
+      };
+
+      if (hasCoords) {
+        try {
+          updates.geohash = geohashForLocation([
+            latitudeCandidate,
+            longitudeCandidate,
+          ]);
+        } catch (geoErr) {
+          console.warn(
+            'Failed to compute geohash for updated event location',
+            geoErr
+          );
+        }
+      }
+    }
+
+    setIsSavingEvent(true);
+    try {
+      await updateDoc(doc(db, 'events', eventId), updates);
+      trackClient('event_edit_saved', { event_id_present: !!eventId });
+      Alert.alert('Event Updated', 'Your changes have been saved.');
+      setEvent((prev) =>
+        prev
+          ? {
+              ...prev,
+              description: updates.description,
+              locationName: updates.locationName,
+              address: updates.address,
+              ...(updates.date ? { date: updates.date } : {}),
+              ...(updates.location ? { location: updates.location } : {}),
+              ...(updates.geohash ? { geohash: updates.geohash } : {}),
+            }
+          : prev
+      );
+      setIsEditingEvent(false);
+      setEditLocation('');
+      setEditDescription('');
+      setEditDate(null);
+      setEditLocationCoords(null);
+      setEditPlaceDetails(null);
+    } catch (err) {
+      console.error('Event update failed:', err);
+      Alert.alert(
+        'Update failed',
+        'Unable to save your changes. Please try again.'
+      );
+    } finally {
+      setIsSavingEvent(false);
+    }
+  };
+
   if (loading || !event) {
     return <ActivityIndicator style={{ flex: 1 }} />;
   }
@@ -930,10 +1149,9 @@ const EventChatScreen = () => {
               >
                 <TouchableOpacity
                   onPress={() => {
-                    navigation.navigate('OtherUserProfile', {
-                      userId:
-                        sender?.id || (isHost ? event?.ownerId : undefined),
-                    });
+                    const targetId =
+                      sender?.id || (isHost ? event?.ownerId : undefined);
+                    if (targetId) navigateToOtherUserProfile(targetId);
                   }}
                   onLongPress={() => handleLongPressMessage(item)}
                 >
@@ -955,10 +1173,9 @@ const EventChatScreen = () => {
                 >
                   <TouchableOpacity
                     onPress={() => {
-                      navigation.navigate('OtherUserProfile', {
-                        userId:
-                          sender?.id || (isHost ? event?.ownerId : undefined),
-                      });
+                      const targetId =
+                        sender?.id || (isHost ? event?.ownerId : undefined);
+                      if (targetId) navigateToOtherUserProfile(targetId);
                     }}
                     onLongPress={() => handleLongPressMessage(item)}
                   >
@@ -1041,14 +1258,20 @@ const EventChatScreen = () => {
           swipeDirection='down'
           style={styles.modal}
           backdropOpacity={0.4}
+          propagateSwipe
         >
           <ScrollView
             style={[
               styles.modalContent,
               { paddingBottom: (insets.bottom || 0) + 32 }, // Ensure bottom actions are above home indicator / nav bar
             ]}
-            contentContainerStyle={{ paddingBottom: (insets.bottom || 0) + 32 }}
+            contentContainerStyle={{
+              paddingBottom: (insets.bottom || 0) + 32,
+              paddingTop: 12,
+              flexGrow: 1,
+            }}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps='handled'
           >
             <View style={styles.dragHandle} />
 
@@ -1073,9 +1296,7 @@ const EventChatScreen = () => {
                       ],
                     });
                   } else {
-                    navigation.navigate('OtherUserProfile', {
-                      userId: ownerId,
-                    });
+                    navigateToOtherUserProfile(ownerId);
                   }
                 }
               }}
@@ -1115,94 +1336,188 @@ const EventChatScreen = () => {
             </TouchableOpacity>
 
             {/* Location */}
-            <View style={styles.card}>
+            <View
+              style={[
+                styles.card,
+                isCreator && isEditingEvent && styles.cardEditing,
+              ]}
+            >
               <Text style={styles.sectionTitle}>Location</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  if (
-                    resolvedLocationLabel &&
-                    resolvedLocationLabel !== 'Location not available'
-                  ) {
-                    Linking.openURL(
-                      `https://maps.google.com/?q=${encodeURIComponent(
-                        resolvedLocationLabel
-                      )}`
-                    );
+              {isCreator && isEditingEvent ? (
+                <View style={styles.autocompleteWrapper}>
+                  <GooglePlacesAutocomplete
+                    placeholder='Search for a location or address'
+                    minLength={2}
+                    enablePoweredByContainer={false}
+                    fetchDetails
+                    debounce={300}
+                    predefinedPlaces={[]}
+                    keyboardShouldPersistTaps='handled'
+                    textInputProps={{
+                      value: editLocation,
+                      onChangeText: (text) => {
+                        setEditLocation(text);
+                        setEditPlaceDetails(null);
+                      },
+                      placeholderTextColor: '#9CA3AF',
+                      autoCorrect: false,
+                      autoCapitalize: 'none',
+                    }}
+                    styles={{
+                      container: styles.autocompleteContainer,
+                      textInput: styles.modalInput,
+                      listView: styles.autocompleteList,
+                      row: styles.autocompleteRow,
+                      separator: styles.autocompleteSeparator,
+                      description: styles.autocompleteDescription,
+                    }}
+                    onPress={(data, details = null) => {
+                      const description = data?.description || '';
+                      const formattedAddress =
+                        details?.formatted_address || description;
+                      const primaryText =
+                        data?.structured_formatting?.main_text || details?.name;
+                      setEditLocation(description);
+                      const lat = details?.geometry?.location?.lat;
+                      const lng = details?.geometry?.location?.lng;
+                      if (typeof lat === 'number' && typeof lng === 'number') {
+                        setEditLocationCoords({
+                          latitude: lat,
+                          longitude: lng,
+                        });
+                      }
+                      setEditPlaceDetails({
+                        name: primaryText || formattedAddress || description,
+                        address: formattedAddress || description,
+                        placeId: data?.place_id || details?.place_id || null,
+                        latitude: typeof lat === 'number' ? lat : null,
+                        longitude: typeof lng === 'number' ? lng : null,
+                        raw: details || null,
+                      });
+                    }}
+                    onFail={(error) =>
+                      console.error('Places autocomplete error:', error)
+                    }
+                    query={{
+                      key: GOOGLE_MAPS_API_KEY,
+                      language: 'en',
+                    }}
+                  />
+                </View>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => {
+                    if (
+                      resolvedLocationLabel &&
+                      resolvedLocationLabel !== 'Location not available'
+                    ) {
+                      Linking.openURL(
+                        `https://maps.google.com/?q=${encodeURIComponent(
+                          resolvedLocationLabel
+                        )}`
+                      );
+                    }
+                  }}
+                  disabled={
+                    !resolvedLocationLabel ||
+                    resolvedLocationLabel === 'Location not available'
                   }
-                }}
-              >
-                <Text style={styles.linkText}>{resolvedLocationLabel}</Text>
-              </TouchableOpacity>
+                >
+                  <Text style={styles.linkText}>{resolvedLocationLabel}</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Date & Time */}
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Date & Time</Text>
               <View style={styles.rowBetween}>
-                <Text style={styles.normalText}>
-                  {/* Description: Robust date formatting for Firestore Timestamp or JS Date */}
-                  {event?.date
-                    ? new Date(event.date.seconds * 1000).toLocaleString(
-                        'en-US',
-                        {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        }
-                      )
-                    : 'Date not specified'}
+                <Text style={[styles.normalText, styles.dateText]}>
+                  {formatEventDate(
+                    isCreator && isEditingEvent ? editDate : event?.date
+                  )}
                 </Text>
                 <TouchableOpacity
+                  style={styles.calendarButton}
                   onPress={() => {
                     trackClient('add_to_calendar_clicked', {
                       event_id_present: !!eventId,
                     });
                   }}
+                  accessibilityLabel='Add to calendar'
                 >
-                  <Text style={styles.linkText}>Add to Calendar</Text>
+                  <Ionicons name='calendar-outline' size={20} color='#fff' />
                 </TouchableOpacity>
               </View>
+              {isCreator && isEditingEvent && (
+                <TouchableOpacity
+                  style={styles.editDateButton}
+                  onPress={() => setIsEditDatePickerVisible(true)}
+                  disabled={isSavingEvent}
+                >
+                  <Ionicons name='time-outline' size={20} color='#2563EB' />
+                  <Text style={styles.editDateButtonText}>
+                    Adjust Date & Time
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Description */}
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Description</Text>
-              <Text
-                style={styles.normalText}
-                numberOfLines={isDescriptionExpanded ? undefined : 3}
-              >
-                {event?.description || 'No description provided.'}
-              </Text>
-              {event?.description?.length > 120 && ( // Show toggle only if long enough
-                <TouchableOpacity
-                  onPress={() =>
-                    setIsDescriptionExpanded(!isDescriptionExpanded)
-                  }
-                >
-                  <Text style={styles.linkText}>
-                    {isDescriptionExpanded ? 'Show Less' : 'Show More'}
+              {isCreator && isEditingEvent ? (
+                <>
+                  <TextInput
+                    style={[styles.modalInput, styles.modalTextarea]}
+                    multiline
+                    value={editDescription}
+                    onChangeText={setEditDescription}
+                    placeholder='Share what attendees should know'
+                    placeholderTextColor='#9CA3AF'
+                  />
+                  <Text style={styles.editInfoNotice}>
+                    Update details attendees see about this event.
                   </Text>
-                </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={styles.normalText}
+                    numberOfLines={isDescriptionExpanded ? undefined : 3}
+                  >
+                    {event?.description || 'No description provided.'}
+                  </Text>
+                  {event?.description?.length > 120 && ( // Show toggle only if long enough
+                    <TouchableOpacity
+                      onPress={() =>
+                        setIsDescriptionExpanded(!isDescriptionExpanded)
+                      }
+                    >
+                      <Text style={styles.linkText}>
+                        {isDescriptionExpanded ? 'Show Less' : 'Show More'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
               )}
             </View>
 
             {/* Attendees */}
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Attendees</Text>
-              <FlatList
-                data={attendees.slice(0, 10)}
+              <ScrollView
                 horizontal
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.attendeeScrollContent}
+              >
+                {attendees.slice(0, 10).map((item) => (
                   <TouchableOpacity
-                    style={{ alignItems: 'center', marginRight: 12 }}
+                    key={item.id}
+                    style={styles.attendeePill}
                     onPress={() => {
                       setIsModalVisible(false);
-                      navigation.navigate('OtherUserProfile', {
-                        userId: item.id,
-                      });
+                      if (item?.id) navigateToOtherUserProfile(item.id);
                     }}
                     onLongPress={() => openAttendeeOptions(item)}
                     delayLongPress={350}
@@ -1217,9 +1532,8 @@ const EventChatScreen = () => {
                       {item.displayName?.split(' ')[0]}
                     </Text>
                   </TouchableOpacity>
-                )}
-                showsHorizontalScrollIndicator={false}
-              />
+                ))}
+              </ScrollView>
 
               {attendees.length > 10 && (
                 <TouchableOpacity
@@ -1247,9 +1561,8 @@ const EventChatScreen = () => {
                       style={styles.requestItem}
                       onPress={() => {
                         setIsModalVisible(false);
-                        navigation.navigate('OtherUserProfile', {
-                          userId: requester.userId,
-                        });
+                        if (requester?.userId)
+                          navigateToOtherUserProfile(requester.userId);
                       }}
                     >
                       <Image
@@ -1293,6 +1606,44 @@ const EventChatScreen = () => {
             )}
 
             {/* Actions */}
+            {isCreator && (
+              <View style={styles.editActionsContainer}>
+                {isEditingEvent ? (
+                  <>
+                    <TouchableOpacity
+                      style={[
+                        styles.editPrimaryButton,
+                        isSavingEvent && { opacity: 0.7 },
+                      ]}
+                      onPress={handleSaveEventEdits}
+                      disabled={isSavingEvent}
+                    >
+                      {isSavingEvent ? (
+                        <ActivityIndicator color='#fff' />
+                      ) : (
+                        <Text style={styles.editPrimaryButtonText}>
+                          Save Changes
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.editSecondaryButton}
+                      onPress={handleCancelEdit}
+                      disabled={isSavingEvent}
+                    >
+                      <Text style={styles.editSecondaryButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.editPrimaryButton}
+                    onPress={handleStartEdit}
+                  >
+                    <Text style={styles.editPrimaryButtonText}>Edit Event</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
             <TouchableOpacity
               style={styles.leaveButton}
               onPress={() => {
@@ -1365,6 +1716,14 @@ const EventChatScreen = () => {
             </TouchableOpacity>
           </ScrollView>
         </Modal>
+
+        <DateTimePickerModal
+          isVisible={isEditDatePickerVisible}
+          mode='datetime'
+          onConfirm={handleEditDateConfirm}
+          onCancel={() => setIsEditDatePickerVisible(false)}
+          date={editDate || toDateOrNull(event?.date) || new Date()}
+        />
 
         {/* Report Modal */}
         <ReportModal
@@ -1447,7 +1806,8 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: '95%', // Slightly taller & allow internal padding to show last button
+    maxHeight: '100%', // Slightly taller & allow internal padding to show last button
+    overflow: 'visible',
   },
   card: {
     backgroundColor: '#fff',
@@ -1458,6 +1818,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    position: 'relative',
+  },
+  cardEditing: {
+    marginBottom: 20,
+    zIndex: 20,
+    overflow: 'visible',
+    position: 'relative',
   },
   cardTitle: { fontSize: 20, fontWeight: 'bold' },
   sectionTitle: { fontWeight: 'bold', fontSize: 16, marginBottom: 4 },
@@ -1468,12 +1835,128 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  dateText: { flex: 1, marginRight: 12 },
+  calendarButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+    backgroundColor: '#fff',
+    color: '#111827',
+  },
+  modalTextarea: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  editInfoNotice: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  editActionsContainer: {
+    marginBottom: 16,
+  },
+  editPrimaryButton: {
+    backgroundColor: '#2563EB',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  editPrimaryButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  editSecondaryButton: {
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  editSecondaryButtonText: {
+    color: '#2563EB',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  editDateButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editDateButtonText: {
+    color: '#2563EB',
+    fontWeight: '600',
+    fontSize: 15,
+    marginLeft: 8,
+  },
+  autocompleteWrapper: {
+    marginTop: 12,
+    marginBottom: 4,
+    position: 'relative',
+    zIndex: 20,
+  },
+  autocompleteContainer: {
+    flex: 0,
+    width: '100%',
+    zIndex: 20,
+  },
+  autocompleteList: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginTop: 4,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 4 },
+    maxHeight: 220,
+    position: 'absolute',
+    top: 52,
+    width: '100%',
+    zIndex: 30,
+  },
+  autocompleteRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  autocompleteSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E5E7EB',
+  },
+  autocompleteDescription: {
+    color: '#111827',
+  },
   attendeeImage: {
     width: 50,
     height: 50,
     borderRadius: 15,
     backgroundColor: '#eee',
     marginBottom: 4,
+  },
+  attendeePill: {
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  attendeeScrollContent: {
+    paddingVertical: 4,
   },
   attendeeName: { fontSize: 12, color: '#333' },
   leaveButton: {

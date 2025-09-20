@@ -18,8 +18,8 @@ import MapScreen from '../features/events/MapScreen';
 import DiscoveryScreen from '../features/events/DiscoveryScreen';
 import MyCircle from '../features/events/MyCircle';
 import EventChatScreen from '../features/chat/EventChatScreen';
+import InterestPostScreen from '../features/interestPosts/InterestPostScreen';
 import NotificationScreen from '../features/notifications/NotificationScreen';
-import EventDetails from '../features/events/EventDetails';
 import ConfirmationScreen from '../features/events/ConfirmationScreen';
 import ManageInterestsScreen from '../features/profile/ManageInterestsScreen';
 import PrivacyInfoScreen from '../features/profile/PrivacyInfoScreen';
@@ -262,18 +262,13 @@ function RootStackScreen() {
         options={{ headerShown: false, title: 'Event Chat' }}
       />
       <RootStack.Screen
-        name='OtherUserProfile'
-        component={OtherUserProfileScreen}
-        options={{ headerShown: false, title: 'Profile' }}
-      />
-      <RootStack.Screen
         name='Notifications'
         component={NotificationScreen}
         options={{ headerShown: false, title: 'Notifications' }}
       />
       <RootStack.Screen
-        name='EventDetails'
-        component={EventDetails}
+        name='InterestPost'
+        component={InterestPostScreen}
         options={{ headerShown: false }}
       />
       <RootStack.Screen

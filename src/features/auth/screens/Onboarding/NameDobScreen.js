@@ -16,6 +16,7 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Timestamp, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../../firebase/config';
 import { useUserStore } from '../../../../features/profile/userStore';
+import { logOnboardingStepComplete } from '../../../../services/onboardingAnalytics';
 
 export default function NameDobScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
@@ -99,6 +100,7 @@ export default function NameDobScreen({ navigation }) {
         lastName,
         dob: Timestamp.fromDate(dob),
       });
+      await logOnboardingStepComplete('name_dob');
       navigation.reset({ index: 0, routes: [{ name: 'Sex' }] });
     } catch (e) {
       setError(e.message);

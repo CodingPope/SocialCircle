@@ -17,6 +17,23 @@ service cloud.firestore {
       return isOwner(uid) && (sub in ['profileviews']);
     }
 
+    function userInterestList(uid) {
+      let interests = get(/databases/$(database)/documents/users/$(uid)).data.interests;
+      return interests is list ? interests : [];
+    }
+
+    function userHasInterest(uid, interestId) {
+      return interestId is string && interestId != '' && userInterestList(uid).hasAny([interestId]);
+    }
+
+    function validPostContent(text) {
+      return text is string && text.size() > 0 && text.size() <= 2000;
+    }
+
+    function validCommentBody(text) {
+      return text is string && text.size() > 0 && text.size() <= 500;
+    }
+
     // Helpers for safe list ops
     function asList(x) { return x is list ? x : []; }
     function listSize(x) { return (x is list) ? x.size() : 0; }
@@ -95,6 +112,65 @@ service cloud.firestore {
           listHasAll(asList(request.resource.data.requests), [request.auth.uid])
         )
       );
+    }
+
+    match /interestPosts/{postId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn() &&
+        request.auth.uid == request.resource.data.creatorId &&
+        validPostContent(request.resource.data.content) &&
+        userHasInterest(request.auth.uid, request.resource.data.interestId) &&
+        request.resource.data.commentCount == 0 &&
+        request.resource.data.likeCount == 0 &&
+        request.resource.data.isDeleted == false;
+
+      allow update: if signedIn() && (
+        (
+          request.auth.uid == resource.data.creatorId &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'content',
+            'mediaUrl',
+            'mediaThumbnailUrl',
+            'mediaStoragePath',
+            'mediaWidth',
+            'mediaHeight',
+            'mediaType',
+            'updatedAt',
+            'isDeleted',
+            'deletedAt',
+          ]) &&
+          validPostContent(request.resource.data.content)
+        ) ||
+        (
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'commentCount',
+            'updatedAt',
+          ]) &&
+          request.resource.data.commentCount >= 0 &&
+          (
+            request.resource.data.commentCount == resource.data.commentCount + 1 ||
+            request.resource.data.commentCount == resource.data.commentCount - 1
+          )
+        )
+      );
+
+      allow delete: if signedIn() && request.auth.uid == resource.data.creatorId;
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn() &&
+          request.auth.uid == request.resource.data.authorId &&
+          validCommentBody(request.resource.data.body);
+        allow update: if signedIn() &&
+          request.auth.uid == resource.data.authorId &&
+          request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            'deleted',
+            'deletedAt',
+          ]) &&
+          request.resource.data.deleted == true;
+        allow delete: if false;
+      }
     }
 
     match /chats/{eventId} {

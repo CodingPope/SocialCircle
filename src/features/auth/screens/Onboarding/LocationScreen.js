@@ -17,6 +17,7 @@ import {
 import { doc, updateDoc } from 'firebase/firestore';
 import { useUserStore } from '../../../profile/userStore';
 import { db } from '../../../../firebase/config';
+import { logOnboardingStepComplete } from '../../../../services/onboardingAnalytics';
 import { geohashForLocation } from 'geofire-common';
 
 export default function LocationScreen({ navigation }) {
@@ -81,6 +82,10 @@ export default function LocationScreen({ navigation }) {
         longitude: loc.coords.longitude,
       };
       await saveLocation({ coords });
+      await logOnboardingStepComplete('location', {
+        method: 'gps_prompt',
+        granted: true,
+      });
       // Navigate to next onboarding screen
       navigation.replace('InterestsScreen');
     } catch (err) {
@@ -142,6 +147,10 @@ export default function LocationScreen({ navigation }) {
       await saveLocation({
         coords: { latitude: loc.lat, longitude: loc.lng, from: 'manual' },
         city: resolvedCity || undefined,
+      });
+      await logOnboardingStepComplete('location', {
+        method: 'manual_entry',
+        granted: true,
       });
 
       // Optionally store the postal code as well

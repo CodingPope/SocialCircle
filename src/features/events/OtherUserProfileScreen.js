@@ -43,7 +43,30 @@ import { useUserStore } from '../profile/userStore';
 import { useUserSnippetStore } from '../profile/userSnippetStore';
 import PopupMenu from './PopupMenu';
 import PostCard from './PostCard';
+import InterestPostCard from '../interestPosts/InterestPostCard';
+import { fetchInterestPostsByCreator } from '../interestPosts/interestPostService';
 import { trackShareEvent, trackReportContent } from '../../lib/analytics';
+
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return 0;
+}
+
+function getTimelineTimestamp(item) {
+  if (!item) return 0;
+  if (item.type === 'post') return toMillis(item.post?.createdAt);
+  if (item.type === 'event')
+    return (
+      toMillis(item.event?.createdAt) ||
+      toMillis(item.event?.date) ||
+      toMillis(item.event?.startAt)
+    );
+  return 0;
+}
 
 function mergeUniqueEvents(...eventArrays) {
   const map = new Map();
@@ -67,6 +90,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     attending: [],
     attended: [],
   });
+  const [interestPosts, setInterestPosts] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [hostMap, setHostMap] = useState({}); // Map of ownerId -> user info
   // Description: Get current user from Zustand userStore
@@ -210,7 +234,23 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       const attending = mergeUniqueEvents(attendingIds, attendingByQuery);
       const attended = mergeUniqueEvents(attendedIds);
 
+      let timelinePosts = [];
+      try {
+        const postsResult = await fetchInterestPostsByCreator({
+          creatorId: userId,
+          pageSize: 50,
+        });
+        timelinePosts = Array.isArray(postsResult?.posts)
+          ? postsResult.posts
+          : Array.isArray(postsResult)
+          ? postsResult
+          : [];
+      } catch (err) {
+        console.warn('Failed to load interest posts for other user', err);
+      }
+
       setUserEvents({ created, attending, attended });
+      setInterestPosts(timelinePosts.filter((post) => post?.isDeleted !== true));
 
       // --- Batch fetch all unique ownerIds for host info ---
       const allEvents = [...created, ...attending, ...attended];
@@ -351,6 +391,27 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   });
 
   const visibleEvents = filteredEvents.slice(0, visibleCount);
+
+  const timelineItems = useMemo(() => {
+    const eventItems = visibleEvents.map((event) => ({
+      type: 'event',
+      id: `event-${event.id}`,
+      event,
+    }));
+    const postItems = (interestPosts || []).slice(0, 25).map((post) => ({
+      type: 'post',
+      id: `post-${post.id}`,
+      post,
+    }));
+    const seen = new Set();
+    return [...eventItems, ...postItems]
+      .filter((item) => {
+        if (!item.id || seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .sort((a, b) => getTimelineTimestamp(b) - getTimelineTimestamp(a));
+  }, [visibleEvents, interestPosts]);
 
   const handleFollow = async () => {
     if (!currentUser || !user || currentUser.uid === userId) return;
@@ -680,14 +741,36 @@ export default function OtherUserProfileScreen({ route, navigation }) {
 
         {/* Events */}
         <View style={styles.timelineHeader}>
-          <Text style={styles.timelineTitle}>{fullName}'s Events</Text>
+          <Text style={styles.timelineTitle}>{fullName}'s Timeline</Text>
         </View>
         {loadingEvents ? (
           <Text style={{ textAlign: 'center', marginTop: 20 }}>
-            Loading events...
+            Loading timeline...
           </Text>
         ) : (
-          visibleEvents.map((event) => {
+          timelineItems.map((item) => {
+            if (item.type === 'post') {
+              return (
+                <InterestPostCard
+                  key={item.id}
+                  post={item.post}
+                  enableInlineComposer={false}
+                  onPress={() =>
+                    navigation.navigate('InterestPost', {
+                      postId: item.post.id,
+                      initialPost: item.post,
+                    })
+                  }
+                  onDeleted={(postId) =>
+                    setInterestPosts((prev) =>
+                      prev.filter((post) => post.id !== postId)
+                    )
+                  }
+                />
+              );
+            }
+
+            const event = item.event;
             // Description: Always show the actual event creator's info (name, image, rating)
             const ownerId = event.ownerId;
             const host = ownerId && hostMap[ownerId] ? hostMap[ownerId] : null;
@@ -723,9 +806,9 @@ export default function OtherUserProfileScreen({ route, navigation }) {
             const handleEventPress = (...args) => {
               if (eventWithHost.isDeleted) return;
               const uid = currentUser?.uid;
-              const dest = args?.[1]; // PostCard passes 'EventChatScreen' when RSVP flow succeeds
+              const dest = args?.[1]; // PostCard passes 'EventChat' when RSVP flow succeeds
 
-              if (dest === 'EventChatScreen') {
+              if (dest === 'EventChat') {
                 // RSVP succeeded -> go to chat
                 navigation.navigate('EventChat', {
                   eventId: eventWithHost.id,
@@ -756,7 +839,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
 
             return (
               <PostCard
-                key={event.id}
+                key={item.id}
                 event={eventWithHost}
                 onPress={handleEventPress}
                 onJoinPress={handleJoinPress}

@@ -49,10 +49,33 @@ import {
   arrayRemove,
 } from 'firebase/firestore';
 import PostCard from './PostCard';
+import InterestPostCard from '../interestPosts/InterestPostCard';
+import { fetchInterestPostsByCreator } from '../interestPosts/interestPostService';
 import ActionModals from '../profile/ActionModals';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useUserSnippetStore } from '../profile/userSnippetStore';
 import { trackReportContent } from '../../lib/analytics';
+
+function toMillis(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return 0;
+}
+
+function getTimelineTimestamp(item) {
+  if (!item) return 0;
+  if (item.type === 'post') return toMillis(item.post?.createdAt);
+  if (item.type === 'event')
+    return (
+      toMillis(item.event?.createdAt) ||
+      toMillis(item.event?.date) ||
+      toMillis(item.event?.startAt)
+    );
+  return 0;
+}
 
 // Helper: Merge unique events and sort by startAt descending
 function mergeUniqueEvents(...eventArrays) {
@@ -225,6 +248,7 @@ export default function ProfileScreen({ navigation }) {
     attending: [],
     attended: [],
   });
+  const [interestPosts, setInterestPosts] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [groupEvents, setGroupEvents] = useState([]);
   const EVENTS_PAGE_SIZE = 10;
@@ -423,6 +447,21 @@ export default function ProfileScreen({ navigation }) {
       setEnhancedEvents(
         mergeUniqueEvents(created, attending, attended, groupEvents)
       );
+
+      try {
+        const postsResult = await fetchInterestPostsByCreator({
+          creatorId: user.uid,
+          pageSize: 50,
+        });
+        const timelinePosts = Array.isArray(postsResult?.posts)
+          ? postsResult.posts
+          : Array.isArray(postsResult)
+          ? postsResult
+          : [];
+        setInterestPosts(timelinePosts.filter((post) => post?.isDeleted !== true));
+      } catch (err) {
+        console.warn('Failed to refresh interest posts', err);
+      }
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -529,7 +568,24 @@ export default function ProfileScreen({ navigation }) {
       const attending = mergeUniqueEvents(attendingIds, attendingByQuery);
       const attended = mergeUniqueEvents(attendedIds);
 
+      let creatorPosts = [];
+      try {
+        const postsResult = await fetchInterestPostsByCreator({
+          creatorId: user.uid,
+          pageSize: 50,
+        });
+        creatorPosts = Array.isArray(postsResult?.posts)
+          ? postsResult.posts
+          : Array.isArray(postsResult)
+          ? postsResult
+          : [];
+      } catch (err) {
+        console.warn('Failed to load interest posts for profile timeline', err);
+      }
+
       if (isMounted) setUserEvents({ created, attending, attended });
+      if (isMounted)
+        setInterestPosts(creatorPosts.filter((post) => post?.isDeleted !== true));
       if (isMounted) setLoadingEvents(false);
     }
     fetchUserEvents();
@@ -590,6 +646,34 @@ export default function ProfileScreen({ navigation }) {
     () => visibleEvents.map((e) => e.id).join('|'),
     [visibleEvents]
   );
+
+  const timelineItems = useMemo(() => {
+    if (selectedTab === 'Current') {
+      return (enhancedEvents || []).map((event) => ({
+        type: 'event',
+        id: `event-${event.id}`,
+        event,
+      }));
+    }
+    const eventItems = (enhancedEvents || []).map((event) => ({
+      type: 'event',
+      id: `event-${event.id}`,
+      event,
+    }));
+    const postItems = (interestPosts || []).slice(0, 25).map((post) => ({
+      type: 'post',
+      id: `post-${post.id}`,
+      post,
+    }));
+    const seen = new Set();
+    return [...eventItems, ...postItems]
+      .filter((item) => {
+        if (!item.id || seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      })
+      .sort((a, b) => getTimelineTimestamp(b) - getTimelineTimestamp(a));
+  }, [selectedTab, enhancedEvents, interestPosts]);
 
   useEffect(() => {
     const enhanceEventData = async () => {
@@ -814,7 +898,7 @@ export default function ProfileScreen({ navigation }) {
           eventData.attendees.includes(uid));
 
       // If explicitly coming from RSVP success, go straight to chat
-      if (opts?.source === 'EventChatScreen') {
+      if (opts?.source === 'EventChat') {
         navigation.navigate('EventChat', { eventId });
         return;
       }
@@ -1132,7 +1216,7 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.timelineTitle}>
             {selectedTab === 'Current'
               ? 'Your Current Events'
-              : 'Your Event Timeline'}
+              : 'Your Timeline'}
           </Text>
           {selectedTab === 'Current' && (
             <Text style={{ color: '#666', marginTop: 4 }}>
@@ -1142,36 +1226,59 @@ export default function ProfileScreen({ navigation }) {
         </View>
         {loadingEvents ? (
           <Text style={{ textAlign: 'center', marginTop: 20 }}>
-            Loading events...
+            Loading timeline...
           </Text>
         ) : (
-          enhancedEvents.map((event) => {
+          timelineItems.map((item) => {
+            if (item.type === 'post') {
+              return (
+                <InterestPostCard
+                  key={item.id}
+                  post={item.post}
+                  enableInlineComposer={false}
+                  onPress={() =>
+                    navigation.navigate('InterestPost', {
+                      postId: item.post.id,
+                      initialPost: item.post,
+                    })
+                  }
+                  onDeleted={(postId) =>
+                    setInterestPosts((prev) =>
+                      prev.filter((post) => post.id !== postId)
+                    )
+                  }
+                />
+              );
+            }
+
+            const event = item.event;
             const now = new Date();
-            const isPastEvent = event.date?.seconds
+            const isPastEvent = event?.date?.seconds
               ? new Date(event.date.seconds * 1000) < now
               : false;
             const role = isPastEvent
-              ? user.createdEvents?.includes(event.id)
+              ? user?.createdEvents?.includes(event.id)
                 ? 'Hosted'
                 : 'Attended'
-              : user.createdEvents?.includes(event.id)
+              : user?.createdEvents?.includes(event.id)
               ? 'Hosting'
               : 'Attending';
+
             return (
               <PostCard
-                key={event.id}
+                key={item.id}
                 event={{
                   ...event,
                   role,
-                  address: event.address,
-                  location: event.location,
-                  formattedDate: event.formattedDate,
+                  address: event?.address,
+                  location: event?.location,
+                  formattedDate: event?.formattedDate,
                 }}
                 onPress={(e, dest) =>
                   handleEventClick(e.id, {
                     source:
-                      dest === 'EventChatScreen'
-                        ? 'EventChatScreen'
+                      dest === 'EventChat'
+                        ? 'EventChat'
                         : undefined,
                   })
                 }

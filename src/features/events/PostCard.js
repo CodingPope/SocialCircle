@@ -11,8 +11,8 @@ import {
   Image,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import AttendeeBubbleRow from './AttendeeBubbleRow';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -42,9 +42,13 @@ export default function PostCard({ event, onPress, onJoinPress }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const pulseTimeoutRef = useRef(null);
+  const joinFeedbackTimeoutRef = useRef(null);
+  const lastJoinMessageRef = useRef(null);
 
   // Track local requested state for immediate UI feedback on RSVP requests
   const [requestedLocal, setRequestedLocal] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinFeedback, setJoinFeedback] = useState(null);
 
   // Derived: soft-delete and expiry checks to control UI (fix ReferenceError)
   const isSoftDeleted = event?.isDeleted === true;
@@ -71,6 +75,41 @@ export default function PostCard({ event, onPress, onJoinPress }) {
       useNativeDriver: true,
     }).start();
   }, [fadeAnim]);
+
+  useEffect(() => {
+    return () => {
+      if (joinFeedbackTimeoutRef.current) {
+        clearTimeout(joinFeedbackTimeoutRef.current);
+        joinFeedbackTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const showJoinFeedback = useCallback((payload) => {
+    const normalized =
+      typeof payload === 'string'
+        ? { message: payload, tone: 'info' }
+        : payload && typeof payload === 'object'
+        ? {
+            message: payload.message || '',
+            tone: payload.tone || 'info',
+          }
+        : null;
+
+    if (!normalized || !normalized.message) return;
+
+    if (joinFeedbackTimeoutRef.current) {
+      clearTimeout(joinFeedbackTimeoutRef.current);
+      joinFeedbackTimeoutRef.current = null;
+    }
+
+    setJoinFeedback(normalized);
+
+    joinFeedbackTimeoutRef.current = setTimeout(() => {
+      setJoinFeedback(null);
+      joinFeedbackTimeoutRef.current = null;
+    }, 3500);
+  }, []);
 
   // Description: Memoized owner check
   const isOwner = useMemo(
@@ -235,29 +274,91 @@ export default function PostCard({ event, onPress, onJoinPress }) {
 
   // Description: Join event handler (unified)
   const handleJoin = useCallback(async () => {
-    if (!user || !event?.id) return;
+    if (!user || !event?.id || joinLoading) return;
 
-    const onShowMessage = (msg) => msg && alert(msg);
+    setJoinLoading(true);
+    lastJoinMessageRef.current = null;
 
-    const res = await joinEvent({
-      event,
-      user,
-      // Use helper navigation for joined; don't pass navigation here
-      navigation: null,
-      stores: { eventStore: useEventStore.getState() },
-      options: { onShowMessage },
-    });
+    try {
+      const res = await joinEvent({
+        event,
+        user,
+        // Use helper navigation for joined; don't pass navigation here
+        navigation: null,
+        stores: { eventStore: useEventStore.getState() },
+        options: {
+          onShowMessage: (msg) => {
+            if (typeof msg === 'string') {
+              lastJoinMessageRef.current = msg;
+            }
+          },
+        },
+      });
 
-    // If owner or already-attending, open chat using onPress contract
-    if (res?.status === 'owner' || res?.status === 'already-attending') {
-      onPress?.(event, 'EventChatScreen');
+      const capturedMessage = lastJoinMessageRef.current;
+      lastJoinMessageRef.current = null;
+      let handledFeedback = false;
+
+      if (res?.status === 'owner') {
+        showJoinFeedback({
+          message: 'You host this event. Jump into the chat to manage it.',
+          tone: 'info',
+        });
+        onPress?.(event, 'EventChat');
+        handledFeedback = true;
+      } else if (res?.status === 'already-attending') {
+        showJoinFeedback({
+          message: 'You are already on the attendee list.',
+          tone: 'info',
+        });
+        onPress?.(event, 'EventChat');
+        handledFeedback = true;
+      } else if (res?.status === 'joined') {
+        showJoinFeedback({
+          message: "You're in! Opening the chat...",
+          tone: 'success',
+        });
+        handledFeedback = true;
+      } else if (res?.status === 'requested') {
+        setRequestedLocal(true);
+        showJoinFeedback({
+          message: 'Request sent. We will notify you once the host responds.',
+          tone: 'success',
+        });
+        handledFeedback = true;
+      } else if (res?.status === 'waitlisted') {
+        showJoinFeedback({
+          message:
+            capturedMessage ||
+            'Added to the waitlist. We will reach out if a spot opens.',
+          tone: 'info',
+        });
+        handledFeedback = true;
+      }
+
+      if (!handledFeedback) {
+        const fallbackMessage =
+          capturedMessage || res?.message || 'Action completed.';
+        if (fallbackMessage) {
+          showJoinFeedback({
+            message: fallbackMessage,
+            tone:
+              res?.status === 'error' || res?.status === 'denied'
+                ? 'error'
+                : 'info',
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[PostCard] join failed:', err);
+      showJoinFeedback({
+        message: err?.message || 'Join failed. Please try again.',
+        tone: 'error',
+      });
+    } finally {
+      setJoinLoading(false);
     }
-
-    // Reflect local requested/requested UI quickly
-    if (res?.status === 'requested') {
-      setRequestedLocal(true);
-    }
-  }, [event, user, onPress]);
+  }, [event, user, joinLoading, onPress, showJoinFeedback]);
 
   // Description: Memoized derived values
   const attendeesCount = useMemo(
@@ -403,6 +504,9 @@ export default function PostCard({ event, onPress, onJoinPress }) {
   // Members stay enabled to open chat even in read-only
   const joinDisabled =
     (privacy === 'rsvp' && hasRequested) || (!isMember && isReadOnly);
+  const buttonDisabled = joinDisabled || joinLoading;
+  const showDisabledStyle =
+    buttonDisabled || (isMember && isReadOnly && !joinLoading);
 
   return (
     <Animated.View
@@ -517,24 +621,38 @@ export default function PostCard({ event, onPress, onJoinPress }) {
             <TouchableOpacity
               style={[
                 styles.joinButton,
-                (joinDisabled || (isMember && isReadOnly)) &&
-                  styles.joinButtonDisabled,
+                showDisabledStyle && styles.joinButtonDisabled,
               ]}
               onPress={handleJoin}
-              disabled={joinDisabled}
+              disabled={buttonDisabled}
             >
-              <Text
-                style={[
-                  styles.joinText,
-                  (joinDisabled || (isMember && isReadOnly)) &&
-                    styles.joinTextDisabled,
-                ]}
-              >
-                {buttonLabel}
-              </Text>
+              {joinLoading ? (
+                <ActivityIndicator size='small' color='#ffffff' />
+              ) : (
+                <Text
+                  style={[
+                    styles.joinText,
+                    showDisabledStyle && styles.joinTextDisabled,
+                  ]}
+                >
+                  {buttonLabel}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
+
+        {joinFeedback && (
+          <View
+            style={[
+              styles.joinFeedbackContainer,
+              joinFeedback.tone === 'error' && styles.joinFeedbackError,
+              joinFeedback.tone === 'success' && styles.joinFeedbackSuccess,
+            ]}
+          >
+            <Text style={styles.joinFeedbackText}>{joinFeedback.message}</Text>
+          </View>
+        )}
 
         {menuVisible && (
           <PopupMenu
@@ -705,5 +823,25 @@ const styles = StyleSheet.create({
   },
   joinTextDisabled: {
     color: '#f2f2f2',
+  },
+  joinFeedbackContainer: {
+    marginHorizontal: 14,
+    marginTop: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#E8F1FF',
+  },
+  joinFeedbackSuccess: {
+    backgroundColor: '#E4F7E7',
+  },
+  joinFeedbackError: {
+    backgroundColor: '#FDE8E8',
+  },
+  joinFeedbackText: {
+    textAlign: 'center',
+    color: '#1F2937',
+    fontSize: 13,
+    fontWeight: '500',
   },
 });

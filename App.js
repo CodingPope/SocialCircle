@@ -1,11 +1,11 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef } from './src/navigation/RootNavigation';
 import { useUserStore } from './src/features/profile/userStore';
 import { db } from './src/firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
 import { initPushForUser } from './src/features/notifications/services/pushService';
@@ -22,14 +22,19 @@ import {
 // Initialize error reporting once at module load to capture early errors
 // Sentry temporarily disabled until __extends error is resolved
 import LoadingOverlay from './src/components/ui/LoadingOverlay'; // Added LoadingOverlay import
+import AnalyticsConsentPrompt from './src/components/analytics/AnalyticsConsentPrompt';
+import { recordDailySessionHeartbeat } from './src/services/sessionHeartbeat';
 console.log('Sentry initialization disabled - troubleshooting __extends error');
 
 function AppContent() {
   // Description: Get user from Zustand store
   const user = useUserStore((state) => state.user);
+  const storeLoading = useUserStore((state) => state.loading);
   const [profileComplete, setProfileComplete] = useState(false);
   const [checking, setChecking] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(null);
+  const [showAnalyticsPrompt, setShowAnalyticsPrompt] = useState(false);
+  const [consentBusy, setConsentBusy] = useState(false);
   // Import onboarding router utility
   const { getNextOnboardingStep } = require('./src/utils/onboardingRouter');
 
@@ -113,26 +118,88 @@ function AppContent() {
     check();
   }, [user]);
 
-  if (checking) {
-    return <LoadingOverlay visible={true} />;
-  }
-  if (user && onboardingStep) {
-    return (
-      <NavigationContainer ref={navigationRef}>
-        <AppNavigator
-          user={user}
-          profileComplete={false}
-          initialOnboardingStep={onboardingStep}
-        />
-      </NavigationContainer>
-    );
-  }
+  useEffect(() => {
+    if (!user?.uid) {
+      setShowAnalyticsPrompt(false);
+      return;
+    }
+    const hasDecision = typeof user?.analyticsOptIn === 'boolean';
+    const alreadyPrompted = !!user?.analyticsPromptedAt;
+    if (!hasDecision && !alreadyPrompted) {
+      setShowAnalyticsPrompt(true);
+    } else {
+      setShowAnalyticsPrompt(false);
+    }
+  }, [user?.uid, user?.analyticsOptIn, user?.analyticsPromptedAt]);
 
-  // If profile is complete, show main app
-  return (
+  const persistAnalyticsChoice = useCallback(
+    async (accepted) => {
+      if (!user?.uid) return;
+      setConsentBusy(true);
+      const now = new Date();
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          analyticsOptIn: !!accepted,
+          analyticsUpdatedAt: now,
+          analyticsPromptedAt: now,
+          analyticsConsentVersion: 1,
+        });
+      } catch (err) {
+        console.error('Failed to persist analytics consent', err);
+      } finally {
+        setConsentBusy(false);
+        setShowAnalyticsPrompt(false);
+      }
+      try {
+        await analyticsSetOptIn(!!accepted);
+      } catch {}
+    },
+    [user?.uid]
+  );
+
+  const showLoadingOverlay = storeLoading || checking;
+
+  useEffect(() => {
+    if (user?.uid) {
+      recordDailySessionHeartbeat(user);
+    }
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const handleAppStateChange = (nextState) => {
+      if (nextState === 'active' && user?.uid) {
+        recordDailySessionHeartbeat(user);
+      }
+    };
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [user?.uid]);
+
+  const navigator = user && onboardingStep ? (
+    <NavigationContainer ref={navigationRef}>
+      <AppNavigator
+        user={user}
+        profileComplete={false}
+        initialOnboardingStep={onboardingStep}
+      />
+    </NavigationContainer>
+  ) : (
     <NavigationContainer ref={navigationRef}>
       <AppNavigator user={user} profileComplete={profileComplete} />
     </NavigationContainer>
+  );
+
+  return (
+    <>
+      {navigator}
+      <LoadingOverlay visible={showLoadingOverlay} />
+      <AnalyticsConsentPrompt
+        visible={showAnalyticsPrompt}
+        busy={consentBusy}
+        onAccept={() => persistAnalyticsChoice(true)}
+        onDecline={() => persistAnalyticsChoice(false)}
+      />
+    </>
   );
 }
 

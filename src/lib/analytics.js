@@ -19,6 +19,9 @@ export const AnalyticsEvents = Object.freeze({
   JOIN_EVENT: 'join_event',
   CHECK_IN: 'check_in', // may be stubbed until feature exists
   REPORT_CONTENT: 'report_content',
+  ONBOARDING_STEP_COMPLETE: 'onboarding_step_complete',
+  ONBOARDING_DONE: 'onboarding_done',
+  SESSION_START: 'session_start',
 });
 
 // Common surfaces and sources for cross-feature consistency
@@ -118,6 +121,18 @@ const EVENT_SCHEMAS = {
   report_content: {
     required: ['content_type', 'content_id', 'reason_category'],
     optional: ['event_id', 'severity', 'surface'], // content_type: event|user|message
+  },
+  onboarding_step_complete: {
+    required: ['step'],
+    optional: ['duration_ms', 'source', 'retry_count'],
+  },
+  onboarding_done: {
+    required: [],
+    optional: ['total_duration_ms', 'steps', 'source'],
+  },
+  session_start: {
+    required: [],
+    optional: ['cadence', 'trigger'],
   },
 };
 
@@ -306,6 +321,22 @@ export function trackReportContent(p) {
   const payload = pickForSchema(AnalyticsEvents.REPORT_CONTENT, p);
   if (!payload) return Promise.resolve();
   return track(AnalyticsEvents.REPORT_CONTENT, payload);
+}
+
+export function trackSessionStart(p = {}) {
+  const payload = pickForSchema(AnalyticsEvents.SESSION_START, p) || {};
+  return track(AnalyticsEvents.SESSION_START, payload);
+}
+
+export function trackOnboardingStepComplete(p) {
+  const payload = pickForSchema(AnalyticsEvents.ONBOARDING_STEP_COMPLETE, p);
+  if (!payload) return Promise.resolve();
+  return track(AnalyticsEvents.ONBOARDING_STEP_COMPLETE, payload);
+}
+
+export function trackOnboardingDone(p = {}) {
+  const payload = pickForSchema(AnalyticsEvents.ONBOARDING_DONE, p) || {};
+  return track(AnalyticsEvents.ONBOARDING_DONE, payload);
 }
 
 // JSDoc: Event semantics and when to fire

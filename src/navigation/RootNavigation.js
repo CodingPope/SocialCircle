@@ -23,9 +23,20 @@ export function resetRoot(routes) {
 
 // Convenience helpers
 export function navigateToOtherUserProfile(userId) {
-  navigate('OtherUserProfile', { userId });
+  if (!userId) return;
+  navigate('MainTabs', {
+    screen: 'ProfileStack',
+    params: {
+      screen: 'OtherUserProfile',
+      params: { userId },
+    },
+  });
 }
 
 export function navigateToEventChat(eventId) {
   navigate('EventChat', { eventId });
+}
+
+export function navigateToInterestPost(postId, initialPost) {
+  navigate('InterestPost', { postId, initialPost });
 }

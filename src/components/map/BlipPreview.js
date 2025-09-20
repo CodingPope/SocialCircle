@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import AttendeeBubbleRow from '../../features/events/AttendeeBubbleRow';
 
@@ -31,6 +32,11 @@ export default function BlipPreview({
   const privacy = (event?.privacy || 'public').toLowerCase();
   const isRSVP =
     privacy === 'rsvp' || privacy === 'private' || privacy === 'approval';
+  const [requestedLocal, setRequestedLocal] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
+  const [joinFeedback, setJoinFeedback] = useState(null);
+  const joinFeedbackTimeoutRef = useRef(null);
+  const lastJoinMessageRef = useRef(null);
 
   // --- Derived membership/request state like EventPopUpCard ---
   const attendees = Array.isArray(event?.attendees) ? event.attendees : [];
@@ -40,8 +46,8 @@ export default function BlipPreview({
   const isAttendee = user?.uid ? attendees.includes(user.uid) : false;
   const isMember = isOwner || isAttendee;
   const hasRequested = user?.uid
-    ? requests.includes(user.uid) && !isMember
-    : false;
+    ? (requests.includes(user.uid) || requestedLocal) && !isMember
+    : requestedLocal && !isMember;
 
   // Button label and disabled
   let buttonLabel = isMember
@@ -52,6 +58,7 @@ export default function BlipPreview({
       : 'RSVP'
     : 'Join';
   const joinDisabled = !isMember && isRSVP && hasRequested; // align with popup minimal rule
+  const buttonDisabled = joinDisabled || joinLoading;
 
   // Derived: attendeesCount
   const attendeesCount =
@@ -125,6 +132,26 @@ export default function BlipPreview({
   }, [appear]);
 
   useEffect(() => {
+    setRequestedLocal(false);
+    setJoinLoading(false);
+    lastJoinMessageRef.current = null;
+    if (joinFeedbackTimeoutRef.current) {
+      clearTimeout(joinFeedbackTimeoutRef.current);
+      joinFeedbackTimeoutRef.current = null;
+    }
+    setJoinFeedback(null);
+  }, [event?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (joinFeedbackTimeoutRef.current) {
+        clearTimeout(joinFeedbackTimeoutRef.current);
+        joinFeedbackTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!happeningNow) return;
     const loop = Animated.loop(
       Animated.sequence([
@@ -143,6 +170,32 @@ export default function BlipPreview({
     loop.start();
     return () => loop.stop();
   }, [pulse, happeningNow]);
+
+  const showJoinFeedback = useCallback((payload) => {
+    const normalized =
+      typeof payload === 'string'
+        ? { message: payload, tone: 'info' }
+        : payload && typeof payload === 'object'
+        ? {
+            message: payload.message || '',
+            tone: payload.tone || 'info',
+          }
+        : null;
+
+    if (!normalized || !normalized.message) return;
+
+    if (joinFeedbackTimeoutRef.current) {
+      clearTimeout(joinFeedbackTimeoutRef.current);
+      joinFeedbackTimeoutRef.current = null;
+    }
+
+    setJoinFeedback(normalized);
+
+    joinFeedbackTimeoutRef.current = setTimeout(() => {
+      setJoinFeedback(null);
+      joinFeedbackTimeoutRef.current = null;
+    }, 3000);
+  }, []);
 
   const animatedStyle = {
     opacity: appear,
@@ -179,6 +232,84 @@ export default function BlipPreview({
       },
     ],
   };
+
+  const handlePrimaryAction = useCallback(() => {
+    if (isMember) {
+      onJoin?.(event);
+      return;
+    }
+
+    const action = isRSVP && !isMember ? onRequest || onJoin : onJoin;
+    if (typeof action !== 'function' || buttonDisabled) return;
+
+    setJoinLoading(true);
+    lastJoinMessageRef.current = null;
+
+    Promise.resolve(
+      action(event, {
+        captureMessage: (msg) => {
+          if (typeof msg === 'string') {
+            lastJoinMessageRef.current = msg;
+          }
+        },
+        onRequested: () => setRequestedLocal(true),
+      })
+    )
+      .then((outcome) => {
+        const payload =
+          outcome && typeof outcome === 'object'
+            ? outcome
+            : outcome != null
+            ? { status: outcome }
+            : null;
+
+        if (payload?.status === 'requested') {
+          setRequestedLocal(true);
+        }
+
+        const inferredMessage =
+          payload?.message ||
+          lastJoinMessageRef.current ||
+          (payload?.status === 'requested'
+            ? 'Request sent. We will notify you once the host responds.'
+            : payload?.status === 'waitlisted'
+            ? 'Added to the waitlist. We will reach out if a spot opens.'
+            : null);
+
+        const tone =
+          payload?.tone ||
+          (payload?.status === 'error' || payload?.status === 'denied'
+            ? 'error'
+            : payload?.status === 'requested'
+            ? 'success'
+            : payload?.status === 'waitlisted'
+            ? 'info'
+            : 'info');
+
+        if (inferredMessage) {
+          showJoinFeedback({ message: inferredMessage, tone });
+        }
+      })
+      .catch((err) => {
+        console.error('[BlipPreview] join failed:', err);
+        showJoinFeedback({
+          message: err?.message || 'Join failed. Please try again.',
+          tone: 'error',
+        });
+      })
+      .finally(() => {
+        lastJoinMessageRef.current = null;
+        setJoinLoading(false);
+      });
+  }, [
+    isMember,
+    onJoin,
+    event,
+    isRSVP,
+    onRequest,
+    buttonDisabled,
+    showJoinFeedback,
+  ]);
 
   return (
     <Animated.View style={[style, styles.wrapper, animatedStyle]}>
@@ -279,9 +410,7 @@ export default function BlipPreview({
             <TouchableOpacity
               onPress={(e) => {
                 e.stopPropagation();
-                if (isMember) onJoin?.(event); // go straight to chat handler
-                else if (isRSVP) onRequest?.(event);
-                else onJoin?.(event);
+                handlePrimaryAction();
               }}
               style={[
                 styles.btn,
@@ -290,12 +419,31 @@ export default function BlipPreview({
                   : isRSVP
                   ? styles.btnRSVP
                   : styles.btnJoin,
+                buttonDisabled && styles.btnDisabled,
               ]}
-              disabled={joinDisabled}
+              disabled={buttonDisabled}
             >
-              <Text style={styles.btnText}>{buttonLabel}</Text>
+              {joinLoading ? (
+                <ActivityIndicator size='small' color='#fff' />
+              ) : (
+                <Text style={styles.btnText}>{buttonLabel}</Text>
+              )}
             </TouchableOpacity>
           </View>
+
+          {joinFeedback && (
+            <View
+              style={[
+                styles.joinFeedbackContainer,
+                joinFeedback.tone === 'success' && styles.joinFeedbackSuccess,
+                joinFeedback.tone === 'error' && styles.joinFeedbackError,
+              ]}
+            >
+              <Text style={styles.joinFeedbackText}>
+                {joinFeedback.message}
+              </Text>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
 
@@ -373,7 +521,27 @@ const styles = StyleSheet.create({
   btnJoin: { backgroundColor: '#10B981' },
   btnRSVP: { backgroundColor: '#3B82F6' },
   btnMember: { backgroundColor: '#6366F1' },
+  btnDisabled: { opacity: 0.6 },
   btnText: { color: '#fff', fontWeight: '800', fontSize: 11 },
+  joinFeedbackContainer: {
+    marginTop: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#E8F1FF',
+    alignSelf: 'flex-start',
+  },
+  joinFeedbackSuccess: {
+    backgroundColor: '#E4F7E7',
+  },
+  joinFeedbackError: {
+    backgroundColor: '#FDE8E8',
+  },
+  joinFeedbackText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
   // Pointer (teardrop) under the card
   pointerContainer: {
     position: 'absolute',

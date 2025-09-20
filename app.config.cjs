@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+
 // app.config.js
 /** @type {import('@expo/config').ExpoConfig} */
 module.exports = ({ config }) => {
@@ -15,6 +18,29 @@ module.exports = ({ config }) => {
   const firebaseMessagingSenderId =
     process.env.FIREBASE_MESSAGING_SENDER_ID || '';
   const firebaseAppId = process.env.FIREBASE_APP_ID || '';
+
+  const iosGoogleServicesFile = './GoogleService-Info.plist';
+  const androidGoogleServicesFile = './android/app/google-services.json';
+  const hasIosGoogleServices = fs.existsSync(
+    path.join(__dirname, 'GoogleService-Info.plist')
+  );
+  const hasAndroidGoogleServices = fs.existsSync(
+    path.join(__dirname, 'android', 'app', 'google-services.json')
+  );
+
+  const firebasePlugins = [];
+  if (hasIosGoogleServices || hasAndroidGoogleServices) {
+    const firebaseAppPluginOptions = {};
+    if (hasIosGoogleServices) {
+      firebaseAppPluginOptions.iosGoogleServicesFile = iosGoogleServicesFile;
+    }
+    if (hasAndroidGoogleServices) {
+      firebaseAppPluginOptions.androidGoogleServicesFile =
+        androidGoogleServicesFile;
+    }
+    firebasePlugins.push(['@react-native-firebase/app', firebaseAppPluginOptions]);
+    firebasePlugins.push('@react-native-firebase/analytics');
+  }
 
   return {
     ...config,
@@ -70,6 +96,7 @@ module.exports = ({ config }) => {
       'expo-calendar',
       'expo-font',
       'expo-asset',
+      ...firebasePlugins,
     ],
     extra: {
       eas: { projectId },
