@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Alert,
   FlatList,
@@ -110,6 +116,14 @@ export default function InterestPostScreen() {
   const [sending, setSending] = useState(false);
   const composerRef = useRef(null);
 
+  // Enable swipe-back gesture (default for stack navigation)
+  useEffect(() => {
+    navigation.setOptions?.({
+      gestureEnabled: true,
+      headerShown: false,
+    });
+  }, [navigation]);
+
   useEffect(() => {
     let isMounted = true;
     async function loadPost() {
@@ -147,13 +161,18 @@ export default function InterestPostScreen() {
         setComments(sorted);
         setPaginationCursor(cursor);
         setPost((prev) =>
-          prev ? { ...prev, commentCount: prev.commentCount || list.length } : prev
+          prev
+            ? { ...prev, commentCount: prev.commentCount || list.length }
+            : prev
         );
       },
     });
     return unsubscribe;
   }, [postId]);
 
+  // ...existing code...
+  // ...existing code...
+  // ...existing code...
   const focusComposer = useCallback(() => {
     try {
       composerRef.current?.focus();
@@ -200,7 +219,10 @@ export default function InterestPostScreen() {
       setComments((prev) => [...normalized, ...prev]);
       setPaginationCursor(cursor);
     } catch (error) {
-      Alert.alert('Unable to load more comments', error?.message || 'Please try again.');
+      Alert.alert(
+        'Unable to load more comments',
+        error?.message || 'Please try again.'
+      );
     } finally {
       setLoadingMore(false);
     }
@@ -230,10 +252,18 @@ export default function InterestPostScreen() {
         await softDeleteComment(postId, comment.id);
         setComments((prev) => prev.filter((c) => c.id !== comment.id));
         setPost((prev) =>
-          prev ? { ...prev, commentCount: Math.max((prev.commentCount || 1) - 1, 0) } : prev
+          prev
+            ? {
+                ...prev,
+                commentCount: Math.max((prev.commentCount || 1) - 1, 0),
+              }
+            : prev
         );
       } catch (error) {
-        Alert.alert('Delete failed', error?.message || 'Unable to remove comment.');
+        Alert.alert(
+          'Delete failed',
+          error?.message || 'Unable to remove comment.'
+        );
       }
     },
     [postId]
@@ -265,10 +295,15 @@ export default function InterestPostScreen() {
         />
         <View style={styles.commentHeaderRow}>
           <Text style={styles.commentHeaderText}>
-            {post?.commentCount ? `${post.commentCount} comments` : 'Start the conversation'}
+            {post?.commentCount
+              ? `${post.commentCount} comments`
+              : 'Start the conversation'}
           </Text>
           {paginationCursor && (
-            <TouchableOpacity onPress={loadOlderComments} disabled={loadingMore}>
+            <TouchableOpacity
+              onPress={loadOlderComments}
+              disabled={loadingMore}
+            >
               <Text style={styles.loadMoreText}>
                 {loadingMore ? 'Loading…' : 'Load older comments'}
               </Text>
@@ -277,10 +312,28 @@ export default function InterestPostScreen() {
         </View>
       </View>
     );
-  }, [post, focusComposer, navigation, paginationCursor, loadOlderComments, loadingMore]);
+  }, [
+    post,
+    focusComposer,
+    navigation,
+    paginationCursor,
+    loadOlderComments,
+    loadingMore,
+  ]);
 
+  // ...existing code...
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+      {/* Top bar with back icon */}
+      <View style={styles.topBar}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+          accessibilityLabel='Go back'
+        >
+          <Ionicons name='chevron-back' size={28} color='#1c1c1e' />
+        </TouchableOpacity>
+      </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
@@ -292,7 +345,9 @@ export default function InterestPostScreen() {
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={header}
           ListEmptyComponent={
-            <Text style={styles.emptyState}>No comments yet. Be the first!</Text>
+            <Text style={styles.emptyState}>
+              No comments yet. Be the first!
+            </Text>
           }
         />
         <View style={styles.composerBar}>
@@ -303,9 +358,13 @@ export default function InterestPostScreen() {
             onChangeText={setComposerText}
             placeholder='Write a comment'
             multiline
+            maxLength={300}
           />
           <TouchableOpacity
-            style={[styles.composerSend, (!composerText.trim() || sending) && styles.composerSendDisabled]}
+            style={[
+              styles.composerSend,
+              (!composerText.trim() || sending) && styles.composerSendDisabled,
+            ]}
             onPress={sendComment}
             disabled={!composerText.trim() || sending}
           >
@@ -319,7 +378,23 @@ export default function InterestPostScreen() {
   );
 }
 
+// ...existing code...
 const styles = StyleSheet.create({
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 52,
+    paddingHorizontal: 8,
+    backgroundColor: '#f2f2f7',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e5ea',
+    zIndex: 10,
+  },
+  backButton: {
+    padding: 8,
+    marginLeft: 2,
+    marginTop: 2,
+  },
   safe: { flex: 1, backgroundColor: '#f2f2f7' },
   flex: { flex: 1 },
   listContent: {

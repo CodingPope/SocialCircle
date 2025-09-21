@@ -13,6 +13,10 @@ service firebase.storage {
         && isImage()
         && maxSize(5 * 1024 * 1024); // 5MB limit
     }
+    //post images
+    match /interest-posts/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
 
     // Event images: event-images/{eventId}/...
     // Host-only writes; allow nested files with {file=**}

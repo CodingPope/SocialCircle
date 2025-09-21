@@ -18,8 +18,11 @@ import { fetchUserInterests } from '../profile/userQueries';
 import { useUserStore } from '../profile/userStore';
 import { event as trackEvent } from '../../services/analytics';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
+import smileDefault from '../../../assets/smileDefault.png';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const MAX_TEXT_LENGTH = 2000;
+const MAX_TEXT_LENGTH = 600;
 
 export default function CreateInterestPostModal({
   visible,
@@ -27,6 +30,7 @@ export default function CreateInterestPostModal({
   onCreated,
 }) {
   const user = useUserStore((state) => state.user);
+  const insets = useSafeAreaInsets();
 
   const [content, setContent] = useState('');
   const [selectedInterest, setSelectedInterest] = useState(null);
@@ -44,11 +48,12 @@ export default function CreateInterestPostModal({
         // Prefer latest server data
         const fetched = await fetchUserInterests();
         if (!mounted) return;
-        const list = Array.isArray(fetched) && fetched.length
-          ? fetched
-          : Array.isArray(user?.interests)
-          ? user.interests
-          : [];
+        const list =
+          Array.isArray(fetched) && fetched.length
+            ? fetched
+            : Array.isArray(user?.interests)
+            ? user.interests
+            : [];
         setInterests(list);
         if (!selectedInterest && list.length) {
           setSelectedInterest(list[0]);
@@ -85,7 +90,8 @@ export default function CreateInterestPostModal({
 
   const handlePickImage = useCallback(async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         return Alert.alert('Permission needed', 'Please allow gallery access.');
       }
@@ -108,6 +114,8 @@ export default function CreateInterestPostModal({
     }
   }, []);
 
+  const handleRemoveMedia = useCallback(() => setMedia(null), []);
+
   const canSubmit = useMemo(() => {
     if (!content.trim()) return false;
     if (!selectedInterest) return false;
@@ -123,6 +131,7 @@ export default function CreateInterestPostModal({
         content: content.trim(),
         interestId: selectedInterest,
         media,
+        creatorId: user?.uid,
       };
       const created = await createInterestPost(payload);
       try {
@@ -139,223 +148,502 @@ export default function CreateInterestPostModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [canSubmit, content, selectedInterest, media, isSubmitting, onCreated, onClose, resetState]);
+  }, [
+    canSubmit,
+    content,
+    selectedInterest,
+    media,
+    isSubmitting,
+    onCreated,
+    onClose,
+    resetState,
+  ]);
 
-  const headerTitle = hasLoadedInterests
-    ? 'Share something with your circle'
-    : 'Loading interests...';
+  const avatarSource = user?.profileImage
+    ? { uri: user.profileImage }
+    : smileDefault;
+
+  const statusLabel = useMemo(() => {
+    if (isSubmitting) return 'Sharing your post…';
+    if (!selectedInterest) return 'Choose an interest to continue';
+    if (!content.trim()) return 'Add a story to share';
+    return 'Ready to share';
+  }, [isSubmitting, selectedInterest, content]);
+
+  const charUsage = content.length / MAX_TEXT_LENGTH;
+  const charColor =
+    charUsage > 0.9 ? '#FF5A5F' : charUsage > 0.75 ? '#F5A623' : '#8E8E93';
 
   return (
     <Modal
       visible={visible}
-      animationType='slide'
+      animationType='fade'
+      transparent
       onRequestClose={onClose}
-      presentationStyle='fullScreen'
     >
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeText}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{headerTitle}</Text>
-          <TouchableOpacity
-            onPress={handleSubmit}
-            disabled={!canSubmit || isSubmitting}
-            style={[styles.postButton, (!canSubmit || isSubmitting) && styles.postButtonDisabled]}
-          >
-            <Text style={styles.postButtonText}>
-              {isSubmitting ? 'Posting…' : 'Post'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView
-          contentContainerStyle={styles.contentContainer}
-          keyboardShouldPersistTaps='handled'
+      <View style={[styles.overlay, { paddingTop: insets.top }]}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-          <Text style={styles.label}>Message</Text>
-          <TextInput
-            value={content}
-            onChangeText={setContent}
-            placeholder='What do you want to share?'
-            multiline
-            style={styles.textInput}
-            maxLength={MAX_TEXT_LENGTH}
-          />
-          <Text style={styles.charCount}>{`${content.length}/${MAX_TEXT_LENGTH}`}</Text>
+          <View style={styles.sheetContainer}>
+            <View
+              style={[
+                styles.sheet,
+                {
+                  paddingBottom: insets.bottom,
+                  paddingTop: 20,
+                },
+              ]}
+            >
+              <View style={styles.sheetHeader}>
+                <View style={styles.identityRow}>
+                  <Image source={avatarSource} style={styles.avatar} />
+                  <View style={styles.identityMeta}>
+                    <Text style={styles.identityName} numberOfLines={1}>
+                      {user?.firstName || user?.lastName
+                        ? `${user?.firstName ?? ''} ${
+                            user?.lastName ?? ''
+                          }`.trim()
+                        : user?.displayName || 'You'}
+                    </Text>
+                    <Text style={styles.identitySubtitle} numberOfLines={1}>
+                      {selectedInterest
+                        ? `Posting to ${selectedInterest}`
+                        : 'Select an interest'}
+                    </Text>
+                  </View>
+                </View>
 
-          <Text style={[styles.label, { marginTop: 16 }]}>Choose an interest</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipsRow}
-          >
-            {interests.map((interest) => {
-              const isActive = interest === selectedInterest;
-              return (
-                <TouchableOpacity
-                  key={interest}
-                  style={[styles.chip, isActive && styles.chipActive]}
-                  onPress={() => setSelectedInterest(interest)}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.interestRail}
                 >
-                  <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
-                    {interest}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-            {!interests.length && (
-              <View style={styles.emptyChip}>
-                <Text style={styles.emptyChipText}>
-                  Add interests in your profile to post.
-                </Text>
+                  {!hasLoadedInterests ? (
+                    <Text style={styles.interestLoading}>
+                      Fetching your interests…
+                    </Text>
+                  ) : (
+                    interests.map((interest) => {
+                      const active = interest === selectedInterest;
+                      return (
+                        <TouchableOpacity
+                          key={interest}
+                          style={[
+                            styles.interestChip,
+                            active && styles.interestChipActive,
+                          ]}
+                          onPress={() => setSelectedInterest(interest)}
+                        >
+                          <Text
+                            style={[
+                              styles.interestChipText,
+                              active && styles.interestChipTextActive,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {interest}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })
+                  )}
+                  {hasLoadedInterests && !interests.length && (
+                    <View style={styles.interestEmpty}>
+                      <Text style={styles.interestEmptyText}>
+                        Add interests in your profile to start posting.
+                      </Text>
+                    </View>
+                  )}
+                </ScrollView>
               </View>
-            )}
-          </ScrollView>
 
-          <View style={styles.mediaSection}>
-            <Text style={styles.label}>Optional image</Text>
-            <TouchableOpacity style={styles.mediaButton} onPress={handlePickImage}>
-              <Ionicons name='image' size={18} color='#007AFF' />
-              <Text style={styles.mediaButtonText}>
-                {media ? 'Change image' : 'Add image'}
-              </Text>
-            </TouchableOpacity>
-            {media?.uri && (
-              <Image source={{ uri: media.uri }} style={styles.previewImage} />
-            )}
-            <Text style={styles.mediaHint}>
-              Images are compressed to stay under 10MB. Video support coming soon.
-            </Text>
+              <ScrollView
+                style={styles.bodyScroll}
+                contentContainerStyle={styles.bodyContent}
+                keyboardShouldPersistTaps='handled'
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.mediaDropZone,
+                    media && styles.mediaDropZoneActive,
+                  ]}
+                  activeOpacity={0.9}
+                  onPress={handlePickImage}
+                >
+                  {media?.uri ? (
+                    <View style={styles.mediaPreviewWrapper}>
+                      <Image
+                        source={{ uri: media.uri }}
+                        style={styles.mediaPreview}
+                      />
+                      <View style={styles.mediaOverlay}>
+                        <TouchableOpacity
+                          style={styles.mediaOverlayButton}
+                          onPress={handlePickImage}
+                        >
+                          <Ionicons name='image' size={18} color='#fff' />
+                          <Text style={styles.mediaOverlayText}>Replace</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.mediaOverlayButton,
+                            styles.mediaOverlayButtonGhost,
+                          ]}
+                          onPress={handleRemoveMedia}
+                        >
+                          <Ionicons name='close' size={16} color='#0F172A' />
+                          <Text
+                            style={[
+                              styles.mediaOverlayText,
+                              styles.mediaOverlayTextDark,
+                            ]}
+                          >
+                            Remove
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.mediaEmpty}>
+                      <View style={styles.mediaIconWrapper}>
+                        <Ionicons
+                          name='images-outline'
+                          size={26}
+                          color='#5B0FF5'
+                        />
+                      </View>
+                      <Text style={styles.mediaEmptyTitle}>Add a photo</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* Add extra vertical spacing between Add a photo and input box */}
+                <View style={{ height: 24 }} />
+
+                <View style={styles.editorCard}>
+                  <TextInput
+                    value={content}
+                    onChangeText={setContent}
+                    placeholder='What’s happening today?'
+                    multiline
+                    style={styles.editorInput}
+                    maxLength={MAX_TEXT_LENGTH}
+                    placeholderTextColor='#A1A3AF'
+                  />
+                  <Text style={[styles.charCount, { color: charColor }]}>
+                    {content.length}/{MAX_TEXT_LENGTH}
+                  </Text>
+                </View>
+              </ScrollView>
+
+              <View
+                style={[
+                  styles.footerBar,
+                  {
+                    paddingBottom: insets.bottom,
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  onPress={() => {
+                    resetState();
+                    onClose?.();
+                  }}
+                >
+                  <Text style={styles.footerCancel}>Cancel</Text>
+                </TouchableOpacity>
+                <Text style={styles.footerStatus}>{statusLabel}</Text>
+                <TouchableOpacity
+                  activeOpacity={canSubmit && !isSubmitting ? 0.8 : 1}
+                  onPress={handleSubmit}
+                  disabled={!canSubmit || isSubmitting}
+                  style={styles.footerSubmit}
+                >
+                  {canSubmit && !isSubmitting ? (
+                    <LinearGradient
+                      colors={['#5B0FF5', '#00B8D9']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.footerSubmitGradient}
+                    >
+                      <Text style={styles.footerSubmitText}>Post</Text>
+                    </LinearGradient>
+                  ) : (
+                    <View
+                      style={[
+                        styles.footerSubmitGradient,
+                        styles.footerSubmitDisabled,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.footerSubmitText,
+                          styles.footerSubmitTextDisabled,
+                        ]}
+                      >
+                        {isSubmitting ? 'Posting…' : 'Post'}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#fff' },
-  header: {
+  flex: { flex: 1 },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
+  sheetContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+    maxHeight: '100%',
+    alignSelf: 'stretch',
+  },
+  sheetHeader: {
+    paddingTop: 12,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(255,255,255,0.75)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  identityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: Platform.OS === 'android' ? 18 : 54,
-    paddingBottom: 12,
+    marginBottom: 16,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 18,
+    backgroundColor: '#E2E4EA',
+    marginRight: 14,
+  },
+  identityMeta: {
+    flex: 1,
+  },
+  identityName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  identitySubtitle: {
+    marginTop: 2,
+    fontSize: 13,
+    color: '#64748B',
+  },
+  interestRail: {
+    paddingVertical: 4,
+    paddingRight: 12,
+  },
+  interestChip: {
     paddingHorizontal: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e5ea',
-  },
-  closeButton: {
-    padding: 8,
-  },
-  closeText: {
-    color: '#ff3b30',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111',
-  },
-  postButton: {
-    paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-  },
-  postButtonDisabled: {
-    backgroundColor: '#9cc7ff',
-  },
-  postButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  contentContainer: {
-    padding: 16,
-  },
-  label: {
-    fontSize: 14,
-    color: '#444',
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  textInput: {
-    minHeight: 140,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#d1d1d6',
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
+    borderColor: 'rgba(91, 15, 245, 0.18)',
+    backgroundColor: 'rgba(241, 244, 255, 0.8)',
+    marginRight: 10,
+  },
+  interestChipActive: {
+    backgroundColor: 'rgba(91, 15, 245, 0.12)',
+    borderColor: 'rgba(0, 184, 217, 0.45)',
+  },
+  interestChipText: {
+    fontSize: 14,
+    color: '#475569',
+    fontWeight: '600',
+  },
+  interestChipTextActive: {
+    color: '#0F172A',
+  },
+  interestEmpty: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(226,232,240,0.6)',
+    borderRadius: 16,
+  },
+  interestEmptyText: {
+    fontSize: 13,
+    color: '#64748B',
+  },
+  interestLoading: {
+    fontSize: 13,
+    color: '#64748B',
+    fontStyle: 'italic',
+    paddingRight: 12,
+  },
+  bodyScroll: {
+    flex: 1,
+  },
+  bodyContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 180,
+  },
+  editorCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 18,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  editorInput: {
+    fontSize: 18,
+    lineHeight: 26,
+    color: '#0F172A',
+    minHeight: 140,
     textAlignVertical: 'top',
   },
   charCount: {
-    fontSize: 12,
-    color: '#8e8e93',
     alignSelf: 'flex-end',
-    marginTop: 4,
-  },
-  chipsRow: {
-    paddingVertical: 4,
-    paddingRight: 16,
-  },
-  chip: {
-    backgroundColor: '#f2f2f7',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 8,
-  },
-  chipActive: {
-    backgroundColor: '#007AFF',
-  },
-  chipText: {
-    fontSize: 14,
-    color: '#111',
-    fontWeight: '500',
-  },
-  chipTextActive: {
-    color: '#fff',
-  },
-  emptyChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: '#f8f4ff',
-  },
-  emptyChipText: {
-    color: '#8e8e93',
-    fontSize: 13,
-  },
-  mediaSection: {
-    marginTop: 24,
-  },
-  mediaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  mediaButtonText: {
-    color: '#007AFF',
-    fontSize: 15,
+    marginTop: 12,
+    fontSize: 12,
     fontWeight: '600',
-    marginLeft: 8,
   },
-  previewImage: {
+  mediaDropZone: {
+    marginTop: 24,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(91, 15, 245, 0.15)',
+    backgroundColor: 'rgba(247, 249, 255, 0.85)',
+    padding: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaDropZoneActive: {
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: '#FFFFFF',
+  },
+  mediaEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaIconWrapper: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: 'rgba(91, 15, 245, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  mediaEmptyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  mediaEmptySubtitle: {
+    marginTop: 6,
+    textAlign: 'center',
+    fontSize: 13,
+    color: '#64748B',
+  },
+  mediaPreviewWrapper: {
+    width: '100%',
+    borderRadius: 22,
+    overflow: 'hidden',
+  },
+  mediaPreview: {
     width: '100%',
     aspectRatio: 4 / 3,
-    borderRadius: 16,
-    marginTop: 12,
   },
-  mediaHint: {
-    fontSize: 12,
-    color: '#8e8e93',
-    marginTop: 6,
+  mediaOverlay: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  mediaOverlayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(15, 23, 42, 0.72)',
+  },
+  mediaOverlayButtonGhost: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+  },
+  mediaOverlayText: {
+    marginLeft: 6,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  mediaOverlayTextDark: {
+    color: '#0F172A',
+  },
+  footerBar: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(15, 23, 42, 0.08)',
+  },
+  footerCancel: {
+    color: '#EF4444',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  footerStatus: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  footerSubmit: {
+    width: 90,
+    alignItems: 'flex-end',
+  },
+  footerSubmitGradient: {
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+  },
+  footerSubmitDisabled: {
+    backgroundColor: '#E2E8F0',
+  },
+  footerSubmitText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  footerSubmitTextDisabled: {
+    color: '#94A3B8',
   },
 });

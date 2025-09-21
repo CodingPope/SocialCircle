@@ -106,18 +106,23 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const [sharedEvents, setSharedEvents] = useState(false); // Track if shared events exist
   const [ratingModalVisible, setRatingModalVisible] = useState(false); // Modal for rating
 
-  // Swipe right to go back (full-screen gesture)
+  const EDGE_SWIPE_START_THRESHOLD = 30;
+  // Swipe right to go back (left-edge gesture only)
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        const { dx, dy } = gestureState;
-        // Engage for predominantly horizontal rightward gestures
-        return Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) && dx > 0;
+        const { dx, dy, x0 } = gestureState;
+        const startedNearEdge = x0 <= EDGE_SWIPE_START_THRESHOLD;
+        if (!startedNearEdge) return false;
+        const horizontalDominant = Math.abs(dx) > Math.abs(dy);
+        const movedEnough = dx > 12;
+        return horizontalDominant && movedEnough;
       },
       onPanResponderRelease: (_, gestureState) => {
-        const { dx, vx } = gestureState;
+        const { dx, vx, x0 } = gestureState;
+        if (x0 > EDGE_SWIPE_START_THRESHOLD) return;
         const distancePass = dx > 60;
-        const velocityPass = vx > 0.35;
+        const velocityPass = vx > 0.35 && dx > 0;
         if ((distancePass || velocityPass) && navigation.canGoBack?.()) {
           navigation.goBack();
         }
@@ -327,32 +332,6 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     checkSharedEvents();
   }, [currentUser, userId]);
 
-  if (!user) return null;
-
-  const fullName = `${user.firstName} ${user.lastName}`;
-  const avatarURL =
-    user.profileImage ||
-    user.avatarURL ||
-    'https://example.com/default-avatar.png';
-  const rating = user.rating || 0;
-  const ratingCount = user.ratingCount || 0;
-  const verified = user.verified || false;
-  const userSince =
-    user.createdAt && typeof user.createdAt.toDate === 'function'
-      ? user.createdAt
-          .toDate()
-          .toLocaleString('default', { month: 'short', year: 'numeric' })
-      : '';
-  const followerCount =
-    typeof user.followerCount === 'number'
-      ? user.followerCount
-      : Array.isArray(user.followers)
-      ? user.followers.length
-      : 0;
-  // Derived: prefer aggregate count if available
-  const followerCountDisplay =
-    typeof followerCountView === 'number' ? followerCountView : followerCount;
-
   const allEvents = mergeUniqueEvents(
     userEvents.created,
     userEvents.attending,
@@ -412,6 +391,32 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       })
       .sort((a, b) => getTimelineTimestamp(b) - getTimelineTimestamp(a));
   }, [visibleEvents, interestPosts]);
+
+  if (!user) return null;
+
+  const fullName = `${user.firstName} ${user.lastName}`;
+  const avatarURL =
+    user.profileImage ||
+    user.avatarURL ||
+    'https://example.com/default-avatar.png';
+  const rating = user.rating || 0;
+  const ratingCount = user.ratingCount || 0;
+  const verified = user.verified || false;
+  const userSince =
+    user.createdAt && typeof user.createdAt.toDate === 'function'
+      ? user.createdAt
+          .toDate()
+          .toLocaleString('default', { month: 'short', year: 'numeric' })
+      : '';
+  const followerCount =
+    typeof user.followerCount === 'number'
+      ? user.followerCount
+      : Array.isArray(user.followers)
+      ? user.followers.length
+      : 0;
+  // Derived: prefer aggregate count if available
+  const followerCountDisplay =
+    typeof followerCountView === 'number' ? followerCountView : followerCount;
 
   const handleFollow = async () => {
     if (!currentUser || !user || currentUser.uid === userId) return;
@@ -637,10 +642,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         </Modal>
       )}
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        {...panResponder.panHandlers}
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <LinearGradient
           colors={['#4DA0B0', '#D39D38']}
