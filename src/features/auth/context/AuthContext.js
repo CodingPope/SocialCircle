@@ -2,11 +2,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from '../../firebase/config';
+import { auth, db } from '../../../firebase/config';
 import {
   init as analyticsInit,
   setOptIn as analyticsSetOptIn,
-} from '../../services/analytics';
+} from '../../../services/analytics';
 
 const AuthContext = createContext({ user: null, loading: true });
 if (!global.unsubscribeAllListeners) {

@@ -8,6 +8,22 @@ let rnfa = null; // cached firebase analytics instance (or null)
 let enabled = false; // runtime flag
 let currentUid = null;
 
+function maskId(value) {
+  try {
+    const str = String(value || '').trim();
+    if (!str) return null;
+    let hash = 0;
+    for (let i = 0; i < str.length; i += 1) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash |= 0; // force 32-bit
+    }
+    const positive = Math.abs(hash);
+    return positive.toString(36).slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+
 // Runtime env helper: detect Expo Go (no custom native modules available)
 function isExpoGo() {
   try {
@@ -122,11 +138,15 @@ function sanitize(obj) {
         lower.includes('address') ||
         lower.includes('image') ||
         lower.includes('photo') ||
-        lower.includes('name') || // avoid full names
-        lower.includes('uid') ||
-        lower.includes('id') // avoid raw ids in analytics payload
+        lower.includes('name') // avoid full names
       )
         continue;
+
+      if (lower.includes('id')) {
+        const masked = maskId(v);
+        if (masked) out[k] = masked;
+        continue;
+      }
 
       if (typeof v === 'number') {
         // If it looks like coordinates, coarse round to 1 decimal (~11km)

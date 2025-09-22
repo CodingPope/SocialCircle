@@ -3,9 +3,9 @@ import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import LoadingOverlay from './components/ui/LoadingOverlay';
 import { onAuthStateChanged } from 'firebase/auth';
-import { firebaseAuth } from './features/auth/firebaseAuth'; // adjust import to your actual path
-import MainNavigator from './navigation/MainNavigator'; // adjust import to your actual main navigator
-import CreateAccountScreen from './screens/CreateAccountScreen'; // adjust as needed
+import { auth as firebaseAuth } from './firebase/config';
+import AppNavigator from './navigation/AppNavigator';
+import { AuthScreen } from './features/auth';
 
 export default function AppEntry() {
   const [checking, setChecking] = useState(true);
@@ -26,9 +26,9 @@ export default function AppEntry() {
 
   // If user is logged in, show main app
   if (user) {
-    return <MainNavigator user={user} />;
+    return <AppNavigator />;
   }
 
-  // If not logged in, show create account/login
-  return <CreateAccountScreen />;
+  // If not logged in, show auth flow
+  return <AuthScreen />;
 }

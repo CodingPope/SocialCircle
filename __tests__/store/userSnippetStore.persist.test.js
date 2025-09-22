@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useUserSnippetStore } from '../../src/store/userSnippetStore';
+import { useUserSnippetStore } from '../../src/features/profile/stores/userSnippetStore';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(() => Promise.resolve()),

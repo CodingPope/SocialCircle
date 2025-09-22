@@ -5,6 +5,10 @@
 
 import { getApp } from 'firebase/app';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import {
+  event as analyticsEvent,
+  isEnabled as analyticsIsEnabled,
+} from '../services/analytics';
 
 // Event taxonomy: standard names used across app surfaces
 // Naming: snake_case event names and payload keys. No lat/lng or PII.
@@ -237,11 +241,9 @@ export async function track(name, payload = {}) {
   try {
     if (!name || typeof name !== 'string') return;
 
-    // Respect local analytics opt-in if available
-    try {
-      const { isEnabled } = await import('../services/analytics');
-      if (typeof isEnabled === 'function' && !isEnabled()) return;
-    } catch {}
+    if (typeof analyticsIsEnabled === 'function' && !analyticsIsEnabled()) {
+      return;
+    }
 
     if (!cf) {
       const functions = getFunctions(getApp(), 'us-central1');
@@ -254,6 +256,10 @@ export async function track(name, payload = {}) {
       .replace(/[^a-z0-9_]/g, '_')
       .slice(0, 64);
     const safePayload = isPlainObject(payload) ? sanitize(payload) : {};
+
+    try {
+      await analyticsEvent(safeName, safePayload);
+    } catch {}
 
     await cf({ name: safeName, payload: safePayload });
   } catch {

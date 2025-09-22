@@ -19,6 +19,18 @@ module.exports = ({ config }) => {
     process.env.FIREBASE_MESSAGING_SENDER_ID || '';
   const firebaseAppId = process.env.FIREBASE_APP_ID || '';
 
+  const dynamicLinkDomainRaw =
+    process.env.EXPO_PUBLIC_DYNAMIC_LINK_DOMAIN ||
+    process.env.DYNAMIC_LINK_DOMAIN ||
+    '';
+  const dynamicLinkDomain = dynamicLinkDomainRaw
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '');
+  const sharePreviewBase =
+    process.env.EXPO_PUBLIC_SHARE_PREVIEW_BASE ||
+    process.env.SHARE_PREVIEW_BASE ||
+    '';
+
   const iosGoogleServicesFile = './GoogleService-Info.plist';
   const androidGoogleServicesFile = './android/app/google-services.json';
   const hasIosGoogleServices = fs.existsSync(
@@ -40,6 +52,7 @@ module.exports = ({ config }) => {
     }
     firebasePlugins.push(['@react-native-firebase/app', firebaseAppPluginOptions]);
     firebasePlugins.push('@react-native-firebase/analytics');
+    firebasePlugins.push('@react-native-firebase/dynamic-links');
   }
 
   return {
@@ -79,6 +92,9 @@ module.exports = ({ config }) => {
         googleMapsApiKey: googleMapsApiKey,
       },
       useFrameworks: 'static',
+      ...(dynamicLinkDomain
+        ? { associatedDomains: [`applinks:${dynamicLinkDomain}`] }
+        : {}),
     },
     android: {
       package: 'com.socialcirclellc.app',
@@ -87,6 +103,23 @@ module.exports = ({ config }) => {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#ffffff',
       },
+      ...(dynamicLinkDomain
+        ? {
+            intentFilters: [
+              {
+                action: 'VIEW',
+                data: [
+                  {
+                    scheme: 'https',
+                    host: dynamicLinkDomain,
+                    pathPrefix: '/',
+                  },
+                ],
+                category: ['BROWSABLE', 'DEFAULT'],
+              },
+            ],
+          }
+        : {}),
     },
     plugins: [
       // match your dependencies
@@ -110,6 +143,10 @@ module.exports = ({ config }) => {
       firebaseStorageBucket,
       firebaseMessagingSenderId,
       firebaseAppId,
+      share: {
+        domain: dynamicLinkDomain,
+        previewBaseUrl: sharePreviewBase,
+      },
     },
     web: { favicon: './assets/favicon.png' },
     owner: 'joe1561',

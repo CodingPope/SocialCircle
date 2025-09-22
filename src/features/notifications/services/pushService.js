@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
-import { useUserStore } from '../../../features/profile/userStore';
+import { useUserStore } from '../../profile';
 import { EAS_PROJECT_ID } from '@env';
 
 // Foreground behavior (optional)

@@ -21,14 +21,34 @@ export function resetRoot(routes) {
   }
 }
 
+function getActiveMainTab() {
+  try {
+    const state = navigationRef.getRootState?.();
+    if (!state?.routes?.length) return null;
+    const mainTabsRoute = state.routes.find((r) => r.name === 'MainTabs');
+    if (!mainTabsRoute) return null;
+    const tabState = mainTabsRoute.state;
+    if (tabState?.routes?.length) {
+      const index = tabState.index ?? 0;
+      return tabState.routes[index]?.name ?? null;
+    }
+    const paramsScreen = mainTabsRoute.params?.screen;
+    if (typeof paramsScreen === 'string') return paramsScreen;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Convenience helpers
 export function navigateToOtherUserProfile(userId) {
   if (!userId) return;
+  const originTab = getActiveMainTab();
   navigate('MainTabs', {
     screen: 'ProfileStack',
     params: {
       screen: 'OtherUserProfile',
-      params: { userId },
+      params: { userId, originTab },
     },
   });
 }

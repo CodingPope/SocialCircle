@@ -8,23 +8,38 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { Radar } from 'lucide-react-native';
 
 // Import screens
-import AuthScreen from '../features/auth/screens/AuthScreen';
-import NameDobScreen from '../features/auth/screens/Onboarding/NameDobScreen';
-import SexScreen from '../features/auth/screens/Onboarding/SexScreen';
-import InterestsScreen from '../features/auth/screens/Onboarding/InterestsScreen';
-import ProfileScreen from '../features/events/ProfileScreen';
-import OtherUserProfileScreen from '../features/events/OtherUserProfileScreen';
-import MapScreen from '../features/events/MapScreen';
-import DiscoveryScreen from '../features/events/DiscoveryScreen';
-import MyCircle from '../features/events/MyCircle';
-import EventChatScreen from '../features/chat/EventChatScreen';
-import InterestPostScreen from '../features/interestPosts/InterestPostScreen';
-import NotificationScreen from '../features/notifications/NotificationScreen';
-import ConfirmationScreen from '../features/events/ConfirmationScreen';
-import ManageInterestsScreen from '../features/profile/ManageInterestsScreen';
-import PrivacyInfoScreen from '../features/profile/PrivacyInfoScreen';
-import InfoArticleScreen from '../features/profile/InfoArticleScreen';
 import {
+  AuthScreen,
+  NameDobScreen,
+  SexScreen,
+  InterestsScreen,
+  LocationScreen,
+} from '../features/auth';
+import {
+  ProfileScreen,
+  OtherUserProfileScreen,
+  MapScreen,
+  DiscoveryScreen,
+  MyCircle,
+  ConfirmationScreen,
+} from '../features/events';
+import { EventChatScreen } from '../features/chat';
+import { InterestPostScreen } from '../features/interestPosts';
+import { NotificationScreen } from '../features/notifications';
+import {
+  ManageInterestsScreen,
+  PrivacyInfoScreen,
+  InfoArticleScreen,
+  useUserStore,
+  useSessionRole,
+} from '../features/profile';
+import {
+  BusinessHomePlaceholder,
+  BusinessOnboardingStack,
+  BusinessCircleScreen,
+  BusinessDiscoverScreen,
+  BusinessMapScreen,
+  BusinessProfileScreen,
   Step0ChooseType,
   Step1Basics,
   Step2Brand,
@@ -34,15 +49,7 @@ import {
   Step6Team,
   Step7Privacy,
   Step8Review,
-} from '../features/business/onboarding/screens';
-
-// Add imports for business onboarding container and home placeholder
-import BusinessOnboardingStack from '../features/business/onboarding/BusinessOnboardingStack';
-import BusinessHomePlaceholder from '../features/business/BusinessHomePlaceholder';
-
-// Zustand store
-import { useUserStore } from '../features/profile/userStore';
-import { useSessionRole } from '../features/profile/sessionRoleStore';
+} from '../features/business';
 
 // --- Auth Stack ---
 const AuthStack = createNativeStackNavigator();
@@ -58,8 +65,6 @@ function AuthStackScreen() {
 const OnboardingStack = createNativeStackNavigator();
 function OnboardingStackScreen({ initialRouteName = 'NameDob' }) {
   // Description: Add Location screen and align route names with getNextOnboardingStep
-  const Location =
-    require('../features/auth/screens/Onboarding/LocationScreen').default;
   return (
     <OnboardingStack.Navigator
       screenOptions={{ headerShown: false }}
@@ -67,7 +72,7 @@ function OnboardingStackScreen({ initialRouteName = 'NameDob' }) {
     >
       <OnboardingStack.Screen name='NameDob' component={NameDobScreen} />
       <OnboardingStack.Screen name='Sex' component={SexScreen} />
-      <OnboardingStack.Screen name='Location' component={Location} />
+      <OnboardingStack.Screen name='Location' component={LocationScreen} />
       <OnboardingStack.Screen
         name='InterestsScreen'
         component={InterestsScreen}
@@ -144,6 +149,12 @@ function MainTabs() {
             />
           ),
         }}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            e.preventDefault();
+            navigation.navigate('ProfileStack', { screen: 'Profile' });
+          },
+        })}
       />
     </Tab.Navigator>
   );
@@ -159,9 +170,7 @@ function BusinessTabs() {
     >
       <BizTab.Screen
         name='BizMap'
-        component={
-          require('../features/business/screens/BusinessMapScreen').default
-        }
+        component={BusinessMapScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Icon name='map-outline' color={color} size={size} />
@@ -171,9 +180,7 @@ function BusinessTabs() {
       />
       <BizTab.Screen
         name='BizDiscover'
-        component={
-          require('../features/business/screens/BusinessDiscoverScreen').default
-        }
+        component={BusinessDiscoverScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Icon name='search-outline' color={color} size={size} />
@@ -183,9 +190,7 @@ function BusinessTabs() {
       />
       <BizTab.Screen
         name='BizCircle'
-        component={
-          require('../features/business/screens/BusinessCircleScreen').default
-        }
+        component={BusinessCircleScreen}
         options={{
           tabBarIcon: ({ color, size }) => <Radar color={color} size={size} />,
           title: 'My Circle',
@@ -193,9 +198,7 @@ function BusinessTabs() {
       />
       <BizTab.Screen
         name='BizProfile'
-        component={
-          require('../features/business/screens/BusinessProfileScreen').default
-        }
+        component={BusinessProfileScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Icon name='briefcase-outline' color={color} size={size} />

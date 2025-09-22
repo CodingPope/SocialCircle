@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { AppState } from 'react-native';
+import * as Linking from 'expo-linking';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer } from '@react-navigation/native';
-import { navigationRef } from './src/navigation/RootNavigation';
-import { useUserStore } from './src/features/profile/userStore';
+import { navigationRef, navigate } from './src/navigation/RootNavigation';
+import { useUserStore } from './src/features/profile';
 import { db } from './src/firebase/config';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
-import { initPushForUser } from './src/features/notifications/services/pushService';
+import { initPushForUser } from './src/features/notifications';
 import Constants from 'expo-constants';
 import {
   initErrorReporting,
@@ -24,6 +25,10 @@ import {
 import LoadingOverlay from './src/components/ui/LoadingOverlay'; // Added LoadingOverlay import
 import AnalyticsConsentPrompt from './src/components/analytics/AnalyticsConsentPrompt';
 import { recordDailySessionHeartbeat } from './src/services/sessionHeartbeat';
+import {
+  handleIncomingLink,
+  shouldEnableDeepLinking,
+} from './src/services/deepLinking';
 console.log('Sentry initialization disabled - troubleshooting __extends error');
 
 function AppContent() {
@@ -81,6 +86,48 @@ function AppContent() {
       }
     );
     return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!shouldEnableDeepLinking()) return;
+
+    const handleLink = (payload) => {
+      const url = typeof payload === 'string' ? payload : payload?.url;
+      if (url) handleIncomingLink(url);
+    };
+
+    let unsubscribeDynamic = null;
+    let linkingSub = null;
+    let mounted = true;
+
+    (async () => {
+      let dynamicLinksModule = null;
+      try {
+        dynamicLinksModule = require('@react-native-firebase/dynamic-links').default;
+      } catch (err) {
+        console.warn('[deep-link] Dynamic Links module unavailable', err?.message || err);
+        return;
+      }
+
+      if (!mounted || typeof dynamicLinksModule !== 'function') return;
+
+      const instance = dynamicLinksModule();
+      try {
+        const initial = await instance.getInitialLink();
+        if (mounted && initial?.url) handleLink(initial.url);
+      } catch {}
+
+      unsubscribeDynamic = instance.onLink((link) => handleLink(link?.url));
+      linkingSub = Linking.addEventListener('url', ({ url }) => handleLink(url));
+    })();
+
+    return () => {
+      mounted = false;
+      try {
+        unsubscribeDynamic?.();
+      } catch {}
+      linkingSub?.remove?.();
+    };
   }, []);
 
   // NEW: Initialize push token once per session after login (per-uid guard)

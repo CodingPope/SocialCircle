@@ -1,5 +1,5 @@
 // At top of functions/index.js
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
 const {
   onDocumentUpdated,
@@ -11,6 +11,192 @@ const { geohashForLocation } = require('geofire-common');
 
 admin.initializeApp();
 const db = admin.firestore(); // convenience
+const projectId = process.env.GCLOUD_PROJECT;
+
+const SHARE_CONFIG = Object.freeze({
+  apiKey:
+    process.env.SHARE_DYNAMIC_LINK_API_KEY || process.env.FIREBASE_API_KEY || '',
+  domainUriPrefix:
+    process.env.SHARE_DYNAMIC_LINK_PREFIX || process.env.DYNAMIC_LINK_PREFIX || '',
+  previewBase:
+    process.env.SHARE_WEB_FALLBACK_BASE ||
+    (projectId
+      ? `https://${projectId}.cloudfunctions.net/sharePreview`
+      : 'https://socialcircle.app/share'),
+  iosBundleId: process.env.SHARE_IOS_BUNDLE_ID || 'com.socialcirclellc.app',
+  iosAppStoreId: process.env.SHARE_IOS_APP_STORE_ID || '',
+  iosFallbackUrl: process.env.SHARE_IOS_FALLBACK_URL || '',
+  androidPackageName:
+    process.env.SHARE_ANDROID_PACKAGE || 'com.socialcirclellc.app',
+  androidFallbackUrl: process.env.SHARE_ANDROID_FALLBACK_URL || '',
+});
+
+function toDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value.toDate === 'function') return value.toDate();
+  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+  if (typeof value === 'number') return new Date(value);
+  return null;
+}
+
+function truncate(text, max = 160) {
+  if (!text || typeof text !== 'string') return '';
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max - 1)}…`;
+}
+
+async function createShortDynamicLink({ link, title, description, imageUrl }) {
+  if (!SHARE_CONFIG.apiKey || !SHARE_CONFIG.domainUriPrefix) return null;
+
+  const payload = {
+    dynamicLinkInfo: {
+      domainUriPrefix: SHARE_CONFIG.domainUriPrefix,
+      link,
+      androidInfo: {
+        androidPackageName: SHARE_CONFIG.androidPackageName,
+        androidFallbackLink:
+          SHARE_CONFIG.androidFallbackUrl || undefined,
+      },
+      iosInfo: {
+        iosBundleId: SHARE_CONFIG.iosBundleId,
+        iosAppStoreId: SHARE_CONFIG.iosAppStoreId || undefined,
+        iosFallbackLink: SHARE_CONFIG.iosFallbackUrl || undefined,
+      },
+      socialMetaTagInfo: {
+        socialTitle: truncate(title, 70) || 'Social Circle',
+        socialDescription: truncate(description, 120) || undefined,
+        socialImageLink: imageUrl || undefined,
+      },
+    },
+    suffix: { option: 'SHORT' },
+  };
+
+  const endpoint = `https://firebasedynamiclinks.googleapis.com/v1/shortLinks?key=${SHARE_CONFIG.apiKey}`;
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    logger.warn('[share] dynamic link error', res.status, text);
+    return null;
+  }
+
+  const json = await res.json().catch(() => ({}));
+  return json?.shortLink || null;
+}
+
+async function buildEventPreview(eventId) {
+  const snap = await db.doc(`events/${eventId}`).get();
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Event not found');
+  }
+  const data = snap.data() || {};
+  const privacy = (data.privacy || 'public').toLowerCase();
+  if (privacy !== 'public') {
+    throw new HttpsError('permission-denied', 'Event is not shareable');
+  }
+
+  const when = toDate(data.date);
+  const whenLabel = when
+    ? when.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '';
+
+  const where = data.location?.address || data.address || '';
+  const description = truncate([whenLabel, where, data.description]
+    .filter(Boolean)
+    .join(' • '));
+
+  return {
+    title: data.title || 'Social Circle Event',
+    description: description || 'Join this Social Circle event.',
+    imageUrl: data.imageUrl || data.imageUri || null,
+    raw: data,
+  };
+}
+
+async function buildPostPreview(postId) {
+  const snap = await db.doc(`interestPosts/${postId}`).get();
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Post not found');
+  }
+  const data = snap.data() || {};
+  if (data.isDeleted === true) {
+    throw new HttpsError('not-found', 'Post not found');
+  }
+  const author =
+    data?.creatorSnapshot?.displayName ||
+    data?.creatorSnapshot?.name ||
+    'Social Circle member';
+
+  return {
+    title: `${author} on Social Circle`,
+    description: truncate(data.content, 200) || 'See what’s happening on Social Circle.',
+    imageUrl: data.mediaUrl || data.mediaThumbnailUrl || null,
+    raw: data,
+  };
+}
+
+async function buildProfilePreview(userId) {
+  const snap = await db.doc(`users/${userId}`).get();
+  if (!snap.exists) {
+    throw new HttpsError('not-found', 'Profile not found');
+  }
+
+  const data = snap.data() || {};
+  if (data.isDeleted === true) {
+    throw new HttpsError('not-found', 'Profile not found');
+  }
+
+  const first = typeof data.firstName === 'string' ? data.firstName.trim() : '';
+  const last = typeof data.lastName === 'string' ? data.lastName.trim() : '';
+  const displayNameRaw =
+    (typeof data.displayName === 'string' ? data.displayName : '') ||
+    `${first} ${last}`.trim();
+  const displayName = displayNameRaw.trim();
+
+  const headline =
+    (typeof data.bio === 'string' && data.bio.trim()) ||
+    (typeof data.tagline === 'string' && data.tagline.trim()) ||
+    '';
+
+  const city =
+    (typeof data.city === 'string' && data.city.trim()) ||
+    (typeof data.location === 'string' && data.location.trim()) ||
+    '';
+
+  const descriptionPieces = [headline, city].filter(Boolean);
+  const description =
+    truncate(descriptionPieces.join(' • '), 160) || 'Connect on Social Circle.';
+
+  const imageUrl =
+    data.profileImage ||
+    data.avatarURL ||
+    data.photoURL ||
+    data.imageUrl ||
+    null;
+
+  return {
+    title: `${displayName || 'Social Circle member'} on Social Circle`,
+    description,
+    imageUrl,
+    raw: data,
+  };
+}
+
+function buildShareTargetUrl(type, id) {
+  return `${SHARE_CONFIG.previewBase.replace(/\/$/, '')}/${type}/${encodeURIComponent(id)}`;
+}
 
 // -------------------- EXISTING FUNCTIONS (unchanged) --------------------
 
@@ -199,6 +385,106 @@ exports.onMessageCreateNotify = onDocumentCreated(
     );
   }
 );
+
+exports.shareGenerateLink = onCall(
+  { region: 'us-central1', timeoutSeconds: 15, memory: '256MiB' },
+  async (req) => {
+    const { type, id } = req.data || {};
+    if (!type || !id) {
+      throw new HttpsError('invalid-argument', 'type and id are required');
+    }
+    const normalized = type.toString().toLowerCase();
+
+    let preview;
+    if (normalized === 'event') {
+      preview = await buildEventPreview(id);
+    } else if (normalized === 'post') {
+      preview = await buildPostPreview(id);
+    } else if (normalized === 'profile' || normalized === 'user') {
+      preview = await buildProfilePreview(id);
+    } else {
+      throw new HttpsError('invalid-argument', 'Unsupported share type');
+    }
+
+    const targetUrl = buildShareTargetUrl(normalized, id);
+    const shortLink = await createShortDynamicLink({
+      link: targetUrl,
+      title: preview.title,
+      description: preview.description,
+      imageUrl: preview.imageUrl,
+    });
+
+    return {
+      url: shortLink || targetUrl,
+      target: targetUrl,
+      preview,
+      shareable: { type: normalized, id },
+    };
+  }
+);
+
+exports.sharePreview = onRequest({ region: 'us-central1' }, async (req, res) => {
+  try {
+    const type = req.query?.type || req.query?.t;
+    const id = req.query?.id;
+    if (!type || !id) {
+      res.status(400).send('Missing type or id');
+      return;
+    }
+    const normalized = type.toString().toLowerCase();
+    let preview;
+    if (normalized === 'event') {
+      preview = await buildEventPreview(id);
+    } else if (normalized === 'post') {
+      preview = await buildPostPreview(id);
+    } else if (normalized === 'profile' || normalized === 'user') {
+      preview = await buildProfilePreview(id);
+    } else {
+      res.status(400).send('Unsupported type');
+      return;
+    }
+
+    const title = truncate(preview.title, 70) || 'Social Circle';
+    const description = truncate(preview.description, 160);
+    const image = preview.imageUrl;
+    const html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <meta property="og:title" content="${title}" />
+    <meta property="og:description" content="${description}" />
+    ${image ? `<meta property="og:image" content="${image}" />` : ''}
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${title}" />
+    <meta name="twitter:description" content="${description}" />
+    ${image ? `<meta name="twitter:image" content="${image}" />` : ''}
+    <style>
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #111827, #1f2937); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
+      .card { max-width: 520px; padding: 32px; background: rgba(17, 24, 39, 0.85); border-radius: 20px; text-align: center; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45); }
+      h1 { font-size: 26px; margin-bottom: 12px; }
+      p { font-size: 17px; line-height: 1.5; margin-bottom: 28px; color: rgba(229, 231, 235, 0.9); }
+      a { display: inline-flex; align-items: center; justify-content: center; padding: 14px 22px; border-radius: 999px; background: linear-gradient(135deg, #2563eb, #9333ea); color: #fff; text-decoration: none; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>${title}</h1>
+      <p>${description}</p>
+      <a href="https://apps.apple.com/us/app/id000000000">Open in Social Circle</a>
+    </div>
+  </body>
+</html>`;
+
+    res.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+    res.status(200).send(html);
+  } catch (err) {
+    logger.error('[sharePreview] failed', err);
+    res.status(500).send('Unable to render preview');
+  }
+});
 
 // NEW: Trigger push when a notification document is created
 exports.onNotificationCreatedPush = onDocumentCreated(

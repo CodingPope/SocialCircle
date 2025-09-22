@@ -8,7 +8,7 @@ import {
   Animated,
   ActivityIndicator,
 } from 'react-native';
-import AttendeeBubbleRow from '../../features/events/AttendeeBubbleRow';
+import { AttendeeBubbleRow } from '../../features/events';
 
 // Description: Floating preview bubble for an event blip with micro-animations and pointer.
 // Props:

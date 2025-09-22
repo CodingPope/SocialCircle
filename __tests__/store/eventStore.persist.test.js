@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act } from 'react-test-renderer';
-import { useEventStore } from '../../src/store/eventStore';
+import { useEventStore } from '../../src/features/events/stores/eventStore';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(() => Promise.resolve()),
