@@ -44,6 +44,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useEventStore } from '../stores/eventStore';
 import joinEvent from '../services/joinEvent';
 import { trackCardClick, trackOpenEvent } from '../../../lib/analytics';
+import { filterBlockedEvents } from '../utils/blockUtils';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const PREVIEW_WIDTH = Math.min(300, SCREEN_W - 16); // slightly narrower preview for smaller overall footprint
@@ -89,6 +90,16 @@ export default function MapScreen() {
 
   const userInterests = Array.isArray(user?.interests) ? user.interests : [];
 
+  const blockKey = useMemo(() => {
+    const blocked = Array.isArray(user?.blocked)
+      ? [...user.blocked].sort().join(',')
+      : '';
+    const blockedBy = Array.isArray(user?.blockedBy)
+      ? [...user.blockedBy].sort().join(',')
+      : '';
+    return `${blocked}|${blockedBy}`;
+  }, [user?.blocked, user?.blockedBy]);
+
   const db = getFirestore();
 
   const [events, setEvents] = useState([]);
@@ -96,6 +107,7 @@ export default function MapScreen() {
   const [newEventLocation, setNewEventLocation] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [region, setRegion] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
 
   const [showListView, setShowListView] = useState(false);
   const [showFilterWindow, setShowFilterWindow] = useState(false);
@@ -134,7 +146,10 @@ export default function MapScreen() {
         const eventRef = doc(db, 'events', eventId);
         const snap = await getDoc(eventRef);
         if (!snap.exists()) {
-          Alert.alert('Event unavailable', 'This event may no longer be available.');
+          Alert.alert(
+            'Event unavailable',
+            'This event may no longer be available.'
+          );
           return;
         }
         const data = { id: snap.id, ...snap.data() };
@@ -142,7 +157,11 @@ export default function MapScreen() {
 
         const lat = data?.location?.latitude;
         const lng = data?.location?.longitude;
-        if (mapRef.current && typeof lat === 'number' && typeof lng === 'number') {
+        if (
+          mapRef.current &&
+          typeof lat === 'number' &&
+          typeof lng === 'number'
+        ) {
           mapRef.current.animateToRegion(
             {
               latitude: lat,
@@ -154,7 +173,10 @@ export default function MapScreen() {
           );
         }
       } catch (err) {
-        console.warn('[MapScreen] Failed to open event from deep link', err?.message || err);
+        console.warn(
+          '[MapScreen] Failed to open event from deep link',
+          err?.message || err
+        );
       }
     },
     [db]
@@ -221,6 +243,19 @@ export default function MapScreen() {
     applyFilters(selectedFilters);
   }, [events, selectedFilters]);
 
+  useEffect(() => {
+    setEvents((prev) => {
+      const filtered = filterBlockedEvents(prev, user);
+      if (
+        filtered.length === prev.length &&
+        filtered.every((event, idx) => event.id === prev[idx]?.id)
+      ) {
+        return prev;
+      }
+      return filtered;
+    });
+  }, [blockKey]);
+
   const extractTimestamp = (value) => {
     if (!value) return null;
     if (typeof value === 'number') return value;
@@ -282,7 +317,9 @@ export default function MapScreen() {
     const { dateRange, date, interests, genderOnly } = filters;
     const now = Date.now();
 
-    let filtered = events.filter((event) => {
+    const sourceEvents = filterBlockedEvents(events, user);
+
+    let filtered = sourceEvents.filter((event) => {
       const eventEnd = getEventEndMs(event);
       return eventEnd && eventEnd + 60 * 60 * 1000 > now;
     });
@@ -392,7 +429,8 @@ export default function MapScreen() {
               }
               return eventTime && eventTime + 60 * 60 * 1000 > nowMs;
             });
-          setEvents(regionEvents);
+          const visibleRegionEvents = filterBlockedEvents(regionEvents, user);
+          setEvents(visibleRegionEvents);
           applyFilters(selectedFilters);
 
           if (isInitial) {
@@ -500,7 +538,7 @@ export default function MapScreen() {
 
   const buildPreviews = useCallback(async () => {
     try {
-      if (!mapRef.current || !region) return;
+      if (!mapRef.current || !region || !mapReady) return;
 
       // Compute visible subset in current region
       const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
@@ -537,7 +575,11 @@ export default function MapScreen() {
 
       const anchors = [];
       const items = [];
-      for (let i = 0; i < prioritized.length && items.length < MAX_EVENT_PREVIEWS; i++) {
+      for (
+        let i = 0;
+        i < prioritized.length && items.length < MAX_EVENT_PREVIEWS;
+        i++
+      ) {
         const ev = prioritized[i];
         try {
           const pt = await mapRef.current.pointForCoordinate(ev.location);
@@ -596,7 +638,7 @@ export default function MapScreen() {
     } catch (e) {
       // ignore
     }
-  }, [filteredEvents, region]);
+  }, [filteredEvents, region, mapReady]);
 
   const handlePreviewPress = useCallback((ev) => {
     try {
@@ -823,10 +865,7 @@ export default function MapScreen() {
         };
       }
 
-      const nextRange = buildRangeFromOffsets(
-        chip.startOffset,
-        chip.endOffset
-      );
+      const nextRange = buildRangeFromOffsets(chip.startOffset, chip.endOffset);
 
       return {
         ...prev,
@@ -881,7 +920,8 @@ export default function MapScreen() {
 
       if (!Object.prototype.hasOwnProperty.call(filters, 'quickDatePreset')) {
         const sameRange =
-          (prev?.dateRange?.start || null) === (next.dateRange?.start || null) &&
+          (prev?.dateRange?.start || null) ===
+            (next.dateRange?.start || null) &&
           (prev?.dateRange?.end || null) === (next.dateRange?.end || null);
         next.quickDatePreset = sameRange ? prev.quickDatePreset : null;
       }
@@ -1032,6 +1072,8 @@ export default function MapScreen() {
           onRegionChange={handleRegionChange}
           onRegionChangeComplete={handleRegionChangeComplete}
           onLongPress={handleMapLongPress}
+          onMapReady={() => setMapReady(true)}
+          onLayout={() => setMapReady(true)}
         >
           {filteredEvents
             // Defensive: ensure marker has a valid location and isn't soft-deleted
@@ -1055,8 +1097,11 @@ export default function MapScreen() {
       )}
 
       {/* Floating Blip Previews */}
-      {previewItems?.length > 0 && (
-        <View pointerEvents='box-none' style={StyleSheet.absoluteFill}>
+      {previewItems.length > 0 && (
+        <View
+          pointerEvents='box-none'
+          style={[StyleSheet.absoluteFill, { zIndex: 50 }]}
+        >
           {previewItems.map((p) => (
             <BlipPreview
               key={p.id}
@@ -1178,7 +1223,7 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { flex: 1, zIndex: 1 },
+  map: { flex: 1 },
   dot: {
     height: 18,
     width: 18,
@@ -1289,10 +1334,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+    backgroundColor: '#FFFFFF',
     marginRight: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.65)',
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.15,
@@ -1300,7 +1345,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   quickDateChipActive: {
-    backgroundColor: 'rgba(0, 122, 255, 0.9)',
+    backgroundColor: '#0A84FF',
     borderColor: '#007AFF',
   },
   quickDateChipLabel: {

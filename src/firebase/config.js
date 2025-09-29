@@ -208,12 +208,57 @@ export const unfollowUser = async (currentUid, targetUid) => {
 // Send a notification via callable (server-side creation only)
 export const sendNotification = async (type, recipientId, data = {}) => {
   try {
-    const { getFunctions, httpsCallable } = await import('firebase/functions');
-    const { getApp } = await import('firebase/app');
-    const functions = getFunctions(getApp(), 'us-central1');
-    const create = httpsCallable(functions, 'createNotification');
-    const res = await create({ type, recipientId, data });
-    return res?.data || { ok: true };
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.warn('sendNotification skipped: no authenticated user');
+      return { ok: false, skipped: true };
+    }
+
+    let idToken;
+    try {
+      idToken = await currentUser.getIdToken(true);
+    } catch (tokenErr) {
+      console.warn('sendNotification token refresh failed', tokenErr);
+      try {
+        idToken = await currentUser.getIdToken();
+      } catch (fallbackErr) {
+        console.warn('sendNotification token recovery failed', fallbackErr);
+      }
+    }
+
+    if (!idToken) {
+      console.warn('sendNotification skipped: no auth token available');
+      return { ok: false, skipped: true };
+    }
+
+    const projectId = FIREBASE_PROJECT_ID;
+    const defaultOrigin = projectId
+      ? `https://us-central1-${projectId}.cloudfunctions.net`
+      : 'https://us-central1.cloudfunctions.net';
+    const functionsOrigin =
+      process.env.EXPO_PUBLIC_FUNCTIONS_ORIGIN ||
+      process.env.FUNCTIONS_ORIGIN ||
+      defaultOrigin;
+    const callablePath = `${functionsOrigin.replace(/\/$/, '')}/createNotification`;
+
+    const payload = { type, recipientId, data };
+
+    const response = await fetch(callablePath, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ data: payload }),
+    });
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => '');
+      throw new Error(`Notification request failed (${response.status}): ${message}`);
+    }
+
+    const json = await response.json().catch(() => ({}));
+    return json?.result || json || { ok: true };
   } catch (e) {
     console.error('sendNotification failed:', e);
     throw e;
