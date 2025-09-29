@@ -8,6 +8,7 @@ import {
   Dimensions,
   Linking,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useNavigation } from '@react-navigation/native';
@@ -30,6 +31,17 @@ import joinEvent from '../services/joinEvent';
 import { trackOpenEvent, trackReportContent } from '../../../lib/analytics';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import { shareEventDetails } from '../utils/shareUtils';
+import { getBlockContext, isEventVisibleForUser } from '../utils/blockUtils';
+import {
+  saveEventForUser,
+  removeSavedEventForUser,
+} from '../services/savedEvents';
+import { useSavedEventsStore } from '../stores/savedEventsStore';
+import {
+  trackSaveEvent,
+  AnalyticsSurfaces,
+  AnalyticsSources,
+} from '../../../lib/analytics';
 
 const screenHeight = Dimensions.get('window').height;
 // Clearance in pixels reserved at the top of the scroll content for the floating handle
@@ -46,6 +58,10 @@ export default function EventPopUpCard({
   const user = useUserStore((state) => state.user);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const blockContext = useMemo(
+    () => getBlockContext(user),
+    [user?.uid, user?.blocked, user?.blockedBy]
+  );
 
   const [address, setAddress] = useState('Fetching address...');
   const [showFullDescription, setShowFullDescription] = useState(false);
@@ -54,6 +70,7 @@ export default function EventPopUpCard({
   const lastJoinMessageRef = useRef(null);
   const [joinLoading, setJoinLoading] = useState(false);
   const [joinFeedback, setJoinFeedback] = useState(null);
+  const [saveBusy, setSaveBusy] = useState(false);
 
   const snapPoints = useMemo(() => {
     const topOffsetPercent = Math.min(
@@ -68,10 +85,22 @@ export default function EventPopUpCard({
   // Live event doc
   const [liveEvent, setLiveEvent] = useState(event || null);
   const openedForIdRef = useRef(null);
+  const activeEventId = liveEvent?.id || event?.id || null;
+  const isEventSaved = useSavedEventsStore((state) =>
+    activeEventId ? !!state.savedMap[activeEventId] : false
+  );
 
   useEffect(() => {
     setLiveEvent(event || null);
   }, [event?.id]);
+
+  useEffect(() => {
+    if (!liveEvent || !liveEvent.ownerId) return;
+    if (!isEventVisibleForUser(liveEvent, blockContext)) {
+      Alert.alert('Event unavailable', 'You no longer have access to this event.');
+      onClose && onClose();
+    }
+  }, [blockContext, liveEvent?.id, liveEvent?.ownerId, onClose]);
 
   useEffect(() => {
     if (joinFeedbackTimeoutRef.current) {
@@ -445,6 +474,58 @@ export default function EventPopUpCard({
     ? { uri: userDetails.profileImage || userDetails.avatarURL }
     : require('../../../../assets/smileDefault.png');
 
+  const handleToggleSave = useCallback(async () => {
+    if (!activeEventId) return;
+    if (!user?.uid) {
+      Alert.alert('Sign in required', 'Log in to save events for later.');
+      return;
+    }
+    if (saveBusy) return;
+
+    setSaveBusy(true);
+    const targetSaved = !isEventSaved;
+    try {
+      if (isEventSaved) {
+        await removeSavedEventForUser({
+          userId: user.uid,
+          eventId: activeEventId,
+        });
+      } else {
+        await saveEventForUser({
+          userId: user.uid,
+          event: liveEvent || event,
+          surface,
+          source,
+        });
+      }
+
+      trackSaveEvent({
+        event_id: activeEventId,
+        surface: surface || AnalyticsSurfaces.EVENT_DETAIL,
+        source: source || AnalyticsSources.OTHER,
+        saved: targetSaved,
+        interest: liveEvent?.interest || event?.interest || null,
+        category: liveEvent?.category || event?.category || null,
+      });
+    } catch (err) {
+      Alert.alert(
+        'Save failed',
+        err?.message || 'Unable to update your saved events right now.'
+      );
+    } finally {
+      setSaveBusy(false);
+    }
+  }, [
+    activeEventId,
+    event,
+    isEventSaved,
+    liveEvent,
+    saveBusy,
+    source,
+    surface,
+    user?.uid,
+  ]);
+
   const openInMaps = () => {
     if (!liveEvent?.location) return;
     const { latitude, longitude } = liveEvent.location;
@@ -499,20 +580,42 @@ export default function EventPopUpCard({
         {/* Title + share */}
         <View style={styles.titleRow}>
           <Text style={styles.title}>{liveEvent.title || 'Untitled Event'}</Text>
-          <TouchableOpacity
-            style={styles.shareButton}
-            onPress={() =>
-              shareEventDetails(liveEvent, {
-                surface,
-                source: source || 'event_detail_popover',
-              })
-            }
-            accessibilityRole='button'
-            accessibilityLabel='Share event'
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name='share-social-outline' size={22} color='#2563EB' />
-          </TouchableOpacity>
+          <View style={styles.titleActions}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={handleToggleSave}
+              disabled={saveBusy || !activeEventId}
+              accessibilityRole='button'
+              accessibilityLabel={
+                isEventSaved ? 'Remove from saved events' : 'Save event'
+              }
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              {saveBusy ? (
+                <ActivityIndicator size='small' color='#2563EB' />
+              ) : (
+                <Ionicons
+                  name={isEventSaved ? 'bookmark' : 'bookmark-outline'}
+                  size={22}
+                  color={isEventSaved ? '#2563EB' : '#2563EB'}
+                />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() =>
+                shareEventDetails(liveEvent, {
+                  surface,
+                  source: source || 'event_detail_popover',
+                })
+              }
+              accessibilityRole='button'
+              accessibilityLabel='Share event'
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name='share-social-outline' size={22} color='#2563EB' />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.metaRow}>
@@ -707,6 +810,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: -2 },
+    backgroundColor: '#fff',
   },
   // Rounded card + clipping
   sheetBackground: {
@@ -763,7 +867,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  shareButton: {
+  titleActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconButton: {
     padding: 6,
     marginLeft: 8,
   },

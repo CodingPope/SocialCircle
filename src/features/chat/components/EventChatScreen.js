@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -62,8 +62,15 @@ const EventChatScreen = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   // Make route params defensive & provide default
-  const { eventId, locationName: locationNameParam = null } =
-    route.params || {};
+  const {
+    eventId,
+    locationName: locationNameParam = null,
+    joinIntent = null,
+    joinGraceMs: joinGraceFromParams,
+  } = route.params || {};
+  const joinGraceDurationMsRaw =
+    typeof joinGraceFromParams === 'number' ? joinGraceFromParams : 8000;
+  const joinGraceDurationMs = Math.max(0, joinGraceDurationMsRaw);
   const [event, setEvent] = useState(null);
   const [attendees, setAttendees] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -84,6 +91,13 @@ const EventChatScreen = () => {
   const [editPlaceDetails, setEditPlaceDetails] = useState(null);
   const [editLocationCoords, setEditLocationCoords] = useState(null);
   const flatListRef = useRef(null);
+  const [pinned, setPinned] = useState(null);
+  const [pinnedEditorVisible, setPinnedEditorVisible] = useState(false);
+  const [pinnedDraft, setPinnedDraft] = useState('');
+  const [pinnedSaving, setPinnedSaving] = useState(false);
+  const [leaveInProgress, setLeaveInProgress] = useState(false);
+  const [hasShownAccessAlert, setHasShownAccessAlert] = useState(false);
+  const [joinGraceActive, setJoinGraceActive] = useState(() => !!joinIntent);
 
   // Track listener unsubscribes so we can stop them immediately on leave
   const eventUnsubRef = useRef(null);
@@ -139,6 +153,38 @@ const EventChatScreen = () => {
   const ended = !!endMs && nowMs >= endMs; // event time has passed
   const archived = !!endMs && nowMs >= endMs + 3 * 24 * 60 * 60 * 1000; // 3 days after end
   const readOnly = isSoftDeleted || archived; // Chat write disabled when archived or soft-deleted
+
+  const pinnedUpdatedAtLabel = useMemo(() => {
+    if (!pinned || !pinned.updatedAt) return null;
+    try {
+      const date =
+        typeof pinned.updatedAt.toDate === 'function'
+          ? pinned.updatedAt.toDate()
+          : new Date(pinned.updatedAt);
+      if (!date || Number.isNaN(date.getTime())) return null;
+      return date.toLocaleString();
+    } catch (err) {
+      return null;
+    }
+  }, [pinned?.updatedAt]);
+
+  const pinnedDraftTrimmed = pinnedDraft.trim();
+  const pinnedActionLabel =
+    pinnedDraftTrimmed.length > 0
+      ? 'Save'
+      : pinned?.text
+      ? 'Clear'
+      : 'Save';
+  const canSubmitPinned = pinnedDraftTrimmed.length > 0 || !!pinned?.text;
+
+  useEffect(() => {
+    if (!joinGraceActive) return;
+    const timeout = setTimeout(
+      () => setJoinGraceActive(false),
+      joinGraceDurationMs
+    );
+    return () => clearTimeout(timeout);
+  }, [joinGraceActive, joinGraceDurationMs]);
 
   // Helper: Resolve best location label (expanded with more fallbacks & lat/lng variants)
   const getLocationLabel = (ev = event) => {
@@ -467,6 +513,28 @@ const EventChatScreen = () => {
     };
   }, [eventId, auth.currentUser]);
 
+  useEffect(() => {
+    if (!eventId) return;
+    const chatDocRef = doc(db, 'chats', eventId);
+    const unsub = onSnapshot(
+      chatDocRef,
+      (snap) => {
+        if (!snap.exists()) {
+          setPinned(null);
+          return;
+        }
+        const data = snap.data() || {};
+        setPinned(data.pinned || null);
+      },
+      () => setPinned(null)
+    );
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+    };
+  }, [eventId]);
+
   // ✅ Host user info when event changes (no snapshot, just getDoc)
   useEffect(() => {
     const ownerId = event?.ownerId;
@@ -498,25 +566,95 @@ const EventChatScreen = () => {
   }, [event?.ownerId]);
 
   // Check if current user is attendee
+  const currentUid = auth.currentUser?.uid || null;
   const isAttendee =
-    Array.isArray(event?.attendees) &&
-    event.attendees.includes(auth.currentUser?.uid);
+    Array.isArray(event?.attendees) && currentUid
+      ? event.attendees.includes(currentUid)
+      : false;
 
-  // Check if current user is event creator (support both ownerId and hostId)
-  const isCreator = event?.ownerId === auth.currentUser?.uid;
+  const hostIds = useMemo(() => {
+    const collected = new Set();
+    const ownerId = event?.ownerId;
+    const hostId = event?.hostId;
+    const owner = event?.owner;
+    const ownerUID = event?.ownerUID;
+    const host = event?.host;
+    const hostUID = event?.hostUID;
 
-  // Block chat access for non-members entirely
-  useEffect(() => {
-    if (!event || !auth.currentUser) return;
-    const isMember = isAttendee || isCreator;
-    if (!isMember) {
-      Alert.alert(
-        'No Access',
-        'Only attendees or the host can view this chat.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+    if (typeof ownerId === 'string' && ownerId) collected.add(ownerId);
+    if (typeof hostId === 'string' && hostId) collected.add(hostId);
+    if (typeof owner === 'string' && owner) collected.add(owner);
+    if (typeof ownerUID === 'string' && ownerUID) collected.add(ownerUID);
+    if (typeof host === 'string' && host) collected.add(host);
+    if (typeof hostUID === 'string' && hostUID) collected.add(hostUID);
+
+    const maybeAddFromList = (value) => {
+      if (Array.isArray(value)) {
+        value.forEach((id) => {
+          if (typeof id === 'string' && id) collected.add(id);
+        });
+      }
+    };
+
+    maybeAddFromList(event?.hosts);
+    maybeAddFromList(event?.coHosts);
+    maybeAddFromList(event?.admins);
+    maybeAddFromList(event?.moderators);
+
+    return collected;
+  }, [
+    event?.ownerId,
+    event?.hostId,
+    event?.owner,
+    event?.ownerUID,
+    event?.host,
+    event?.hostUID,
+    event?.hosts,
+    event?.coHosts,
+    event?.admins,
+    event?.moderators,
+  ]);
+
+  // Check if current user is event creator/host (supports legacy fields and host lists)
+  const isCreator = currentUid ? hostIds.has(currentUid) : false;
+
+  const safeExitChat = useCallback(() => {
+    setIsModalVisible(false);
+    if (navigation?.canGoBack?.()) {
+      navigation.goBack();
+    } else {
+      navigation?.navigate?.('MainTabs', { screen: 'Map' });
     }
-  }, [event?.attendees, event?.ownerId, auth.currentUser]);
+  }, [navigation]);
+
+  // Block chat access for non-members entirely (with grace periods)
+  useEffect(() => {
+    if (!event || !currentUid) return;
+    const isMember = isAttendee || isCreator;
+    if (isMember) {
+      setHasShownAccessAlert(false);
+      if (joinGraceActive) setJoinGraceActive(false);
+      return;
+    }
+    if (joinGraceActive || leaveInProgress) return;
+    if (hasShownAccessAlert) return;
+    setHasShownAccessAlert(true);
+    Alert.alert(
+      'No Access',
+      'Only attendees or the host can view this chat.',
+      [{ text: 'OK', onPress: safeExitChat }],
+      { cancelable: false }
+    );
+  }, [
+    event,
+    currentUid,
+    isAttendee,
+    isCreator,
+    joinGraceActive,
+    leaveInProgress,
+    hasShownAccessAlert,
+    safeExitChat,
+  ]);
 
   // Send message
   const sendMessage = async () => {
@@ -816,6 +954,7 @@ const EventChatScreen = () => {
           text: 'Leave',
           style: 'destructive',
           onPress: async () => {
+            setLeaveInProgress(true);
             try {
               // Proactively stop listeners to avoid permission-denied errors during transition
               try {
@@ -846,7 +985,7 @@ const EventChatScreen = () => {
 
               // Navigate back out of chat
               setIsModalVisible(false);
-              navigation.goBack();
+              safeExitChat();
             } catch (err) {
               console.error('Leave event error:', err);
               const code = err?.code || '';
@@ -855,6 +994,7 @@ const EventChatScreen = () => {
               else if (code.includes('permission') || code.includes('denied'))
                 msg = "You don't have permission to leave this event.";
               else if (code.includes('not-found')) msg = 'Event not found.';
+              setLeaveInProgress(false);
               Alert.alert('Leave Failed', msg);
             }
           },
@@ -958,6 +1098,45 @@ const EventChatScreen = () => {
     setEditLocationCoords(null);
     setEditPlaceDetails(null);
   };
+
+  const openPinnedEditor = useCallback(() => {
+    if (!isCreator) return;
+    setPinnedDraft(typeof pinned?.text === 'string' ? pinned.text : '');
+    setPinnedEditorVisible(true);
+  }, [isCreator, pinned?.text]);
+
+  const handleSavePinned = useCallback(async () => {
+    if (!isCreator) return;
+    setPinnedSaving(true);
+    try {
+      const trimmed = pinnedDraft.trim();
+      const chatDocRef = doc(db, 'chats', eventId);
+      if (!trimmed.length) {
+        await updateDoc(chatDocRef, {
+          pinned: null,
+          lastUpdated: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(chatDocRef, {
+          pinned: {
+            text: trimmed,
+            updatedAt: serverTimestamp(),
+            updatedBy: auth.currentUser?.uid || null,
+          },
+          lastUpdated: serverTimestamp(),
+        });
+      }
+      setPinnedEditorVisible(false);
+    } catch (err) {
+      console.error('Pinned announcement update failed:', err);
+      Alert.alert(
+        'Update failed',
+        'Unable to update the pinned announcement. Please try again.'
+      );
+    } finally {
+      setPinnedSaving(false);
+    }
+  }, [auth.currentUser?.uid, eventId, isCreator, pinnedDraft]);
 
   const handleEditDateConfirm = (pickedDate) => {
     setEditDate(pickedDate || new Date());
@@ -1077,7 +1256,7 @@ const EventChatScreen = () => {
       {/* Header placed below SafeAreaView padding */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
+          <TouchableOpacity onPress={safeExitChat}>
             <Ionicons name='arrow-back' size={24} color='#007AFF' />
           </TouchableOpacity>
           <TouchableOpacity
@@ -1089,6 +1268,23 @@ const EventChatScreen = () => {
             </Text>
           </TouchableOpacity>
           <View style={styles.headerActions}>
+            {isCreator && (
+              <TouchableOpacity
+                style={styles.headerIconButton}
+                onPress={openPinnedEditor}
+                accessibilityRole='button'
+                accessibilityLabel={
+                  pinned?.text ? 'Edit pinned announcement' : 'Pin message'
+                }
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name={pinned?.text ? 'pin' : 'pin-outline'}
+                  size={22}
+                  color='#007AFF'
+                />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.headerIconButton}
               onPress={() =>
@@ -1126,6 +1322,33 @@ const EventChatScreen = () => {
           </Text>
         </View>
       )}
+
+      {pinned?.text ? (
+        <View style={styles.pinnedContainer}>
+          <Ionicons
+            name='pin'
+            size={16}
+            color='#1D4ED8'
+            style={styles.pinnedIcon}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pinnedTitle}>Host announcement</Text>
+            <Text style={styles.pinnedMessage}>{pinned.text}</Text>
+            {pinnedUpdatedAtLabel ? (
+              <Text style={styles.pinnedTimestamp}>{pinnedUpdatedAtLabel}</Text>
+            ) : null}
+          </View>
+          {isCreator && (
+            <TouchableOpacity
+              style={styles.pinnedEditButton}
+              onPress={openPinnedEditor}
+              accessibilityLabel='Edit pinned announcement'
+            >
+              <Text style={styles.pinnedEditText}>Edit</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -1669,7 +1892,10 @@ const EventChatScreen = () => {
               </View>
             )}
             <TouchableOpacity
-              style={styles.leaveButton}
+              style={[
+                styles.leaveButton,
+                leaveInProgress && styles.leaveButtonDisabled,
+              ]}
               onPress={() => {
                 if (isCreator) {
                   Alert.alert(
@@ -1702,7 +1928,7 @@ const EventChatScreen = () => {
                           // Soft delete flow
                           deleteEvent(eventId, auth.currentUser.uid)
                             .then(() => {
-                              navigation.goBack();
+                              safeExitChat();
                               Alert.alert(
                                 'Event Deleted',
                                 'The event has been deleted.'
@@ -1723,9 +1949,14 @@ const EventChatScreen = () => {
                   handleLeaveEvent();
                 }
               }}
+              disabled={leaveInProgress}
             >
               <Text style={styles.leaveButtonText}>
-                {isCreator ? 'Delete Event' : 'Leave Event'}
+                {leaveInProgress
+                  ? 'Leaving...'
+                  : isCreator
+                  ? 'Delete Event'
+                  : 'Leave Event'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -1749,6 +1980,52 @@ const EventChatScreen = () => {
           date={editDate || toDateOrNull(event?.date) || new Date()}
         />
 
+        <Modal
+          isVisible={pinnedEditorVisible}
+          onBackdropPress={() => {
+            if (!pinnedSaving) setPinnedEditorVisible(false);
+          }}
+          onBackButtonPress={() => {
+            if (!pinnedSaving) setPinnedEditorVisible(false);
+          }}
+        >
+          <View style={styles.pinnedModal}>
+            <Text style={styles.pinnedModalTitle}>Pinned announcement</Text>
+            <TextInput
+              style={styles.pinnedInput}
+              multiline
+              placeholder='Share important updates or reminders with attendees'
+              value={pinnedDraft}
+              onChangeText={setPinnedDraft}
+              maxLength={400}
+            />
+            <View style={styles.pinnedModalActions}>
+              <TouchableOpacity
+                style={[styles.pinnedModalButton, styles.pinnedModalCancel]}
+                onPress={() => setPinnedEditorVisible(false)}
+                disabled={pinnedSaving}
+              >
+                <Text style={styles.pinnedModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.pinnedModalButton,
+                  styles.pinnedModalSave,
+                  (!canSubmitPinned || pinnedSaving)
+                    ? styles.pinnedModalSaveDisabled
+                    : null,
+                ]}
+                onPress={handleSavePinned}
+                disabled={!canSubmitPinned || pinnedSaving}
+              >
+                <Text style={styles.pinnedModalButtonText}>
+                  {pinnedActionLabel}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
         {/* Report Modal */}
         <ReportModal
           isVisible={isReportModalVisible}
@@ -1759,6 +2036,14 @@ const EventChatScreen = () => {
           onRemove={handleRemoveUser}
         />
       </KeyboardAvoidingView>
+      {leaveInProgress && (
+        <View style={styles.pendingOverlay} pointerEvents='auto'>
+          <View style={styles.pendingOverlayCard}>
+            <ActivityIndicator size='large' color='#fff' />
+            <Text style={styles.pendingOverlayText}>Leaving event...</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -1990,6 +2275,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
+  leaveButtonDisabled: {
+    opacity: 0.7,
+  },
   leaveButtonText: {
     color: '#fff',
     fontWeight: 'bold',
@@ -2068,6 +2356,35 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   ellipsis: { fontSize: 24, color: '#888' },
+  pendingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(17,24,39,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 200,
+  },
+  pendingOverlayCard: {
+    backgroundColor: '#111827',
+    borderRadius: 18,
+    paddingVertical: 24,
+    paddingHorizontal: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  pendingOverlayText: {
+    color: '#fff',
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: '600',
+  },
 
   // Requests Section Styles
   requestItem: {
@@ -2147,6 +2464,94 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     color: '#333',
+  },
+  pinnedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    padding: 12,
+  },
+  pinnedIcon: {
+    marginRight: 10,
+  },
+  pinnedTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1D4ED8',
+    marginBottom: 4,
+  },
+  pinnedMessage: {
+    color: '#1F2937',
+    fontSize: 14,
+  },
+  pinnedTimestamp: {
+    color: '#6B7280',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  pinnedEditButton: {
+    marginLeft: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: '#E0E7FF',
+  },
+  pinnedEditText: {
+    color: '#1D4ED8',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  pinnedModal: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+  },
+  pinnedModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+    color: '#111827',
+  },
+  pinnedInput: {
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    padding: 12,
+    textAlignVertical: 'top',
+    marginBottom: 16,
+    fontSize: 15,
+    color: '#111827',
+  },
+  pinnedModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  pinnedModalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    marginLeft: 10,
+  },
+  pinnedModalCancel: {
+    backgroundColor: '#E5E7EB',
+  },
+  pinnedModalSave: {
+    backgroundColor: '#2563EB',
+  },
+  pinnedModalSaveDisabled: {
+    opacity: 0.6,
+  },
+  pinnedModalButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  pinnedModalCancelText: {
+    color: '#111827',
+    fontWeight: '500',
   },
 });
 

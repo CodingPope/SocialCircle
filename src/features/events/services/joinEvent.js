@@ -54,6 +54,8 @@ export async function joinEvent({
   const onShowMessage = options.onShowMessage || noop;
   const requireLocation = !!options.requireLocation;
   const eventStore = stores?.eventStore || null;
+  const joinGraceMs =
+    typeof options.joinGraceMs === 'number' ? options.joinGraceMs : 8000;
 
   try {
     // Basic guards
@@ -186,11 +188,15 @@ export async function joinEvent({
       await eventStore.rsvpEvent(event.id, uid);
 
       // Navigate to chat on join
-      const params = { eventId: event.id };
+      const params = {
+        eventId: event.id,
+        joinIntent: 'direct',
+        joinGraceMs,
+      };
       if (navigation && typeof navigation.navigate === 'function') {
         navigation.navigate('EventChat', params);
       } else {
-        navigateToEventChat(event.id);
+        navigateToEventChat(event.id, params);
       }
       onShowMessage('You joined the event!');
       try {

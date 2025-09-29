@@ -20,7 +20,7 @@ import {
 } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { db, storage, sendNotification } from '../../../firebase/config';
+import { db, storage } from '../../../firebase/config';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_TEXT_LENGTH = 2000;
@@ -359,17 +359,8 @@ export async function softDeleteComment(postId, commentId) {
   });
 }
 
-export async function notifyPostComment(post, comment) {
-  try {
-    if (!post?.creatorId || post.creatorId === comment?.authorId) return;
-    await sendNotification('interest_post_comment', post.creatorId, {
-      postId: post.id,
-      commentId: comment.id,
-      preview: comment.body.slice(0, 140),
-    });
-  } catch (error) {
-    console.warn('notifyPostComment failed', error);
-  }
+export async function notifyPostComment() {
+  // Temporarily disabled to avoid notification permission errors.
 }
 
 export function listenToComments(postId, { limitCount = 20, onUpdate }) {

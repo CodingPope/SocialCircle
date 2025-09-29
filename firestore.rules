@@ -3,18 +3,76 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function matchesAuthUid(value) {
+      return value is string && value == request.auth.uid;
+    }
+
+    function listIncludesAuthUid(value) {
+      return value is list && value.hasAny([request.auth.uid]);
+    }
+
     function isEventHost(e) {
-      return signedIn() && (
-        request.auth.uid == e.data.ownerId || request.auth.uid == e.data.hostId
+      return signedIn() && e != null && (
+        matchesAuthUid(e.data.ownerId) ||
+        matchesAuthUid(e.data.hostId) ||
+        matchesAuthUid(e.data.owner) ||
+        matchesAuthUid(e.data.ownerUID) ||
+        matchesAuthUid(e.data.host) ||
+        matchesAuthUid(e.data.hostUID) ||
+        listIncludesAuthUid(e.data.hosts) ||
+        listIncludesAuthUid(e.data.coHosts) ||
+        listIncludesAuthUid(e.data.admins) ||
+        listIncludesAuthUid(e.data.moderators)
       );
     }
     function isAttendee(e) { return signedIn() && (request.auth.uid in (e.data.attendees == null ? [] : e.data.attendees)); }
     function isValidDeviceToken(t) {
       return t == null || (t is string && t != '' && t.matches('^ExponentPushToken.*'));
     }
-    function allowUserSubcollection(uid, sub) {
-      // Whitelist safe subcollections a user can write to under their own user doc
-      return isOwner(uid) && (sub in ['profileviews']);
+    function allowUserSubcollection(uid, subPath) {
+      return isOwner(uid) &&
+        (subPath is string) &&
+        subPath.lower().matches('^(profileviews|savedevents)(/.*)?$');
+    }
+
+    function blockedByUnchanged() {
+      return !request.resource.data
+        .diff(resource.data)
+        .changedKeys()
+        .hasAny(['blockedBy']);
+    }
+
+    function chatPinnedUpdateAllowed() {
+      return request.resource.data
+        .diff(resource.data)
+        .changedKeys()
+        .hasOnly(['pinned', 'lastUpdated']);
+    }
+
+    function validOptionalString(data, key, maxLen) {
+      return !(data.keys().hasAny([key])) ||
+        (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function validSavedEventCreate(eventId) {
+      return request.resource != null &&
+        request.resource.data.keys().hasOnly([
+          'eventId',
+          'savedAt',
+          'eventStart',
+          'interest',
+          'category',
+          'surface',
+          'source',
+        ]) &&
+        request.resource.data.eventId == eventId &&
+        request.resource.data.savedAt is timestamp &&
+        request.resource.data.eventStart is timestamp &&
+        request.resource.data.savedAt <= request.time &&
+        validOptionalString(request.resource.data, 'interest', 100) &&
+        validOptionalString(request.resource.data, 'category', 100) &&
+        validOptionalString(request.resource.data, 'surface', 60) &&
+        validOptionalString(request.resource.data, 'source', 60);
     }
 
     function userInterestList(uid) {
@@ -55,7 +113,7 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if true;
+      allow read: if signedIn();
 
       // On create, enforce device token validity and sensible defaults for restricted flags
       allow create: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&
@@ -69,7 +127,15 @@ service cloud.firestore {
 
       // Owners can update their profile, but not restricted fields
       allow update: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&
-        !userRestrictedKeysChanged();
+        !userRestrictedKeysChanged() &&
+        blockedByUnchanged();
+
+      match /savedEvents/{eventId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid) && validSavedEventCreate(eventId);
+        allow delete: if isOwner(uid);
+        allow update: if false;
+      }
 
       match /{sub=**}/{docId} {
         allow create, update: if allowUserSubcollection(uid, sub);
@@ -175,9 +241,11 @@ service cloud.firestore {
 
     match /chats/{eventId} {
       allow read: if signedIn();
-      allow create, update: if isEventHost(get(/databases/$(database)/documents/events/$(eventId))) ||
+      allow create: if isEventHost(get(/databases/$(database)/documents/events/$(eventId))) ||
         isAttendee(get(/databases/$(database)/documents/events/$(eventId))) ||
         isChatParticipant(eventId);
+      allow update: if isEventHost(get(/databases/$(database)/documents/events/$(eventId))) &&
+        chatPinnedUpdateAllowed();
 
       match /messages/{messageId} {
         allow read: if isEventHost(get(/databases/$(database)/documents/events/$(eventId))) ||

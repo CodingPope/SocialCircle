@@ -14,7 +14,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import { useUserStore } from '../stores/userStore';
-import { setOptIn as analyticsSetOptIn } from '../../../services/analytics';
+import {
+  setOptIn as analyticsSetOptIn,
+  analyticsInit,
+} from '../../../services/analytics';
 
 // Description: Centralized screen to manage privacy and legal information
 export default function PrivacyInfoScreen({ navigation }) {
@@ -34,6 +37,18 @@ export default function PrivacyInfoScreen({ navigation }) {
           analyticsOptIn: next,
           analyticsUpdatedAt: new Date(),
         });
+        // Initialize analytics immediately after successful update so
+        // we can set coarse props (plan, interests_count) right away.
+        try {
+          await analyticsInit({
+            optedIn: next,
+            uid: user.uid,
+            props: {
+              plan: user.plan || 'free',
+              interests_count: String(user.interests?.length || 0),
+            },
+          });
+        } catch {}
       }
     } catch {}
     try {

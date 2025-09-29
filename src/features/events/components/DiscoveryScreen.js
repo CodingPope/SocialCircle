@@ -45,6 +45,7 @@ import {
 import { trackCardClick } from '../../../lib/analytics';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
+import { filterBlockedEvents } from '../utils/blockUtils';
 
 function toMillis(value) {
   if (!value) return 0;
@@ -93,6 +94,16 @@ export default function DiscoveryScreen() {
   const user = useUserStore((s) => s.user);
   const personalizationEnabled = !!user?.analyticsOptIn;
   const navigation = useNavigation();
+
+  const blockKey = useMemo(() => {
+    const blocked = Array.isArray(user?.blocked)
+      ? [...user.blocked].sort().join(',')
+      : '';
+    const blockedBy = Array.isArray(user?.blockedBy)
+      ? [...user.blockedBy].sort().join(',')
+      : '';
+    return `${blocked}|${blockedBy}`;
+  }, [user?.blocked, user?.blockedBy]);
 
   const ALL_LABEL = 'All';
 
@@ -148,6 +159,19 @@ export default function DiscoveryScreen() {
   }, [activeTab]);
 
   useEffect(() => {
+    setEvents((prev) => {
+      const filtered = filterBlockedEvents(prev, user);
+      if (
+        filtered.length === prev.length &&
+        filtered.every((event, idx) => event.id === prev[idx]?.id)
+      ) {
+        return prev;
+      }
+      return filtered;
+    });
+  }, [blockKey]);
+
+  useEffect(() => {
     async function initializeUserData() {
       try {
         // If personalization is disabled, don't request location or interests here
@@ -157,7 +181,12 @@ export default function DiscoveryScreen() {
           setUserInterests([]);
           // Load a generic set of upcoming events
           const generic = await fetchGenericEvents(20);
-          setEvents(generic.filter((e) => e.isDeleted !== true));
+          setEvents(
+            filterBlockedEvents(
+              generic.filter((e) => e.isDeleted !== true),
+              user
+            )
+          );
           setPosts([]);
           return;
         }
@@ -197,10 +226,11 @@ export default function DiscoveryScreen() {
       try {
         if (!personalizationEnabled) {
           const cachedEvents = await AsyncStorage.getItem('genericEvents');
-          if (cachedEvents) setEvents(JSON.parse(cachedEvents));
+          if (cachedEvents)
+            setEvents(filterBlockedEvents(JSON.parse(cachedEvents), user));
           const generic = await fetchGenericEvents(20);
           const filtered = generic.filter((e) => !e.isDeleted);
-          setEvents(filtered);
+          setEvents(filterBlockedEvents(filtered, user));
           await AsyncStorage.setItem('genericEvents', JSON.stringify(filtered));
           setPosts([]);
           return;
@@ -215,12 +245,12 @@ export default function DiscoveryScreen() {
 
         const cachedEvents = await AsyncStorage.getItem('hotEvents');
         if (cachedEvents) {
-          setEvents(JSON.parse(cachedEvents));
+          setEvents(filterBlockedEvents(JSON.parse(cachedEvents), user));
         }
 
         const newEvents = await fetchHotEvents(interests, location.coords);
         const filteredEvents = newEvents.filter((event) => !event.isDeleted);
-        setEvents(filteredEvents);
+        setEvents(filterBlockedEvents(filteredEvents, user));
         await AsyncStorage.setItem('hotEvents', JSON.stringify(filteredEvents));
       } catch (error) {
         console.error('Error preloading data:', error);
@@ -296,8 +326,14 @@ export default function DiscoveryScreen() {
   async function loadEvents(reset = false) {
     if (!personalizationEnabled) {
       const generic = await fetchGenericEvents(20);
-      const filtered = generic.filter((e) => e.isDeleted !== true);
-      setEvents((prev) => (reset ? filtered : [...prev, ...filtered]));
+      const filtered = filterBlockedEvents(
+        generic.filter((e) => e.isDeleted !== true),
+        user
+      );
+      setEvents((prev) => {
+        const next = reset ? filtered : [...prev, ...filtered];
+        return filterBlockedEvents(next, user);
+      });
       return;
     }
 
@@ -399,14 +435,19 @@ export default function DiscoveryScreen() {
       fetchedPosts = [];
     }
 
-    const enriched = await enrichEventsWithHosts(newEvents);
+    const visibleNewEvents = filterBlockedEvents(
+      (newEvents || []).filter((event) => event && event.isDeleted !== true),
+      user
+    );
+    const enriched = await enrichEventsWithHosts(visibleNewEvents);
     setEvents((prevEvents) => {
-      const merged = reset ? enriched : [...prevEvents, ...enriched];
+      const base = reset ? [] : prevEvents;
+      const merged = [...base, ...enriched];
       const uniqueById = merged.filter(
         (event, index, self) =>
           index === self.findIndex((e) => e.id === event.id)
       );
-      return uniqueById;
+      return filterBlockedEvents(uniqueById, user);
     });
 
     setPosts(fetchedPosts.filter((post) => post?.isDeleted !== true));

@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from 'react';
 import {
   SafeAreaView,
   View,
@@ -12,6 +18,7 @@ import {
   StatusBar,
   Platform,
   PanResponder,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -36,7 +43,6 @@ import {
   where,
   doc,
   getDoc,
-  getCountFromServer,
 } from 'firebase/firestore';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
@@ -46,7 +52,15 @@ import InterestPostCard from '../../interestPosts/components/InterestPostCard';
 import { fetchInterestPostsByCreator } from '../../interestPosts/services/interestPostService';
 import { trackReportContent } from '../../../lib/analytics';
 import { shareEvent } from '../../../services/share';
-import { getEventEndMs, getTimelineTimestamp, mergeUniqueEvents } from '../utils/dateUtils';
+import {
+  getEventEndMs,
+  getTimelineTimestamp,
+  mergeUniqueEvents,
+} from '../utils/dateUtils';
+import {
+  blockUser as blockUserService,
+  unblockUser as unblockUserService,
+} from '../../profile/services/blockService';
 
 export default function OtherUserProfileScreen({ route, navigation }) {
   const { userId } = route.params;
@@ -63,6 +77,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   // Description: Get current user from Zustand userStore
   const currentUser = useUserStore((state) => state.user);
   const setUserStore = useUserStore((state) => state.setUser);
+  const fetchCurrentUser = useUserStore((state) => state.fetchUser);
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followerCountView, setFollowerCountView] = useState(null);
@@ -72,6 +87,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const [requestingFollow, setRequestingFollow] = useState(false);
   const [sharedEvents, setSharedEvents] = useState(false); // Track if shared events exist
   const [ratingModalVisible, setRatingModalVisible] = useState(false); // Modal for rating
+  const [blockBusy, setBlockBusy] = useState(false);
 
   const EDGE_SWIPE_START_THRESHOLD = 30;
 
@@ -131,6 +147,34 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     [currentUser?.following]
   );
 
+  const viewerBlockedList = useMemo(
+    () => (Array.isArray(currentUser?.blocked) ? currentUser.blocked : []),
+    [currentUser?.blocked]
+  );
+  const viewerBlockedByList = useMemo(
+    () => (Array.isArray(currentUser?.blockedBy) ? currentUser.blockedBy : []),
+    [currentUser?.blockedBy]
+  );
+  const otherBlocksViewer = useMemo(() => {
+    if (!currentUser?.uid) return false;
+    return Array.isArray(user?.blocked)
+      ? user.blocked.includes(currentUser.uid)
+      : false;
+  }, [user?.blocked, currentUser?.uid]);
+  const viewerBlocksTarget = useMemo(
+    () => viewerBlockedList.includes(userId),
+    [viewerBlockedList, userId]
+  );
+  const viewerIsBlocked = useMemo(
+    () => viewerBlockedByList.includes(userId) || otherBlocksViewer,
+    [viewerBlockedByList, userId, otherBlocksViewer]
+  );
+  const shouldHideProfile = useMemo(
+    () =>
+      currentUser?.uid !== userId && (viewerIsBlocked || viewerBlocksTarget),
+    [currentUser?.uid, userId, viewerIsBlocked, viewerBlocksTarget]
+  );
+
   useEffect(() => {
     const fetchUser = async () => {
       const data = await getUserData(userId);
@@ -153,8 +197,8 @@ export default function OtherUserProfileScreen({ route, navigation }) {
           collection(db, 'users'),
           where('following', 'array-contains', userId)
         );
-        const snap = await getCountFromServer(q);
-        if (!cancelled) setFollowerCountView(snap?.data()?.count ?? null);
+        const snap = await getDocs(q);
+        if (!cancelled) setFollowerCountView(snap?.docs?.length ?? null);
       } catch (e) {
         if (!cancelled) setFollowerCountView(null);
       }
@@ -248,7 +292,9 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       }
 
       setUserEvents({ created, attending, attended });
-      setInterestPosts(timelinePosts.filter((post) => post?.isDeleted !== true));
+      setInterestPosts(
+        timelinePosts.filter((post) => post?.isDeleted !== true)
+      );
 
       // --- Batch fetch all unique ownerIds for host info ---
       const allEvents = [...created, ...attending, ...attended];
@@ -367,9 +413,110 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       .sort((a, b) => getTimelineTimestamp(b) - getTimelineTimestamp(a));
   }, [visibleEvents, interestPosts]);
 
+  const refreshProfiles = useCallback(async () => {
+    try {
+      if (currentUser?.uid) {
+        await fetchCurrentUser(currentUser.uid);
+      }
+      if (userId) {
+        const refreshed = await getUserData(userId);
+        setUser(refreshed);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh profiles after block action:', err);
+    }
+  }, [currentUser?.uid, userId, fetchCurrentUser]);
+
+  const confirmBlockUser = useCallback(() => {
+    if (!currentUser?.uid || !userId) return;
+    Alert.alert(
+      'Block this user?',
+      'They will no longer be able to view your profile or events, and you will stop seeing theirs.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            setBlockBusy(true);
+            try {
+              await blockUserService(userId);
+              await refreshProfiles();
+              setIsFollowing(false);
+              Alert.alert(
+                'User blocked',
+                'You will no longer see their activity.'
+              );
+            } catch (err) {
+              console.error('Block failed:', err);
+              Alert.alert('Error', 'Unable to block this user.');
+            } finally {
+              setBlockBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [currentUser?.uid, userId, refreshProfiles]);
+
+  const confirmUnblockUser = useCallback(() => {
+    if (!currentUser?.uid || !userId) return;
+    Alert.alert(
+      'Unblock this user?',
+      'They will regain access to your public information and events.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          onPress: async () => {
+            setBlockBusy(true);
+            try {
+              await unblockUserService(userId);
+              await refreshProfiles();
+              Alert.alert(
+                'User unblocked',
+                'You can interact with them again.'
+              );
+            } catch (err) {
+              console.error('Unblock failed:', err);
+              Alert.alert('Error', 'Unable to unblock this user.');
+            } finally {
+              setBlockBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [currentUser?.uid, userId, refreshProfiles]);
+
+  const menuExtraActions = useMemo(() => {
+    if (!currentUser?.uid || currentUser.uid === userId) return [];
+    const label = blockBusy
+      ? 'Updating...'
+      : viewerBlocksTarget
+      ? 'Unblock User'
+      : 'Block User';
+    return [
+      {
+        key: viewerBlocksTarget ? 'unblock-user' : 'block-user',
+        label,
+        onPress: viewerBlocksTarget ? confirmUnblockUser : confirmBlockUser,
+        destructive: !viewerBlocksTarget,
+        disabled: blockBusy,
+      },
+    ];
+  }, [
+    currentUser?.uid,
+    userId,
+    viewerBlocksTarget,
+    confirmUnblockUser,
+    confirmBlockUser,
+    blockBusy,
+  ]);
+
   if (!user) return null;
 
-  const fullName = `${user.firstName} ${user.lastName}`;
+  const fullName = `${user?.firstName || ''} ${user?.lastName || ''}`.trim();
   const avatarURL =
     user.profileImage ||
     user.avatarURL ||
@@ -395,6 +542,20 @@ export default function OtherUserProfileScreen({ route, navigation }) {
 
   const handleFollow = async () => {
     if (!currentUser || !user || currentUser.uid === userId) return;
+    if (viewerBlocksTarget) {
+      Alert.alert(
+        'Unblock required',
+        'Unblock this user before following them again.'
+      );
+      return;
+    }
+    if (viewerIsBlocked) {
+      Alert.alert(
+        'Action not allowed',
+        'You cannot follow someone who has blocked you.'
+      );
+      return;
+    }
     setRequestingFollow(true);
     try {
       await followUser(currentUser.uid, userId);
@@ -421,25 +582,21 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       setRequestingFollow(false);
     }
     // Fire-and-forget notification (do not fail the follow UX)
-    try {
-      await sendNotification('friend_request', userId, {
-        fromUserId: currentUser.uid,
-        fromUserName:
-          `${currentUser.firstName || ''} ${
-            currentUser.lastName || ''
-          }`.trim() ||
-          currentUser.displayName ||
-          'Someone',
-        message: `${
-          currentUser.firstName || currentUser.displayName || 'Someone'
-        } added you as a friend! Tap to view their profile.`,
-        linkType: 'profile',
-        linkId: currentUser.uid,
-        read: false,
-      });
-    } catch (e) {
+    sendNotification('friend_request', userId, {
+      fromUserId: currentUser.uid,
+      fromUserName:
+        `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() ||
+        currentUser.displayName ||
+        'Someone',
+      message: `${
+        currentUser.firstName || currentUser.displayName || 'Someone'
+      } added you as a friend! Tap to view their profile.`,
+      linkType: 'profile',
+      linkId: currentUser.uid,
+      read: false,
+    }).catch((e) => {
       console.warn('Notification send failed (non-blocking):', e?.message || e);
-    }
+    });
   };
 
   const handleUnfollow = async () => {
@@ -541,74 +698,8 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   // Proxy join press (kept for future customization); actual checks happen inside PostCard
   const handleJoinPress = () => {};
 
-  return (
-    <SafeAreaView style={styles.safe} {...panResponder.panHandlers}>
-      {/* Rating Modal */}
-      {ratingModalVisible && (
-        <Modal
-          visible={ratingModalVisible}
-          transparent
-          animationType='slide'
-          onRequestClose={() => setRatingModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.ratingModal}>
-              <Text style={styles.modalTitle}>Rate {fullName}</Text>
-
-              {/* ⭐ Star Row */}
-              <View style={styles.starRow}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <TouchableOpacity
-                    key={star}
-                    onPress={() => setSelectedRating(star)}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.star,
-                        {
-                          color: star <= selectedRating ? '#FFD700' : '#ccc',
-                        },
-                      ]}
-                    >
-                      ★
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* ✅ Rating Value (optional) */}
-              {selectedRating > 0 && (
-                <Text style={styles.selectedRatingText}>
-                  {selectedRating} out of 5
-                </Text>
-              )}
-
-              {/* ✅ Buttons */}
-              <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  onPress={() => setRatingModalVisible(false)}
-                  style={styles.cancelButton}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    handleRateUser(selectedRating);
-                    setRatingModalVisible(false);
-                  }}
-                  style={styles.submitButton}
-                  disabled={selectedRating === 0}
-                >
-                  <Text style={styles.submitButtonText}>Submit</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
-
+  const profileContent = (
+    <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <LinearGradient
@@ -667,28 +758,30 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         {/* Follow/Unfollow and Rate User Buttons */}
         {currentUser?.uid !== userId && (
           <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={[
-                styles.followButton,
-                { backgroundColor: isFollowing ? '#ccc' : '#007AFF' },
-              ]}
-              onPress={isFollowing ? handleUnfollow : handleFollow}
-              disabled={requestingFollow}
-            >
-              <Text
+            {!viewerBlocksTarget && !viewerIsBlocked && (
+              <TouchableOpacity
                 style={[
-                  styles.followButtonText,
-                  { color: isFollowing ? '#333' : '#fff' },
+                  styles.followButton,
+                  { backgroundColor: isFollowing ? '#ccc' : '#007AFF' },
                 ]}
+                onPress={isFollowing ? handleUnfollow : handleFollow}
+                disabled={requestingFollow}
               >
-                {requestingFollow
-                  ? 'Processing...'
-                  : isFollowing
-                  ? 'Unfollow'
-                  : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-            {sharedEvents && (
+                <Text
+                  style={[
+                    styles.followButtonText,
+                    { color: isFollowing ? '#333' : '#fff' },
+                  ]}
+                >
+                  {requestingFollow
+                    ? 'Processing...'
+                    : isFollowing
+                    ? 'Unfollow'
+                    : 'Follow'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {sharedEvents && !viewerBlocksTarget && !viewerIsBlocked && (
               <TouchableOpacity
                 style={[styles.followButton, { backgroundColor: '#FFD700' }]}
                 onPress={() => setRatingModalVisible(true)}
@@ -824,7 +917,51 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         onReport={handleReport}
         onDelete={handleDeleteEvent}
         targetType='user'
+        extraActions={menuExtraActions}
       />
+    </View>
+  );
+
+  const restrictedContent = (
+    <View style={styles.blockedContainer}>
+      <Text style={styles.blockedTitle}>You can’t view this profile</Text>
+      <Text style={styles.blockedText}>
+        {viewerBlocksTarget
+          ? 'You blocked this user. Unblock them to reconnect.'
+          : 'This user has blocked you. You can still block or report them from other screens if needed.'}
+      </Text>
+      <TouchableOpacity
+        style={[
+          styles.blockActionButton,
+          blockBusy && styles.blockActionDisabled,
+        ]}
+        onPress={viewerBlocksTarget ? confirmUnblockUser : confirmBlockUser}
+        disabled={blockBusy}
+      >
+        <Text style={styles.blockActionText}>
+          {blockBusy
+            ? 'Updating…'
+            : viewerBlocksTarget
+            ? 'Unblock User'
+            : 'Block User'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const loadingContent = (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size='large' color='#007AFF' />
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.safe} {...panResponder.panHandlers}>
+      {!user
+        ? loadingContent
+        : shouldHideProfile
+        ? restrictedContent
+        : profileContent}
     </SafeAreaView>
   );
 }
@@ -834,6 +971,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, // Add padding for Android
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollContent: { paddingBottom: 20 },
   profileHeader: {
@@ -939,6 +1081,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   shareButtonText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  blockedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  blockedTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  blockedText: {
+    fontSize: 15,
+    color: '#4B5563',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  blockActionButton: {
+    backgroundColor: '#EF4444',
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 24,
+  },
+  blockActionDisabled: {
+    opacity: 0.6,
+  },
+  blockActionText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  blockAltButton: {
+    backgroundColor: '#E5E7EB',
+  },
+  blockAltButtonText: {
+    color: '#111827',
+    fontWeight: '600',
+    fontSize: 16,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

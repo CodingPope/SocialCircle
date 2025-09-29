@@ -4,6 +4,7 @@ const { logger } = require('firebase-functions/v2');
 const {
   onDocumentUpdated,
   onDocumentCreated,
+  onDocumentDeleted,
 } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
@@ -11,6 +12,7 @@ const { geohashForLocation } = require('geofire-common');
 
 admin.initializeApp();
 const db = admin.firestore(); // convenience
+const FieldValue = admin.firestore.FieldValue;
 const projectId = process.env.GCLOUD_PROJECT;
 
 const SHARE_CONFIG = Object.freeze({
@@ -268,6 +270,201 @@ async function sendExpoPushMessages(messages) {
     if (hasErrors) logger.error('[push] Expo ticket errors', tickets);
   }
 }
+
+exports.blockUser = onCall(
+  {
+    region: 'us-central1',
+    timeoutSeconds: 30,
+    memory: '128MiB',
+  },
+  async (req) => {
+    const caller = req.auth?.uid;
+    const targetUid = (req.data?.targetUid || '').trim();
+    if (!caller) throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!targetUid) throw new HttpsError('invalid-argument', 'Missing targetUid');
+    if (targetUid === caller) {
+      throw new HttpsError('invalid-argument', 'Cannot block yourself');
+    }
+
+    const actorRef = db.doc(`users/${caller}`);
+    const targetRef = db.doc(`users/${targetUid}`);
+
+    await db.runTransaction(async (tx) => {
+      const [actorSnap, targetSnap] = await Promise.all([
+        tx.get(actorRef),
+        tx.get(targetRef),
+      ]);
+
+      if (!targetSnap.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const actorBlocked = Array.isArray(actorSnap.data()?.blocked)
+        ? actorSnap.data().blocked
+        : [];
+      if (actorBlocked.includes(targetUid)) return;
+
+      const actorUpdates = {
+        blocked: FieldValue.arrayUnion(targetUid),
+        friends: FieldValue.arrayRemove(targetUid),
+        followers: FieldValue.arrayRemove(targetUid),
+        following: FieldValue.arrayRemove(targetUid),
+        followRequests: FieldValue.arrayRemove(targetUid),
+        requests: FieldValue.arrayRemove(targetUid),
+      };
+
+      const targetUpdates = {
+        blockedBy: FieldValue.arrayUnion(caller),
+        friends: FieldValue.arrayRemove(caller),
+        followers: FieldValue.arrayRemove(caller),
+        following: FieldValue.arrayRemove(caller),
+        followRequests: FieldValue.arrayRemove(caller),
+        requests: FieldValue.arrayRemove(caller),
+      };
+
+      tx.set(actorRef, actorUpdates, { merge: true });
+      tx.set(targetRef, targetUpdates, { merge: true });
+    });
+
+    return { ok: true };
+  }
+);
+
+exports.unblockUser = onCall(
+  {
+    region: 'us-central1',
+    timeoutSeconds: 30,
+    memory: '128MiB',
+  },
+  async (req) => {
+    const caller = req.auth?.uid;
+    const targetUid = (req.data?.targetUid || '').trim();
+    if (!caller) throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!targetUid) throw new HttpsError('invalid-argument', 'Missing targetUid');
+    if (targetUid === caller) {
+      throw new HttpsError('invalid-argument', 'Cannot unblock yourself');
+    }
+
+    const actorRef = db.doc(`users/${caller}`);
+    const targetRef = db.doc(`users/${targetUid}`);
+
+    await db.runTransaction(async (tx) => {
+      const actorSnap = await tx.get(actorRef);
+      if (!actorSnap.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const actorBlocked = Array.isArray(actorSnap.data()?.blocked)
+        ? actorSnap.data().blocked
+        : [];
+      if (!actorBlocked.includes(targetUid)) return;
+
+      tx.set(
+        actorRef,
+        { blocked: FieldValue.arrayRemove(targetUid) },
+        { merge: true }
+      );
+      tx.set(
+        targetRef,
+        { blockedBy: FieldValue.arrayRemove(caller) },
+        { merge: true }
+      );
+    });
+
+    return { ok: true };
+  }
+);
+
+async function adjustSavedAggregates(uid, eventId, deltaRaw) {
+  const delta = deltaRaw > 0 ? 1 : deltaRaw < 0 ? -1 : 0;
+  if (!delta || !uid || !eventId) return;
+
+  const eventRef = db.doc(`events/${eventId}`);
+  const userRef = db.doc(`users/${uid}`);
+
+  try {
+    await db.runTransaction(async (tx) => {
+      const [eventSnap, userSnap] = await Promise.all([
+        tx.get(eventRef),
+        tx.get(userRef),
+      ]);
+
+      if (eventSnap.exists) {
+        const data = eventSnap.data() || {};
+        const currentSaveCount = Number(data.saveCount || 0);
+        const nextSaveCount = Math.max(0, currentSaveCount + delta);
+        const updates = { saveCount: nextSaveCount };
+
+        const hasPopularity = typeof data.popularity === 'number';
+        const currentPopularity = hasPopularity ? Number(data.popularity) : 0;
+        if (hasPopularity || delta > 0) {
+          const nextPopularity = Math.max(0, currentPopularity + delta);
+          updates.popularity = nextPopularity;
+        }
+
+        tx.update(eventRef, updates);
+      }
+
+      if (userSnap.exists) {
+        const userData = userSnap.data() || {};
+        const currentSavedCount = Number(userData.savedCount || 0);
+        const nextSavedCount = Math.max(0, currentSavedCount + delta);
+        tx.update(userRef, { savedCount: nextSavedCount });
+      }
+    });
+  } catch (err) {
+    logger.error('[savedEvents] adjustSavedAggregates failed', {
+      uid,
+      eventId,
+      delta,
+      error: err?.message || err,
+    });
+  }
+}
+
+exports.onSavedEventCreated = onDocumentCreated(
+  'users/{uid}/savedEvents/{eventId}',
+  async (event) => {
+    const { uid, eventId } = event.params;
+    await adjustSavedAggregates(uid, eventId, 1);
+    try {
+      await db
+        .collection('analytics')
+        .doc('stream')
+        .collection('eventSaves')
+        .add({
+          eventId,
+          uid,
+          action: 'save',
+          at: FieldValue.serverTimestamp(),
+        });
+    } catch (err) {
+      logger.warn('[savedEvents] analytics log failed', err?.message || err);
+    }
+  }
+);
+
+exports.onSavedEventDeleted = onDocumentDeleted(
+  'users/{uid}/savedEvents/{eventId}',
+  async (event) => {
+    const { uid, eventId } = event.params;
+    await adjustSavedAggregates(uid, eventId, -1);
+    try {
+      await db
+        .collection('analytics')
+        .doc('stream')
+        .collection('eventSaves')
+        .add({
+          eventId,
+          uid,
+          action: 'unsave',
+          at: FieldValue.serverTimestamp(),
+        });
+    } catch (err) {
+      logger.warn('[savedEvents] analytics log failed', err?.message || err);
+    }
+  }
+);
 
 // Callable: send a push to a specific userId or directly to a list of Expo tokens
 // data: { userId?, tokens?, title, body, data? }
@@ -606,6 +803,12 @@ exports.rsvpEvent = onCall(
         const ev = evSnap.data();
         const ownerId = ev.ownerId || null;
 
+        let hostData = {};
+        if (ownerId) {
+          const hostSnap = await tx.get(db.doc(`users/${ownerId}`));
+          if (hostSnap.exists) hostData = hostSnap.data() || {};
+        }
+
         // Do not allow direct joins for RSVP events
         if ((ev.privacy || 'public').toLowerCase() === 'rsvp') {
           throw new HttpsError(
@@ -658,6 +861,32 @@ exports.rsvpEvent = onCall(
           );
         }
 
+        if (ownerId) {
+          const viewerBlocked = Array.isArray(userDoc.blocked)
+            ? userDoc.blocked.includes(ownerId)
+            : false;
+          const viewerBlockedBy = Array.isArray(userDoc.blockedBy)
+            ? userDoc.blockedBy.includes(ownerId)
+            : false;
+          const hostBlocksViewer = Array.isArray(hostData.blocked)
+            ? hostData.blocked.includes(userId)
+            : false;
+          const hostBlockedByViewer = Array.isArray(hostData.blockedBy)
+            ? hostData.blockedBy.includes(userId)
+            : false;
+          if (
+            viewerBlocked ||
+            viewerBlockedBy ||
+            hostBlocksViewer ||
+            hostBlockedByViewer
+          ) {
+            throw new HttpsError(
+              'permission-denied',
+              'You cannot join this event.'
+            );
+          }
+        }
+
         // Compute participants union (owner + attendees + user)
         const participants = new Set(attendeesArr);
         if (ownerId) participants.add(ownerId);
@@ -692,6 +921,7 @@ exports.rsvpEvent = onCall(
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
             messageCount: 0,
             isArchived: false,
+            pinned: null,
           });
         } else {
           tx.update(chatRef, {
@@ -1201,10 +1431,108 @@ exports.createNotification = onCall(
     timeoutSeconds: 30,
   },
   async (req) => {
-    const uid = req.auth?.uid;
-    if (!uid) throw new HttpsError('unauthenticated', 'Sign in required');
+    const rawData = req.data || {};
+    const authToken =
+      typeof rawData.authToken === 'string' && rawData.authToken.trim().length
+        ? rawData.authToken.trim()
+        : null;
+
+    const identityToolkitKey =
+      process.env.IDENTITY_TOOLKIT_API_KEY ||
+      process.env.FIREBASE_WEB_API_KEY ||
+      process.env.FIREBASE_API_KEY ||
+      process.env.GCLOUD_API_KEY ||
+      null;
+
+    const verificationErrors = [];
+
+    const verifyViaRest = async (token, source) => {
+      if (!token || !identityToolkitKey) return null;
+      try {
+        const res = await fetch(
+          `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${identityToolkitKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken: token }),
+          }
+        );
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          verificationErrors.push({
+            source: `${source}:rest`,
+            message: `status ${res.status}: ${text.slice(0, 160)}`,
+          });
+          return null;
+        }
+        const json = await res.json().catch(() => null);
+        const uid = json?.users?.[0]?.localId || null;
+        if (uid) return { uid, source: `${source}:rest` };
+      } catch (err) {
+        verificationErrors.push({
+          source: `${source}:rest`,
+          message: err?.message || err,
+        });
+      }
+      return null;
+    };
+
+    const headerValue =
+      req.rawRequest?.headers?.authorization ||
+      req.rawRequest?.headers?.Authorization ||
+      null;
+    const headerToken =
+      typeof headerValue === 'string' && headerValue.toLowerCase().startsWith('bearer ')
+        ? headerValue.slice(7).trim()
+        : null;
+
+    let uid = req.auth?.uid || null;
+
+    const tryVerify = async (token, source) => {
+      if (!token) return null;
+      try {
+        const decoded = await admin.auth().verifyIdToken(token);
+        if (decoded?.uid) {
+          return { uid: decoded.uid, source };
+        }
+      } catch (err) {
+        verificationErrors.push({
+          source: `${source}:admin`,
+          message: err?.message || err,
+        });
+        const fallback = await verifyViaRest(token, source);
+        if (fallback?.uid) return fallback;
+      }
+      const restOnly = await verifyViaRest(token, source);
+      if (restOnly?.uid) return restOnly;
+      return null;
+    };
+
+    if (!uid && authToken) {
+      const verified = await tryVerify(authToken, 'payload');
+      if (verified?.uid) uid = verified.uid;
+    }
+
+    if (!uid && headerToken && headerToken !== authToken) {
+      const verified = await tryVerify(headerToken, 'header');
+      if (verified?.uid) uid = verified.uid;
+    }
+
+    if (!uid) {
+      logger.warn('[notifications] unauthenticated callable request', {
+        hasAuthContext: Boolean(req.auth?.uid),
+        hasPayloadToken: Boolean(authToken),
+        hasHeaderToken: Boolean(headerToken),
+        verificationErrors,
+      });
+      throw new HttpsError('unauthenticated', 'Sign in required', {
+        verificationErrors,
+      });
+    }
+
+    const { authToken: _discard, ...sanitized } = rawData;
     const { recipientId, type, title, message, linkType, linkId, eventId } =
-      req.data || {};
+      sanitized;
     if (!recipientId || typeof recipientId !== 'string')
       throw new HttpsError('invalid-argument', 'Missing recipientId');
     if (!type || typeof type !== 'string')

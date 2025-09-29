@@ -236,6 +236,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       eventTags: [],
       viewCount: 0,
       joinCount: 0,
+      saveCount: 0,
       status: 'active',
       isReported: false,
       attendees: [],

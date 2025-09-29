@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo, useRef } from 'react';
+import React, { useState, useEffect, memo, useRef, useCallback } from 'react';
 import { Image, ActivityIndicator, Pressable } from 'react-native';
 import {
   SafeAreaView,
@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import { SwipeListView } from 'react-native-swipe-list-view';
 import Card from '../../../components/ui/Card';
@@ -302,8 +302,6 @@ const NotificationScreen = () => {
 
   // Notification store
   const notifications = useNotificationStore((s) => s.notifications);
-  const subscribe = useNotificationStore((s) => s.subscribe);
-  const unsubscribe = useNotificationStore((s) => s.unsubscribe);
   const softDelete = useNotificationStore((s) => s.softDelete);
   const markAsRead = useNotificationStore((s) => s.markAsRead);
   const markAllAsRead = useNotificationStore((s) => s.markAllAsRead);
@@ -321,18 +319,11 @@ const NotificationScreen = () => {
   };
 
   // Subscribe on mount / user change
-  useEffect(() => {
-    if (!user?.uid) return;
-    const unsub = subscribe(user.uid);
-    return () => {
-      try {
-        unsub && unsub();
-      } catch {}
-      try {
-        unsubscribe();
-      } catch {}
-    };
-  }, [user?.uid, subscribe, unsubscribe]);
+  useFocusEffect(
+    useCallback(() => {
+      markAllAsRead();
+    }, [markAllAsRead])
+  );
 
   // Lightweight in-app toast for feedback
   const [toast, setToast] = useState({ visible: false, message: '' });

@@ -3,7 +3,7 @@
     "name": "SocialCircle",
     "slug": "socialcircle",
     "scheme": "socialcircle",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -18,7 +18,7 @@
       "config": {
         "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}"
       },
-      "buildNumber": "1.0.0",
+      "buildNumber": "2",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Social Circle uses your location to show nearby events and improve discovery.",
         "NSCameraUsageDescription": "Allow camera access to take photos for events and your profile.",
@@ -45,6 +45,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "expo-apple-authentication",
       "expo-notifications",
       "expo-video",
       "expo-calendar",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   FlatList,
   ActivityIndicator,
   useWindowDimensions,
+  Alert,
 } from 'react-native';
 import {
   collection,
@@ -25,6 +26,20 @@ import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import EventPopUpCard from './EventPopUpCard';
 import UpcomingEventCard from './UpcomingEventCard';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSavedEventsStore } from '../stores/savedEventsStore';
+import {
+  removeSavedEventForUser,
+} from '../services/savedEvents';
+import {
+  getBlockContext,
+  isEventVisibleForUser,
+} from '../utils/blockUtils';
+import {
+  trackSaveEvent,
+  AnalyticsSurfaces,
+  AnalyticsSources,
+} from '../../../lib/analytics';
 
 export default function MyCircle({ navigation }) {
   // Description: Get current user from Zustand userStore
@@ -41,6 +56,43 @@ export default function MyCircle({ navigation }) {
   );
   const { width: windowWidth } = useWindowDimensions();
 
+  const savedRecords = useSavedEventsStore((s) => s.savedEvents);
+  const savedLoading = useSavedEventsStore((s) => s.isLoading);
+  const savedReady = useSavedEventsStore((s) => s.isReady);
+  const ensureSavedSubscribed = useSavedEventsStore((s) => s.ensureSubscribed);
+  const resetSavedStore = useSavedEventsStore((s) => s.reset);
+
+  const [savedFeed, setSavedFeed] = useState([]);
+  const [unsavingMap, setUnsavingMap] = useState({});
+  const savedEventCacheRef = useRef(new Map());
+  const savedEventListenersRef = useRef(new Map());
+  const [savedCacheVersion, setSavedCacheVersion] = useState(0);
+  const blockContext = useMemo(
+    () => getBlockContext(user),
+    [user?.uid, user?.blocked, user?.blockedBy]
+  );
+  const blockKey = useMemo(() => {
+    const blocked = Array.isArray(user?.blocked)
+      ? [...user.blocked].sort().join(',')
+      : '';
+    const blockedBy = Array.isArray(user?.blockedBy)
+      ? [...user.blockedBy].sort().join(',')
+      : '';
+    return `${blocked}|${blockedBy}`;
+  }, [user?.blocked, user?.blockedBy]);
+
+  const visibleFollowingIds = useMemo(() => {
+    const blockedSet = new Set(
+      Array.isArray(user?.blocked) ? user.blocked.filter(Boolean) : []
+    );
+    const blockedBySet = new Set(
+      Array.isArray(user?.blockedBy) ? user.blockedBy.filter(Boolean) : []
+    );
+    return (followingIds || []).filter((id) =>
+      id && !blockedSet.has(id) && !blockedBySet.has(id)
+    );
+  }, [followingIds, blockKey]);
+
   // Layout hint for upcoming events carousel to keep cards centered across devices
   const { cardWidth, cardSpacing, sidePadding, snapInterval } = useMemo(() => {
     const safeWidth = windowWidth || 360;
@@ -55,6 +107,28 @@ export default function MyCircle({ navigation }) {
       snapInterval: width + spacing,
     };
   }, [windowWidth]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      resetSavedStore();
+      savedEventListenersRef.current.forEach((unsub) => {
+        try {
+          unsub && unsub();
+        } catch {}
+      });
+      savedEventListenersRef.current.clear();
+      savedEventCacheRef.current.clear();
+      setSavedFeed([]);
+      return;
+    }
+
+    const unsubscribe = ensureSavedSubscribed(user.uid);
+    return () => {
+      try {
+        unsubscribe && unsubscribe();
+      } catch {}
+    };
+  }, [user?.uid, ensureSavedSubscribed, resetSavedStore]);
 
   // Helper: Enhance event with host data (cached snippets)
   const enhanceWithHostData = useCallback(
@@ -149,16 +223,10 @@ export default function MyCircle({ navigation }) {
     let cancelled = false;
 
     const run = async () => {
-      if (!followingIds?.length) {
+      if (!visibleFollowingIds?.length) {
         setFriends([]);
         setFriendActivities([]);
         return;
-      }
-
-      // Chunk following IDs by 10
-      const chunks = [];
-      for (let i = 0; i < followingIds.length; i += 10) {
-        chunks.push(followingIds.slice(i, i + 10));
       }
 
       const acc = new Map();
@@ -174,11 +242,15 @@ export default function MyCircle({ navigation }) {
             friend.username ||
             'Friend',
         }));
-        if (!cancelled) setFriends(allFriends);
+        const visibleFriends = allFriends.filter(
+          (friend) =>
+            !blockContext.blocked.has(friend.id) &&
+            !blockContext.blockedBy.has(friend.id)
+        );
+        if (!cancelled) setFriends(visibleFriends);
 
-        // Build Friend Activities feed (fetch events on demand for latest IDs)
         const friendEventIds = [];
-        allFriends.forEach((friend) => {
+        visibleFriends.forEach((friend) => {
           (friend.createdEvents || []).forEach((id) =>
             friendEventIds.push({ id, type: 'hosting', friend })
           );
@@ -224,24 +296,35 @@ export default function MyCircle({ navigation }) {
             event: enhancedFriendEvents[idx],
           }));
           friendFeed.sort((a, b) => a.date - b.date);
-          if (!cancelled) setFriendActivities(friendFeed);
+          const visibleFeed = friendFeed.filter((item) =>
+            isEventVisibleForUser(item.event, blockContext)
+          );
+          if (!cancelled) setFriendActivities(visibleFeed);
         } catch (e) {
           console.error('Friend activities update error:', e);
         }
       };
 
-      chunks.forEach((chunk) => {
-        const q = query(
-          collection(db, 'users'),
-          where('__name__', 'in', chunk)
-        );
+      visibleFollowingIds.forEach((friendId) => {
+        const friendRef = doc(db, 'users', friendId);
         const unsub = onSnapshot(
-          q,
+          friendRef,
           (snap) => {
-            snap.docs.forEach((d) => acc.set(d.id, { id: d.id, ...d.data() }));
+            if (snap.exists()) {
+              acc.set(friendId, { id: friendId, ...snap.data() });
+            } else {
+              acc.delete(friendId);
+            }
             recomputeFriendsAndActivities();
           },
-          (err) => console.error('Friends listener error:', err)
+          (err) => {
+            if (err?.code === 'permission-denied') {
+              acc.delete(friendId);
+              recomputeFriendsAndActivities();
+            } else {
+              console.error('Friends listener error:', err);
+            }
+          }
         );
         unsubs.push(unsub);
       });
@@ -252,7 +335,138 @@ export default function MyCircle({ navigation }) {
       cancelled = true;
       unsubs.forEach((fn) => fn && fn());
     };
-  }, [JSON.stringify(followingIds), enhanceWithHostData]);
+  }, [JSON.stringify(visibleFollowingIds), enhanceWithHostData, blockContext]);
+
+  useEffect(() => {
+    const listeners = savedEventListenersRef.current;
+    const cache = savedEventCacheRef.current;
+    const currentIds = new Set(
+      savedRecords.map((rec) => rec.eventId).filter(Boolean)
+    );
+
+    listeners.forEach((unsub, eventId) => {
+      if (currentIds.has(eventId)) return;
+      try {
+        unsub && unsub();
+      } catch {}
+      listeners.delete(eventId);
+      cache.delete(eventId);
+    });
+
+    savedRecords.forEach((rec) => {
+      const eventId = rec.eventId;
+      if (!eventId || listeners.has(eventId)) return;
+      const ref = doc(db, 'events', eventId);
+      const unsub = onSnapshot(
+        ref,
+        (snap) => {
+          if (!snap.exists()) {
+            cache.delete(eventId);
+            setSavedCacheVersion((v) => v + 1);
+            return;
+          }
+          const data = { id: snap.id, ...snap.data() };
+          cache.set(eventId, data);
+          setSavedCacheVersion((v) => v + 1);
+        },
+        (err) => console.error('Saved event listener error:', err)
+      );
+      listeners.set(eventId, unsub);
+    });
+  }, [savedRecords]);
+
+  useEffect(() => {
+    return () => {
+      savedEventListenersRef.current.forEach((unsub) => {
+        try {
+          unsub && unsub();
+        } catch {}
+      });
+      savedEventListenersRef.current.clear();
+      savedEventCacheRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const computeSavedFeed = async () => {
+      const now = Date.now();
+      if (!savedRecords.length) {
+        if (!cancelled) setSavedFeed([]);
+        return;
+      }
+
+      const cache = savedEventCacheRef.current;
+      const missingIds = savedRecords
+        .map((rec) => rec.eventId)
+        .filter((id) => id && !cache.has(id));
+
+      if (missingIds.length) {
+        await Promise.all(
+          missingIds.map(async (eventId) => {
+            try {
+              const snap = await getDoc(doc(db, 'events', eventId));
+              if (snap.exists()) {
+                cache.set(eventId, { id: snap.id, ...snap.data() });
+              } else {
+                cache.delete(eventId);
+              }
+            } catch (err) {
+              console.error('Failed to hydrate saved event', err);
+            }
+          })
+        );
+      }
+
+      const pairs = savedRecords
+        .map((rec) => {
+          const event = cache.get(rec.eventId);
+          if (!event) return null;
+          return { record: rec, event };
+        })
+        .filter(Boolean)
+        .filter(({ record, event }) => {
+          if (!record.eventStartMs || record.eventStartMs <= now) return false;
+          if (event.isDeleted === true) return false;
+          const eventStart = getEventStartMs(event);
+          return eventStart > now;
+        });
+
+      const visiblePairs = pairs.filter(({ event }) =>
+        isEventVisibleForUser(event, blockContext)
+      );
+
+      if (!visiblePairs.length) {
+        if (!cancelled) setSavedFeed([]);
+        return;
+      }
+
+      const enhancedEvents = await enhanceWithHostData(
+        visiblePairs.map((p) => p.event)
+      );
+
+      const combined = visiblePairs
+        .map((pair, idx) => ({
+          record: pair.record,
+          event: enhancedEvents[idx],
+        }))
+        .sort((a, b) => b.record.savedAtMs - a.record.savedAtMs);
+
+      if (!cancelled) setSavedFeed(combined);
+    };
+
+    computeSavedFeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    savedRecords,
+    savedCacheVersion,
+    enhanceWithHostData,
+    getEventStartMs,
+    blockKey,
+  ]);
 
   const getEventStartMs = useCallback((event) => {
     if (!event?.date) return Number.MAX_SAFE_INTEGER;
@@ -275,10 +489,14 @@ export default function MyCircle({ navigation }) {
       if (unique.has(event.id)) return;
       unique.set(event.id, { ...event, viewerStatus: 'attending' });
     });
-    return Array.from(unique.values()).sort(
-      (a, b) => getEventStartMs(a) - getEventStartMs(b)
-    );
-  }, [attendingEvents, hostingEvents, getEventStartMs]);
+    return Array.from(unique.values())
+      .filter((event) =>
+        event.viewerStatus === 'hosting'
+          ? true
+          : isEventVisibleForUser(event, blockContext)
+      )
+      .sort((a, b) => getEventStartMs(a) - getEventStartMs(b));
+  }, [attendingEvents, hostingEvents, getEventStartMs, blockContext]);
 
   const hasUpcomingEvents = upcomingEvents.length > 0;
 
@@ -316,6 +534,130 @@ export default function MyCircle({ navigation }) {
   const renderCarouselSeparator = useCallback(
     () => <View style={{ width: cardSpacing }} />,
     [cardSpacing]
+  );
+
+  const markUnsaving = useCallback((eventId, value) => {
+    if (!eventId) return;
+    setUnsavingMap((prev) => {
+      const next = { ...prev };
+      if (value) next[eventId] = true;
+      else delete next[eventId];
+      return next;
+    });
+  }, []);
+
+  const handleRemoveSavedEvent = useCallback(
+    async (eventOrId) => {
+      const eventId =
+        typeof eventOrId === 'string'
+          ? eventOrId
+          : eventOrId?.id || eventOrId?.eventId;
+      if (!eventId || !user?.uid) return;
+      markUnsaving(eventId, true);
+      try {
+        await removeSavedEventForUser({ userId: user.uid, eventId });
+        const analyticsEvent =
+          typeof eventOrId === 'object' && eventOrId
+            ? eventOrId
+            : savedFeed.find((item) => item.event.id === eventId)?.event;
+        trackSaveEvent({
+          event_id: eventId,
+          surface: AnalyticsSurfaces.MY_CIRCLE,
+          source: AnalyticsSources.SAVED,
+          saved: false,
+          interest: analyticsEvent?.interest,
+          category: analyticsEvent?.category,
+        });
+      } catch (err) {
+        Alert.alert(
+          'Unable to remove',
+          err?.message || 'We could not unsave this event. Please try again.'
+        );
+      } finally {
+        markUnsaving(eventId, false);
+      }
+    },
+    [markUnsaving, savedFeed, user?.uid]
+  );
+
+  const savedSectionLoading = savedLoading && !savedReady;
+
+  const formatSavedEventDate = useCallback(
+    (event) => {
+      const ms = getEventStartMs(event);
+      if (!ms) return 'Date TBD';
+      return new Date(ms).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    },
+    [getEventStartMs]
+  );
+
+  const handleSavedEventPress = useCallback((event) => {
+    if (!event) return;
+    setSelectedEvent(event);
+  }, []);
+
+  const renderSavedEvent = useCallback(
+    ({ item }) => {
+      if (!item?.event?.id) return null;
+      const { event } = item;
+      const isUnsaving = !!unsavingMap[event.id];
+      const previewImage =
+        event.imageUrl || event.cardImage || 'https://via.placeholder.com/60';
+      const hostLabel = event.hostName
+        ? `Hosted by ${event.hostName}`
+        : null;
+      const interestLabel =
+        (item.record?.interest && item.record.interest.trim()) ||
+        (typeof event.interest === 'string' ? event.interest : null);
+
+      return (
+        <View style={styles.savedCard}>
+          <TouchableOpacity
+            style={styles.savedMain}
+            onPress={() => handleSavedEventPress(event)}
+            activeOpacity={0.82}
+          >
+            <Image source={{ uri: previewImage }} style={styles.savedImage} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.savedTitle} numberOfLines={1}>
+                {event.title || 'Untitled Event'}
+              </Text>
+              {interestLabel ? (
+                <View style={styles.savedChip}>
+                  <Text style={styles.savedChipText} numberOfLines={1}>
+                    {interestLabel}
+                  </Text>
+                </View>
+              ) : null}
+              <Text style={styles.savedMeta}>{formatSavedEventDate(event)}</Text>
+              {hostLabel ? (
+                <Text style={styles.savedHost} numberOfLines={1}>
+                  {hostLabel}
+                </Text>
+              ) : null}
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.savedIconButton}
+            onPress={() => handleRemoveSavedEvent(event)}
+            disabled={isUnsaving}
+            accessibilityLabel='Unsave event'
+          >
+            {isUnsaving ? (
+              <ActivityIndicator size='small' color='#4da6ff' />
+            ) : (
+              <Ionicons name='bookmark-outline' size={22} color='#4da6ff' />
+            )}
+          </TouchableOpacity>
+        </View>
+      );
+    },
+    [formatSavedEventDate, handleRemoveSavedEvent, handleSavedEventPress, unsavingMap]
   );
 
   const renderFriendActivity = ({ item }) => (
@@ -419,6 +761,25 @@ export default function MyCircle({ navigation }) {
           ) : (
             <Text style={styles.emptyState}>
               Add friends to see what they're up to.
+            </Text>
+          )}
+        </View>
+
+        {/* Saved Events */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🔖 Saved</Text>
+          {savedSectionLoading ? (
+            <ActivityIndicator size='small' color='#4da6ff' />
+          ) : savedFeed.length > 0 ? (
+            <FlatList
+              data={savedFeed}
+              renderItem={renderSavedEvent}
+              keyExtractor={(item) => item.event.id}
+              scrollEnabled={false}
+            />
+          ) : (
+            <Text style={styles.emptyState}>
+              Tap the bookmark icon on events to keep them handy.
             </Text>
           )}
         </View>
@@ -553,6 +914,63 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 8,
     marginLeft: 10,
+  },
+  savedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  savedMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  savedImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 14,
+    marginRight: 12,
+    backgroundColor: '#eef1f6',
+  },
+  savedTitle: {
+    fontWeight: '700',
+    color: '#222',
+    fontSize: 15,
+    marginBottom: 2,
+  },
+  savedMeta: {
+    color: '#555',
+    fontSize: 13,
+  },
+  savedChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E8F1FF',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  savedChipText: {
+    color: '#1D4ED8',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  savedHost: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  savedIconButton: {
+    padding: 6,
+    marginLeft: 8,
   },
   friendsHeader: {
     flexDirection: 'row',

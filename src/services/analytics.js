@@ -57,34 +57,72 @@ export function isEnabled() {
 
 // Description: Initialize analytics for a user session
 // user: { uid, analyticsOptIn?: boolean, interests?: string[] }
-export async function init(user) {
-  currentUid = user?.uid || null;
-  enabled = user?.analyticsOptIn === true;
+// New: Initialize analytics based on explicit consent at runtime.
+// Keeps native module lazy-loading via getRNFA() so this is safe in Expo Go.
+// Accepts either a user-like object or the explicit shape used elsewhere.
+export async function analyticsInit({ optedIn, uid, props } = {}) {
+  // update runtime flags
+  enabled = !!optedIn;
+  currentUid = uid || null;
+
   const a = await getRNFA();
   if (!a) return;
+
   try {
+    // Explicitly control collection at runtime (plist default should be OFF)
     await a.setAnalyticsCollectionEnabled(enabled);
-    if (enabled && currentUid) {
-      // Avoid setting raw PII as user properties
-      await a.setUserId(currentUid);
-      const interestsCount = Array.isArray(user?.interests)
-        ? Math.min(user.interests.length, 50)
-        : 0;
-      await a.setUserProperties({ interests_count: String(interestsCount) });
-    } else {
-      // Clear user context when disabled/signed-out
-      await a.setUserId(null);
+
+    // Optional: tweak session timeout (30 minutes)
+    try {
+      if (typeof a.setSessionTimeoutDuration === 'function') {
+        await a.setSessionTimeoutDuration(30 * 60 * 1000);
+      }
+    } catch (e) {
+      // noop
     }
-  } catch {}
+
+    if (enabled && currentUid) {
+      try {
+        // Avoid setting raw PII as user id/property values
+        await a.setUserId(String(currentUid));
+      } catch (e) {}
+    } else {
+      try {
+        await a.setUserId(null);
+      } catch (e) {}
+    }
+
+    if (enabled && props && typeof props === 'object') {
+      const entries = Object.entries(props).filter(
+        ([k, v]) => typeof v === 'string'
+      );
+      for (const [k, v] of entries) {
+        try {
+          await a.setUserProperty(k, v);
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
+
+// Backwards-compatible wrapper: accept the original user shape
+export async function init(user) {
+  const optedIn = user?.analyticsOptIn === true;
+  const uid = user?.uid || null;
+  const interestsCount = Array.isArray(user?.interests)
+    ? Math.min(user.interests.length, 50)
+    : 0;
+  const props = { interests_count: String(interestsCount) };
+  return analyticsInit({ optedIn, uid, props });
 }
 
 // Description: Toggle analytics collection for the current device
 export async function setOptIn(on) {
   enabled = !!on;
-  const a = await getRNFA();
-  if (!a) return;
+  // Ensure that toggling opt-in triggers full initialization behavior
+  // (collection flag, session timeout, user id/properties) when available.
   try {
-    await a.setAnalyticsCollectionEnabled(enabled);
+    await analyticsInit({ optedIn: enabled, uid: currentUid });
   } catch {}
 }
 
@@ -110,6 +148,11 @@ export async function event(name, params = {}) {
   try {
     await a.logEvent(name, sanitize(params));
   } catch {}
+}
+
+// Alias to match common naming in app code: track(name, params)
+export async function track(name, params = {}) {
+  return event(name, params);
 }
 
 // Description: Identify user with coarse properties only

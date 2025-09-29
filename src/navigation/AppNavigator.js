@@ -1,7 +1,7 @@
 // src/navigation/AppNavigator.js
 
-import React, { useEffect } from 'react';
-import { ActivityIndicator } from 'react-native';
+import React from 'react';
+import { View, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -25,7 +25,7 @@ import {
 } from '../features/events';
 import { EventChatScreen } from '../features/chat';
 import { InterestPostScreen } from '../features/interestPosts';
-import { NotificationScreen } from '../features/notifications';
+import { NotificationScreen, useNotificationStore } from '../features/notifications';
 import {
   ManageInterestsScreen,
   PrivacyInfoScreen,
@@ -98,6 +98,7 @@ function ProfileStackScreen() {
 // --- Main Tabs ---
 const Tab = createBottomTabNavigator();
 function MainTabs() {
+  const hasUnreadNotifications = useNotificationStore((s) => s.hasUnread);
   return (
     <Tab.Navigator
       initialRouteName='Map'
@@ -142,11 +143,14 @@ function MainTabs() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ focused, color, size }) => (
-            <Icon
-              name={focused ? 'person' : 'person-outline'}
-              color={color}
-              size={size}
-            />
+            <View style={styles.iconWrapper}>
+              <Icon
+                name={focused ? 'person' : 'person-outline'}
+                color={color}
+                size={size}
+              />
+              {hasUnreadNotifications && <View style={styles.notificationDot} />}
+            </View>
           ),
         }}
         listeners={({ navigation }) => ({
@@ -338,3 +342,22 @@ function AppNavigator({ user, profileComplete, initialOnboardingStep }) {
 }
 
 export default AppNavigator;
+
+const styles = StyleSheet.create({
+  iconWrapper: {
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#EF4444',
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+});

@@ -67,7 +67,7 @@ export const useEventStore = create(
 
           // Optionally seed chatStore with chat metadata (caller can implement chatStore seed)
           try {
-            const chatModule = await import('../chat/chatStore');
+            const chatModule = await import('../../chat/stores/chatStore');
             if (chatModule && chatModule.useChatStore) {
               const useChatStore = chatModule.useChatStore;
               const addChat = useChatStore.getState().addChat;

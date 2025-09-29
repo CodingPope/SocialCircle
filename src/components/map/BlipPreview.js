@@ -1,4 +1,10 @@
-import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
+import React, {
+  useMemo,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import {
   View,
   Text,
@@ -409,7 +415,20 @@ export default function BlipPreview({
             )}
             <TouchableOpacity
               onPress={(e) => {
-                e.stopPropagation();
+                // Some environments (native wrappers, forwarded events) may call
+                // this handler without a proper event object. Defensive guard to
+                // avoid "cannot read property 'stopPropagation' of undefined"
+                // errors that can surface in dev/TestFlight builds.
+                try {
+                  e?.stopPropagation?.();
+                } catch (err) {
+                  // If stopPropagation throws for any reason, swallow it and
+                  // continue to the primary action. We don't want this micro
+                  // interaction to crash the app in production.
+                  // eslint-disable-next-line no-console
+                  console.warn('[BlipPreview] stopPropagation failed', err);
+                }
+
                 handlePrimaryAction();
               }}
               style={[

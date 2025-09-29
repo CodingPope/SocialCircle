@@ -16,10 +16,14 @@ import {
   GoogleAuthProvider,
   signInWithCredential,
   fetchSignInMethodsForEmail,
+  OAuthProvider,
+  linkWithCredential,
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../../firebase/config';
 import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -42,6 +46,11 @@ import { GOOGLE_CLIENT_ID } from '@env';
 import { track as trackClient } from '../../../../lib/analytics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LoadingOverlay from '../../../../components/ui/LoadingOverlay';
+
+async function generateNonce(length = 32) {
+  const bytes = await Crypto.getRandomBytesAsync(length);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 export default function AuthScreen({ navigation, route }) {
   const [mode, setMode] = useState('login');
@@ -80,6 +89,145 @@ export default function AuthScreen({ navigation, route }) {
     Google.useIdTokenAuthRequest({
       clientId: GOOGLE_CLIENT_ID,
     });
+
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  useEffect(() => {
+    // Check availability once
+    let mounted = true;
+    AppleAuthentication.isAvailableAsync()
+      .then((v) => {
+        if (mounted) setAppleAvailable(!!v);
+      })
+      .catch(() => {});
+    return () => (mounted = false);
+  }, []);
+
+  // Description: Sign in with Apple handler
+  const handleAppleSignIn = async () => {
+    // Only available on iOS devices; expo-apple-authentication will guard accordingly
+    try {
+      setLoading(true);
+      // Generate a secure nonce and SHA256 it for Firebase as recommended
+      const rawNonce = await generateNonce();
+      const hashed = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        rawNonce
+      );
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashed,
+      });
+
+      // credential contains identityToken (JWT) which we can exchange with Firebase
+      if (!credential || !credential.identityToken) {
+        throw new Error('Apple Sign-In returned no identity token.');
+      }
+
+      // Create an OAuth credential for Firebase using the raw nonce
+      const provider = new OAuthProvider('apple.com');
+      const oauthCredential = provider.credential({
+        idToken: credential.identityToken,
+        rawNonce,
+      });
+
+      try {
+        const result = await signInWithCredential(auth, oauthCredential);
+
+        // If new user, create minimal profile (re-use createUser from profile services)
+        if (result?.additionalUserInfo?.isNewUser) {
+          const {
+            createUser,
+          } = require('../../../profile/services/userService');
+          const token = await registerForPushTokenAsync().catch(() => null);
+          await createUser(result.user.uid, {
+            email: result.user.email || '',
+            deviceToken: token || null,
+            pushOptIn: !!token,
+            premiumActive: false,
+            premiumTier: 'free',
+            premiumSince: null,
+            premiumUntil: null,
+            isPopular: false,
+            popularScore: 0,
+          });
+          if (token) initPushForUser(result.user.uid).catch(() => {});
+        } else {
+          initPushForUser(result.user.uid).catch(() => {});
+        }
+      } catch (err) {
+        // Handle account-exists-with-different-credential for Apple
+        const code = err?.code || err?.message || '';
+        if (code.includes('account-exists-with-different-credential')) {
+          // Save pending credential for linking after user signs in with existing provider
+          // We store it in-memory for now; for persistence consider storing in secure local storage
+          const pendingCred = oauthCredential;
+
+          // Ask user to sign in with the existing provider (we try Google if available)
+          Alert.alert(
+            'Account conflict',
+            'An account already exists with the same email but different sign-in method. Sign in with the existing method to link Apple to your account.',
+            [
+              {
+                text: 'Sign in with Google',
+                onPress: async () => {
+                  try {
+                    // Prompt Google sign-in flow and then link
+                    await googlePromptAsync();
+                    // Wait for googleResponse effect to handle signInWithCredential;
+                    // after user is signed in, try linking
+                    const unsubscribe = auth.onAuthStateChanged(
+                      async (user) => {
+                        if (user) {
+                          try {
+                            await linkWithCredential(user, pendingCred);
+                            Alert.alert(
+                              'Linked',
+                              'Apple account linked successfully.'
+                            );
+                          } catch (linkErr) {
+                            console.warn('Link error', linkErr);
+                            Alert.alert(
+                              'Link failed',
+                              linkErr?.message || String(linkErr)
+                            );
+                          }
+                          unsubscribe();
+                        }
+                      }
+                    );
+                  } catch (gErr) {
+                    Alert.alert(
+                      'Google Sign-In Failed',
+                      gErr?.message || String(gErr)
+                    );
+                  }
+                },
+              },
+              {
+                text: 'Cancel',
+                style: 'cancel',
+              },
+            ]
+          );
+        } else {
+          throw err;
+        }
+      }
+    } catch (err) {
+      // expo-apple-authentication throws with code 'ERR_CANCELED' when user cancels
+      if (err && err.code === 'ERR_CANCELED') {
+        // user cancelled, don't alert
+      } else {
+        Alert.alert('Apple Sign-In Error', err?.message || String(err));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     // Description: Handle Google sign-in and create user with full default schema if new
@@ -230,6 +378,8 @@ export default function AuthScreen({ navigation, route }) {
               savedCount: 0,
               referralCode: '',
               referredBy: '',
+              blocked: [],
+              blockedBy: [],
               rating: 0,
               ratingCount: 0,
               eventCount: 0,
@@ -386,6 +536,21 @@ export default function AuthScreen({ navigation, route }) {
                   Sign up with Google (Coming Soon)
                 </Text>
               </TouchableOpacity>
+            )}
+
+            {/* Sign in with Apple - iOS only */}
+            {appleAvailable && (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={
+                  AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                }
+                buttonStyle={
+                  AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={8}
+                style={{ width: '100%', height: 44, marginTop: 10 }}
+                onPress={handleAppleSignIn}
+              />
             )}
 
             <TouchableOpacity

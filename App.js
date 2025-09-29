@@ -9,7 +9,7 @@ import { db } from './src/firebase/config';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
-import { initPushForUser } from './src/features/notifications';
+import { initPushForUser, useNotificationStore } from './src/features/notifications';
 import Constants from 'expo-constants';
 import {
   initErrorReporting,
@@ -19,6 +19,7 @@ import {
   init as analyticsInit,
   setOptIn as analyticsSetOptIn,
 } from './src/services/analytics';
+import { screen as analyticsScreen } from './src/services/analytics';
 
 // Initialize error reporting once at module load to capture early errors
 // Sentry temporarily disabled until __extends error is resolved
@@ -42,6 +43,9 @@ function AppContent() {
   const [consentBusy, setConsentBusy] = useState(false);
   // Import onboarding router utility
   const { getNextOnboardingStep } = require('./src/utils/onboardingRouter');
+
+  const subscribeNotifications = useNotificationStore((s) => s.subscribe);
+  const clearNotifications = useNotificationStore((s) => s.unsubscribe);
 
   // Tag Sentry and initialize analytics with privacy flag when user changes
   useEffect(() => {
@@ -103,9 +107,13 @@ function AppContent() {
     (async () => {
       let dynamicLinksModule = null;
       try {
-        dynamicLinksModule = require('@react-native-firebase/dynamic-links').default;
+        dynamicLinksModule =
+          require('@react-native-firebase/dynamic-links').default;
       } catch (err) {
-        console.warn('[deep-link] Dynamic Links module unavailable', err?.message || err);
+        console.warn(
+          '[deep-link] Dynamic Links module unavailable',
+          err?.message || err
+        );
         return;
       }
 
@@ -118,7 +126,9 @@ function AppContent() {
       } catch {}
 
       unsubscribeDynamic = instance.onLink((link) => handleLink(link?.url));
-      linkingSub = Linking.addEventListener('url', ({ url }) => handleLink(url));
+      linkingSub = Linking.addEventListener('url', ({ url }) =>
+        handleLink(url)
+      );
     })();
 
     return () => {
@@ -179,6 +189,19 @@ function AppContent() {
     }
   }, [user?.uid, user?.analyticsOptIn, user?.analyticsPromptedAt]);
 
+  useEffect(() => {
+    if (!user?.uid) {
+      clearNotifications();
+      return;
+    }
+    const unsub = subscribeNotifications(user.uid);
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+    };
+  }, [user?.uid, subscribeNotifications, clearNotifications]);
+
   const persistAnalyticsChoice = useCallback(
     async (accepted) => {
       if (!user?.uid) return;
@@ -218,23 +241,61 @@ function AppContent() {
         recordDailySessionHeartbeat(user);
       }
     };
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    const subscription = AppState.addEventListener(
+      'change',
+      handleAppStateChange
+    );
     return () => subscription.remove();
   }, [user?.uid]);
 
-  const navigator = user && onboardingStep ? (
-    <NavigationContainer ref={navigationRef}>
-      <AppNavigator
-        user={user}
-        profileComplete={false}
-        initialOnboardingStep={onboardingStep}
-      />
-    </NavigationContainer>
-  ) : (
-    <NavigationContainer ref={navigationRef}>
-      <AppNavigator user={user} profileComplete={profileComplete} />
-    </NavigationContainer>
-  );
+  const navigator =
+    user && onboardingStep ? (
+      <NavigationContainer
+        ref={navigationRef}
+        onReady={() => {
+          try {
+            const rn = navigationRef.current?.getCurrentRoute()?.name;
+            navigationRef.routeNameRef = rn;
+            if (rn) analyticsScreen(rn);
+          } catch {}
+        }}
+        onStateChange={async () => {
+          try {
+            const prev = navigationRef.routeNameRef;
+            const curr = navigationRef.current?.getCurrentRoute()?.name;
+            if (curr && curr !== prev) await analyticsScreen(curr);
+            navigationRef.routeNameRef = curr;
+          } catch {}
+        }}
+      >
+        <AppNavigator
+          user={user}
+          profileComplete={false}
+          initialOnboardingStep={onboardingStep}
+        />
+      </NavigationContainer>
+    ) : (
+      <NavigationContainer
+        ref={navigationRef}
+        onReady={() => {
+          try {
+            const rn = navigationRef.current?.getCurrentRoute()?.name;
+            navigationRef.routeNameRef = rn;
+            if (rn) analyticsScreen(rn);
+          } catch {}
+        }}
+        onStateChange={async () => {
+          try {
+            const prev = navigationRef.routeNameRef;
+            const curr = navigationRef.current?.getCurrentRoute()?.name;
+            if (curr && curr !== prev) await analyticsScreen(curr);
+            navigationRef.routeNameRef = curr;
+          } catch {}
+        }}
+      >
+        <AppNavigator user={user} profileComplete={profileComplete} />
+      </NavigationContainer>
+    );
 
   return (
     <>

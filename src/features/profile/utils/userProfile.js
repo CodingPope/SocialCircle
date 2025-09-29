@@ -65,6 +65,8 @@ export function buildInitialUserDoc({ uid, email, raw = {} }) {
     eventCount: 0,
     followCount: 0,
     savedCount: 0,
+    blocked: [],
+    blockedBy: [],
 
     referralCode: '',
     referredBy: '',

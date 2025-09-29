@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Animated,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import AttendeeBubbleRow from './AttendeeBubbleRow';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -31,8 +32,19 @@ import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { Video } from 'expo-video';
 import joinEvent from '../services/joinEvent';
-import { trackCardClick, trackReportContent } from '../../../lib/analytics';
+import {
+  trackCardClick,
+  trackReportContent,
+  trackSaveEvent,
+  AnalyticsSurfaces,
+  AnalyticsSources,
+} from '../../../lib/analytics';
 import { shareEvent } from '../../../services/share';
+import {
+  saveEventForUser,
+  removeSavedEventForUser,
+} from '../services/savedEvents';
+import { useSavedEventsStore } from '../stores/savedEventsStore';
 
 export default function PostCard({ event, onPress, onJoinPress }) {
   // Description: Get current user from Zustand userStore
@@ -51,6 +63,12 @@ export default function PostCard({ event, onPress, onJoinPress }) {
   const [requestedLocal, setRequestedLocal] = useState(false);
   const [joinLoading, setJoinLoading] = useState(false);
   const [joinFeedback, setJoinFeedback] = useState(null);
+  const [saveBusy, setSaveBusy] = useState(false);
+
+  const eventId = event?.id || null;
+  const isEventSaved = useSavedEventsStore((state) =>
+    eventId ? !!state.savedMap[eventId] : false
+  );
 
   // Derived: soft-delete and expiry checks to control UI (fix ReferenceError)
   const isSoftDeleted = event?.isDeleted === true;
@@ -161,6 +179,54 @@ export default function PostCard({ event, onPress, onJoinPress }) {
       alert('Failed to report the event. Please try again.');
     }
   }, [event.id, user.uid]);
+
+  const handleToggleSave = useCallback(async () => {
+    if (!eventId) return;
+    if (!user?.uid) {
+      Alert.alert('Sign in required', 'Log in to save events for later.');
+      return;
+    }
+    if (saveBusy) return;
+
+    setSaveBusy(true);
+    const targetSaved = !isEventSaved;
+    try {
+      if (isEventSaved) {
+        await removeSavedEventForUser({ userId: user.uid, eventId });
+      } else {
+        await saveEventForUser({
+          userId: user.uid,
+          event,
+          surface: 'discover_card',
+          source: 'discover_card',
+        });
+      }
+
+      trackSaveEvent({
+        event_id: eventId,
+        surface: AnalyticsSurfaces.DISCOVER,
+        source: AnalyticsSources.CARD,
+        saved: targetSaved,
+        interest: event?.interest,
+        category: event?.category,
+      });
+    } catch (err) {
+      Alert.alert(
+        'Save failed',
+        err?.message || 'Unable to update your saved events right now.'
+      );
+    } finally {
+      setSaveBusy(false);
+    }
+  }, [
+    event,
+    event?.category,
+    event?.interest,
+    eventId,
+    isEventSaved,
+    saveBusy,
+    user?.uid,
+  ]);
 
   // Friendly callable error message mapper
   const getFriendlyJoinError = useCallback((err) => {
@@ -545,6 +611,26 @@ export default function PostCard({ event, onPress, onJoinPress }) {
         <View style={styles.info}>
           <View style={styles.headerActions}>
             <TouchableOpacity
+              style={styles.saveIcon}
+              onPress={handleToggleSave}
+              disabled={saveBusy || !eventId}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole='button'
+              accessibilityLabel={
+                isEventSaved ? 'Remove from saved events' : 'Save event'
+              }
+            >
+              {saveBusy ? (
+                <ActivityIndicator size='small' color='#2563EB' />
+              ) : (
+                <Ionicons
+                  name={isEventSaved ? 'bookmark' : 'bookmark-outline'}
+                  size={20}
+                  color={isEventSaved ? '#2563EB' : '#2563EB'}
+                />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.shareIcon}
               onPress={() =>
                 shareEvent(event, {
@@ -715,6 +801,12 @@ const styles = StyleSheet.create({
     zIndex: 10,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  saveIcon: {
+    padding: 6,
+    marginRight: 6,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderRadius: 999,
   },
   shareIcon: {
     padding: 6,

@@ -129,6 +129,8 @@ export async function createUser(uid, userData) {
     savedCount: 0,
     referralCode: '',
     referredBy: '',
+    blocked: [],
+    blockedBy: [],
     // Add any other fields your app expects
     createdAt: new Date(),
     lastActive: new Date(),

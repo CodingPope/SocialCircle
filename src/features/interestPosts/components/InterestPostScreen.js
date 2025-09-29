@@ -190,7 +190,7 @@ export default function InterestPostScreen() {
         prev ? { ...prev, commentCount: (prev.commentCount || 0) + 1 } : prev
       );
       const targetPost = post ? { ...post, id: postId } : { id: postId };
-      await notifyPostComment(targetPost, created);
+      notifyPostComment(targetPost, created);
       try {
         trackEvent('post_comment', {
           post_id: postId,

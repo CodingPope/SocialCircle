@@ -29,6 +29,7 @@ import {
 import {
   getFunctions,
   httpsCallable,
+  httpsCallableFromURL,
   httpsCallable as callFn,
 } from 'firebase/functions';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -207,60 +208,137 @@ export const unfollowUser = async (currentUid, targetUid) => {
 
 // Send a notification via callable (server-side creation only)
 export const sendNotification = async (type, recipientId, data = {}) => {
-  try {
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.warn('sendNotification skipped: no authenticated user');
-      return { ok: false, skipped: true };
-    }
+  const currentUser = auth.currentUser;
+  const hasCurrentUser = Boolean(currentUser);
+  if (!hasCurrentUser) {
+    console.warn('sendNotification skipped: no authenticated user');
+    return { ok: false, skipped: true };
+  }
 
-    let idToken;
+  const basePayload = { type, recipientId, data };
+  const callable = httpsCallable(functions, 'createNotification');
+
+  // Keep a reusable helper so we can fetch or refresh the ID token when the callable complains.
+  const ensureIdToken = async (forceRefresh = false) => {
+    if (!currentUser) return null;
     try {
-      idToken = await currentUser.getIdToken(true);
-    } catch (tokenErr) {
-      console.warn('sendNotification token refresh failed', tokenErr);
-      try {
-        idToken = await currentUser.getIdToken();
-      } catch (fallbackErr) {
-        console.warn('sendNotification token recovery failed', fallbackErr);
+      const token = await currentUser.getIdToken(forceRefresh);
+      return typeof token === 'string' && token.length > 0 ? token : null;
+    } catch (err) {
+      const label = forceRefresh
+        ? 'sendNotification token refresh failed'
+        : 'sendNotification token fetch failed';
+      console.warn(label, err?.message || err);
+      return null;
+    }
+  };
+
+  let idToken = await ensureIdToken(false);
+  let idTokenRetrieved = Boolean(idToken);
+
+  const buildCallablePayload = (token) =>
+    token ? { ...basePayload, authToken: token } : basePayload;
+
+  try {
+    const callablePayload = buildCallablePayload(idToken);
+    const result = await callable(callablePayload);
+    if (result?.data) return result.data;
+    return { ok: true };
+  } catch (callableError) {
+    const code = callableError?.code || 'unknown';
+    const message = callableError?.message || String(callableError);
+    console.warn('sendNotification callable error', { code, message });
+
+    if (code === 'functions/unauthenticated') {
+      idToken = await ensureIdToken(true);
+      idTokenRetrieved = Boolean(idToken);
+      if (idTokenRetrieved) {
+        try {
+          const retryPayload = buildCallablePayload(idToken);
+          const retryResult = await callable(retryPayload);
+          if (retryResult?.data) return retryResult.data;
+          return { ok: true };
+        } catch (retryError) {
+          const retryCode = retryError?.code || 'unknown';
+          const retryMessage = retryError?.message || String(retryError);
+          console.warn('sendNotification callable retry failed', {
+            code: retryCode,
+            message: retryMessage,
+          });
+        }
       }
     }
+  }
 
-    if (!idToken) {
-      console.warn('sendNotification skipped: no auth token available');
-      return { ok: false, skipped: true };
+  if (!idTokenRetrieved) {
+    idToken = await ensureIdToken(true);
+    idTokenRetrieved = Boolean(idToken);
+  }
+
+  if (!idTokenRetrieved) {
+    console.warn(
+      'sendNotification fallback skipped: unable to obtain auth token',
+      { hasCurrentUser, idTokenRetrieved }
+    );
+    return { ok: false, skipped: true };
+  }
+
+  // Resolve the callable HTTPS endpoint, favouring explicit override and falling back to project ID.
+  const resolveFunctionsOrigin = () => {
+    const env = typeof process !== 'undefined' ? process.env : undefined;
+    const explicitOrigin =
+      typeof env?.EXPO_PUBLIC_FUNCTIONS_ORIGIN === 'string'
+        ? env.EXPO_PUBLIC_FUNCTIONS_ORIGIN.trim()
+        : '';
+    if (explicitOrigin) return explicitOrigin;
+
+    const projectIdCandidates = [
+      env?.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+      env?.FIREBASE_PROJECT_ID,
+      FIREBASE_PROJECT_ID,
+      app?.options?.projectId,
+    ];
+    const projectId = projectIdCandidates.find(
+      (value) => typeof value === 'string' && value.trim().length > 0
+    );
+    if (projectId) {
+      const trimmed = projectId.trim();
+      return `https://us-central1-${trimmed}.cloudfunctions.net`;
     }
 
-    const projectId = FIREBASE_PROJECT_ID;
-    const defaultOrigin = projectId
-      ? `https://us-central1-${projectId}.cloudfunctions.net`
-      : 'https://us-central1.cloudfunctions.net';
-    const functionsOrigin =
-      process.env.EXPO_PUBLIC_FUNCTIONS_ORIGIN ||
-      process.env.FUNCTIONS_ORIGIN ||
-      defaultOrigin;
-    const callablePath = `${functionsOrigin.replace(/\/$/, '')}/createNotification`;
+    return '';
+  };
 
-    const payload = { type, recipientId, data };
-
-    const response = await fetch(callablePath, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
-      body: JSON.stringify({ data: payload }),
+  const origin = resolveFunctionsOrigin();
+  if (!origin) {
+    console.warn('sendNotification fallback skipped: no functions origin resolved', {
+      hasCurrentUser,
+      idTokenRetrieved,
     });
+    return { ok: false, skipped: true };
+  }
 
-    if (!response.ok) {
-      const message = await response.text().catch(() => '');
-      throw new Error(`Notification request failed (${response.status}): ${message}`);
-    }
+  const normalizedOrigin = origin.replace(/\/$/, '');
+  const callablePath = `${normalizedOrigin}/createNotification`;
+  const fallbackPayload = buildCallablePayload(idToken);
 
-    const json = await response.json().catch(() => ({}));
-    return json?.result || json || { ok: true };
+  console.warn('sendNotification callable fallback invoked', {
+    callablePath,
+    functionsOrigin: normalizedOrigin,
+    hasCurrentUser,
+    idTokenRetrieved,
+    payloadKeys: Object.keys(fallbackPayload || {}),
+  });
+
+  try {
+    const fallbackCallable = httpsCallableFromURL(functions, callablePath);
+    const response = await fallbackCallable(fallbackPayload);
+    if (response?.data) return response.data;
+    return { ok: true };
   } catch (e) {
-    console.error('sendNotification failed:', e);
+    const code = e?.code || 'unknown';
+    const message = e?.message || String(e);
+    console.error('sendNotification fallback callable failed', { code, message });
     throw e;
   }
 };

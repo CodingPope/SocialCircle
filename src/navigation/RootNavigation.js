@@ -53,8 +53,9 @@ export function navigateToOtherUserProfile(userId) {
   });
 }
 
-export function navigateToEventChat(eventId) {
-  navigate('EventChat', { eventId });
+export function navigateToEventChat(eventId, extraParams = {}) {
+  if (!eventId) return;
+  navigate('EventChat', { eventId, ...extraParams });
 }
 
 export function navigateToInterestPost(postId, initialPost) {

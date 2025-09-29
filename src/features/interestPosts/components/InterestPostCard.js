@@ -123,7 +123,7 @@ export default function InterestPostCard({
       setCommentVisible(false);
       setCommentCount((prev) => prev + 1);
       onCommentCreated?.(created);
-      await notifyPostComment(post, { ...created, id: created.id });
+      notifyPostComment(post, { ...created, id: created.id });
       try {
         trackEvent('post_comment', {
           post_id: post.id,
