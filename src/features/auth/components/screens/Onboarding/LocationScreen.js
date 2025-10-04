@@ -14,11 +14,10 @@ import {
   requestForegroundPermissionsAsync,
   getCurrentPositionAsync,
 } from 'expo-location';
-import { doc, updateDoc } from 'firebase/firestore';
 import { useUserStore } from '../../../../profile';
-import { db } from '../../../../../firebase/config';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
 import { geohashForLocation } from 'geofire-common';
+import { mergeUserFields } from '../../../../profile/services/userService';
 
 export default function LocationScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
@@ -27,6 +26,7 @@ export default function LocationScreen({ navigation }) {
   const [manualZip, setManualZip] = useState('');
   const [manualSaving, setManualSaving] = useState(false);
   const user = useUserStore((state) => state.user);
+  const setUser = useUserStore((state) => state.setUser);
 
   const computeCoarseHash5 = (lat, lng) => {
     try {
@@ -52,10 +52,13 @@ export default function LocationScreen({ navigation }) {
     }
     if (city) payload.city = city;
 
-    await updateDoc(doc(db, 'users', user.uid), payload);
+    await mergeUserFields(user.uid, {
+      ...payload,
+      deviceToken: user?.deviceToken ?? null,
+      pushOptIn: user?.pushOptIn ?? false,
+    });
 
-    // Update Zustand user state
-    useUserStore.getState().setUser({
+    setUser({
       ...user,
       ...(payload.location ? { location: payload.location } : {}),
       ...(payload.coarseGeohash5
@@ -156,15 +159,12 @@ export default function LocationScreen({ navigation }) {
       // Optionally store the postal code as well
       if (resolvedZip) {
         try {
-          await updateDoc(doc(db, 'users', user.uid), {
+          await mergeUserFields(user.uid, {
             postalCode: resolvedZip,
+            deviceToken: user?.deviceToken ?? null,
+            pushOptIn: user?.pushOptIn ?? false,
           });
-          useUserStore
-            .getState()
-            .setUser({
-              ...useUserStore.getState().user,
-              postalCode: resolvedZip,
-            });
+          setUser({ ...useUserStore.getState().user, postalCode: resolvedZip });
         } catch {}
       }
 

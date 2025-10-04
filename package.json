@@ -1,13 +1,14 @@
 {
   "name": "socialscene",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "jest"
+    "test": "jest",
+    "seed:categories": "node scripts/replaceCategories.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",

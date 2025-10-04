@@ -1,5 +1,9 @@
 // At top of functions/index.js
-const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const {
+  onCall,
+  onRequest,
+  HttpsError,
+} = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
 const {
   onDocumentUpdated,
@@ -17,9 +21,13 @@ const projectId = process.env.GCLOUD_PROJECT;
 
 const SHARE_CONFIG = Object.freeze({
   apiKey:
-    process.env.SHARE_DYNAMIC_LINK_API_KEY || process.env.FIREBASE_API_KEY || '',
+    process.env.SHARE_DYNAMIC_LINK_API_KEY ||
+    process.env.FIREBASE_API_KEY ||
+    '',
   domainUriPrefix:
-    process.env.SHARE_DYNAMIC_LINK_PREFIX || process.env.DYNAMIC_LINK_PREFIX || '',
+    process.env.SHARE_DYNAMIC_LINK_PREFIX ||
+    process.env.DYNAMIC_LINK_PREFIX ||
+    '',
   previewBase:
     process.env.SHARE_WEB_FALLBACK_BASE ||
     (projectId
@@ -58,8 +66,7 @@ async function createShortDynamicLink({ link, title, description, imageUrl }) {
       link,
       androidInfo: {
         androidPackageName: SHARE_CONFIG.androidPackageName,
-        androidFallbackLink:
-          SHARE_CONFIG.androidFallbackUrl || undefined,
+        androidFallbackLink: SHARE_CONFIG.androidFallbackUrl || undefined,
       },
       iosInfo: {
         iosBundleId: SHARE_CONFIG.iosBundleId,
@@ -115,9 +122,9 @@ async function buildEventPreview(eventId) {
     : '';
 
   const where = data.location?.address || data.address || '';
-  const description = truncate([whenLabel, where, data.description]
-    .filter(Boolean)
-    .join(' • '));
+  const description = truncate(
+    [whenLabel, where, data.description].filter(Boolean).join(' • ')
+  );
 
   return {
     title: data.title || 'Social Circle Event',
@@ -143,7 +150,8 @@ async function buildPostPreview(postId) {
 
   return {
     title: `${author} on Social Circle`,
-    description: truncate(data.content, 200) || 'See what’s happening on Social Circle.',
+    description:
+      truncate(data.content, 200) || 'See what’s happening on Social Circle.',
     imageUrl: data.mediaUrl || data.mediaThumbnailUrl || null,
     raw: data,
   };
@@ -197,7 +205,10 @@ async function buildProfilePreview(userId) {
 }
 
 function buildShareTargetUrl(type, id) {
-  return `${SHARE_CONFIG.previewBase.replace(/\/$/, '')}/${type}/${encodeURIComponent(id)}`;
+  return `${SHARE_CONFIG.previewBase.replace(
+    /\/$/,
+    ''
+  )}/${type}/${encodeURIComponent(id)}`;
 }
 
 // -------------------- EXISTING FUNCTIONS (unchanged) --------------------
@@ -280,8 +291,10 @@ exports.blockUser = onCall(
   async (req) => {
     const caller = req.auth?.uid;
     const targetUid = (req.data?.targetUid || '').trim();
-    if (!caller) throw new HttpsError('unauthenticated', 'Authentication required');
-    if (!targetUid) throw new HttpsError('invalid-argument', 'Missing targetUid');
+    if (!caller)
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!targetUid)
+      throw new HttpsError('invalid-argument', 'Missing targetUid');
     if (targetUid === caller) {
       throw new HttpsError('invalid-argument', 'Cannot block yourself');
     }
@@ -339,8 +352,10 @@ exports.unblockUser = onCall(
   async (req) => {
     const caller = req.auth?.uid;
     const targetUid = (req.data?.targetUid || '').trim();
-    if (!caller) throw new HttpsError('unauthenticated', 'Authentication required');
-    if (!targetUid) throw new HttpsError('invalid-argument', 'Missing targetUid');
+    if (!caller)
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    if (!targetUid)
+      throw new HttpsError('invalid-argument', 'Missing targetUid');
     if (targetUid === caller) {
       throw new HttpsError('invalid-argument', 'Cannot unblock yourself');
     }
@@ -620,31 +635,33 @@ exports.shareGenerateLink = onCall(
   }
 );
 
-exports.sharePreview = onRequest({ region: 'us-central1' }, async (req, res) => {
-  try {
-    const type = req.query?.type || req.query?.t;
-    const id = req.query?.id;
-    if (!type || !id) {
-      res.status(400).send('Missing type or id');
-      return;
-    }
-    const normalized = type.toString().toLowerCase();
-    let preview;
-    if (normalized === 'event') {
-      preview = await buildEventPreview(id);
-    } else if (normalized === 'post') {
-      preview = await buildPostPreview(id);
-    } else if (normalized === 'profile' || normalized === 'user') {
-      preview = await buildProfilePreview(id);
-    } else {
-      res.status(400).send('Unsupported type');
-      return;
-    }
+exports.sharePreview = onRequest(
+  { region: 'us-central1' },
+  async (req, res) => {
+    try {
+      const type = req.query?.type || req.query?.t;
+      const id = req.query?.id;
+      if (!type || !id) {
+        res.status(400).send('Missing type or id');
+        return;
+      }
+      const normalized = type.toString().toLowerCase();
+      let preview;
+      if (normalized === 'event') {
+        preview = await buildEventPreview(id);
+      } else if (normalized === 'post') {
+        preview = await buildPostPreview(id);
+      } else if (normalized === 'profile' || normalized === 'user') {
+        preview = await buildProfilePreview(id);
+      } else {
+        res.status(400).send('Unsupported type');
+        return;
+      }
 
-    const title = truncate(preview.title, 70) || 'Social Circle';
-    const description = truncate(preview.description, 160);
-    const image = preview.imageUrl;
-    const html = `<!DOCTYPE html>
+      const title = truncate(preview.title, 70) || 'Social Circle';
+      const description = truncate(preview.description, 160);
+      const image = preview.imageUrl;
+      const html = `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -675,13 +692,14 @@ exports.sharePreview = onRequest({ region: 'us-central1' }, async (req, res) => 
   </body>
 </html>`;
 
-    res.set('Cache-Control', 'public, max-age=300, s-maxage=600');
-    res.status(200).send(html);
-  } catch (err) {
-    logger.error('[sharePreview] failed', err);
-    res.status(500).send('Unable to render preview');
+      res.set('Cache-Control', 'public, max-age=300, s-maxage=600');
+      res.status(200).send(html);
+    } catch (err) {
+      logger.error('[sharePreview] failed', err);
+      res.status(500).send('Unable to render preview');
+    }
   }
-});
+);
 
 // NEW: Trigger push when a notification document is created
 exports.onNotificationCreatedPush = onDocumentCreated(
@@ -1482,7 +1500,8 @@ exports.createNotification = onCall(
       req.rawRequest?.headers?.Authorization ||
       null;
     const headerToken =
-      typeof headerValue === 'string' && headerValue.toLowerCase().startsWith('bearer ')
+      typeof headerValue === 'string' &&
+      headerValue.toLowerCase().startsWith('bearer ')
         ? headerValue.slice(7).trim()
         : null;
 
@@ -2786,4 +2805,276 @@ exports.submitBusiness = onCall(async (req) => {
   );
   return { ok: true, status };
 });
+
+// HTTP function to update categories (easier to call from terminal)
+exports.updateCategoriesHttp = onRequest(
+  {
+    region: 'us-central1',
+    cors: true,
+  },
+  async (request, response) => {
+    // Simple security: require a secret key or admin context
+    const secretKey = request.query.secret || request.body?.secret;
+    if (secretKey !== 'update-categories-2025') {
+      response.status(403).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const categoriesRef = db.collection('categories');
+
+      // Clear existing documents
+      logger.info('Clearing existing categories...');
+      const existing = await categoriesRef.listDocuments();
+
+      // Delete in batches of 500 (Firestore limit)
+      for (let i = 0; i < existing.length; i += 500) {
+        const chunk = existing.slice(i, i + 500);
+        const batch = db.batch();
+        chunk.forEach((docRef) => batch.delete(docRef));
+        await batch.commit();
+      }
+
+      // Load categories from the JSON file
+      const allCategories = require('./categories.json');
+
+      // Add new categories
+      logger.info('Adding new categories...');
+      let batch = db.batch();
+      let writes = 0;
+
+      for (const category of allCategories) {
+        const docRef = categoriesRef.doc(category.id);
+        batch.set(docRef, {
+          name: category.name?.trim() || '',
+          emoji: category.emoji?.trim() || '',
+          interests: (category.interests || []).map((interest) => ({
+            name: interest.name?.trim() || '',
+            count_selected: Number(interest.count_selected) || 0,
+            count_event_matches: Number(interest.count_event_matches) || 0,
+            count_event_views: Number(interest.count_event_views) || 0,
+            count_event_joins: Number(interest.count_event_joins) || 0,
+            last_activity: interest.last_activity || null,
+          })),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        writes += 1;
+
+        // Commit batch every 500 writes (Firestore limit)
+        if (writes % 500 === 0) {
+          await batch.commit();
+          batch = db.batch();
+        }
+      }
+
+      // Commit remaining writes
+      if (writes % 500 !== 0) {
+        await batch.commit();
+      }
+
+      logger.info(`Successfully updated ${writes} categories`);
+      response.json({ success: true, categoriesUpdated: writes });
+    } catch (error) {
+      logger.error('Error updating categories:', error);
+      response
+        .status(500)
+        .json({ error: 'Failed to update categories', details: error.message });
+    }
+  }
+);
+
+// Function to update categories from the new categories data
+exports.updateCategories = onCall(
+  {
+    region: 'us-central1',
+    enforceAppCheck: false, // Allow for admin calls
+  },
+  async (request) => {
+    // Description: Updates all categories in Firestore with new structure
+    const { auth, data } = request;
+
+    // Simple authentication check - you can remove this if running from admin context
+    // For now, let's allow any authenticated user to run this (you can restrict later)
+    if (!auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Must be authenticated');
+    }
+
+    const newCategories = [
+      {
+        id: 'active_outdoors',
+        name: 'active outdoors',
+        emoji: '',
+        interests: [
+          {
+            name: 'Hiking',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Trail Running',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Backpacking',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Cycling',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Mountain Biking',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Climbing',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Skiing',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Snowboarding',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Rafting',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Fishing',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Paddleboarding',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Kayaking',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+          {
+            name: 'Yoga',
+            count_selected: 0,
+            count_event_matches: 0,
+            count_event_views: 0,
+            count_event_joins: 0,
+            last_activity: '2025-07-30T00:00:00Z',
+          },
+        ],
+      },
+      // ... (I'll add the rest in the actual function, keeping this short for readability)
+    ];
+
+    try {
+      const categoriesRef = db.collection('categories');
+
+      // Clear existing documents
+      logger.info('Clearing existing categories...');
+      const existing = await categoriesRef.listDocuments();
+
+      // Delete in batches of 500 (Firestore limit)
+      for (let i = 0; i < existing.length; i += 500) {
+        const chunk = existing.slice(i, i + 500);
+        const batch = db.batch();
+        chunk.forEach((docRef) => batch.delete(docRef));
+        await batch.commit();
+      }
+
+      // Add new categories
+      logger.info('Adding new categories...');
+      let batch = db.batch();
+      let writes = 0;
+
+      const allCategories =
+        data?.categories || require('../scripts/categories.json');
+
+      for (const category of allCategories) {
+        const docRef = categoriesRef.doc(category.id);
+        batch.set(docRef, {
+          name: category.name?.trim() || '',
+          emoji: category.emoji?.trim() || '',
+          interests: (category.interests || []).map((interest) => ({
+            name: interest.name?.trim() || '',
+            count_selected: Number(interest.count_selected) || 0,
+            count_event_matches: Number(interest.count_event_matches) || 0,
+            count_event_views: Number(interest.count_event_views) || 0,
+            count_event_joins: Number(interest.count_event_joins) || 0,
+            last_activity: interest.last_activity || null,
+          })),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        writes += 1;
+
+        // Commit batch every 500 writes (Firestore limit)
+        if (writes % 500 === 0) {
+          await batch.commit();
+          batch = db.batch();
+        }
+      }
+
+      // Commit remaining writes
+      if (writes % 500 !== 0) {
+        await batch.commit();
+      }
+
+      logger.info(`Successfully updated ${writes} categories`);
+      return { success: true, categoriesUpdated: writes };
+    } catch (error) {
+      logger.error('Error updating categories:', error);
+      throw new HttpsError('internal', 'Failed to update categories');
+    }
+  }
+);
+
 //# sourceMappingURL=index.js.map

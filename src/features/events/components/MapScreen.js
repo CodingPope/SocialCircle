@@ -39,6 +39,7 @@ import { Ionicons } from '@expo/vector-icons';
 // NEW: previews + markers
 import BlipMarker from '../../../components/map/BlipMarker';
 import BlipPreview from '../../../components/map/BlipPreview';
+import { CategoryMarker } from '../../../components/map/CategoryMarker';
 import { Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useEventStore } from '../stores/eventStore';
@@ -1079,12 +1080,12 @@ export default function MapScreen() {
             // Defensive: ensure marker has a valid location and isn't soft-deleted
             .filter((e) => e && e.location && !e.isDeleted)
             .map((event) => {
-              // Rendering BlipMarker for event
+              // Rendering CategoryMarker for event with category emoji
               return (
-                <BlipMarker
+                <CategoryMarker
                   key={event.id}
                   event={event}
-                  onPress={onMarkerPress}
+                  onPress={() => onMarkerPress(event)}
                 />
               );
             })}

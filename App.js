@@ -6,7 +6,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef, navigate } from './src/navigation/RootNavigation';
 import { useUserStore } from './src/features/profile';
 import { db } from './src/firebase/config';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
 import { initPushForUser, useNotificationStore } from './src/features/notifications';
@@ -18,8 +18,9 @@ import {
 import {
   init as analyticsInit,
   setOptIn as analyticsSetOptIn,
+  screen as analyticsScreen,
+  event as analyticsEvent,
 } from './src/services/analytics';
-import { screen as analyticsScreen } from './src/services/analytics';
 
 // Initialize error reporting once at module load to capture early errors
 // Sentry temporarily disabled until __extends error is resolved
@@ -36,6 +37,7 @@ function AppContent() {
   // Description: Get user from Zustand store
   const user = useUserStore((state) => state.user);
   const storeLoading = useUserStore((state) => state.loading);
+  const setUser = useUserStore((state) => state.setUser);
   const [profileComplete, setProfileComplete] = useState(false);
   const [checking, setChecking] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(null);
@@ -206,25 +208,92 @@ function AppContent() {
     async (accepted) => {
       if (!user?.uid) return;
       setConsentBusy(true);
-      const now = new Date();
+      const timestamp = serverTimestamp();
+      const acceptedFlag = !!accepted;
+      const localTimestamp = new Date();
+      let writeSucceeded = false;
       try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          analyticsOptIn: !!accepted,
-          analyticsUpdatedAt: now,
-          analyticsPromptedAt: now,
-          analyticsConsentVersion: 1,
-        });
+        await setDoc(
+          doc(db, 'users', user.uid),
+          {
+            analyticsOptIn: acceptedFlag,
+            analyticsUpdatedAt: timestamp,
+            analyticsPromptedAt: timestamp,
+            analyticsConsentVersion: 1,
+          },
+          { merge: true }
+        );
+        writeSucceeded = true;
       } catch (err) {
-        console.error('Failed to persist analytics consent', err);
+        if (err?.code === 'permission-denied') {
+          try {
+            await setDoc(
+              doc(db, 'users', user.uid),
+              {
+                type: 'user',
+                email: user.email || '',
+                premiumActive: false,
+                isPopular: false,
+                status: 'active',
+                verified: false,
+                isDeleted: false,
+                deletedAt: null,
+                analyticsOptIn: acceptedFlag,
+                analyticsUpdatedAt: timestamp,
+                analyticsPromptedAt: timestamp,
+                analyticsConsentVersion: 1,
+              },
+              { merge: true }
+            );
+            writeSucceeded = true;
+          } catch (fallbackErr) {
+            console.error(
+              'Failed to persist analytics consent after fallback',
+              fallbackErr
+            );
+            throw fallbackErr;
+          }
+        } else {
+          console.error('Failed to persist analytics consent', err);
+          throw err;
+        }
       } finally {
         setConsentBusy(false);
         setShowAnalyticsPrompt(false);
       }
+
+      if (!writeSucceeded) return;
+
+      if (typeof setUser === 'function') {
+        try {
+          setUser({
+            ...user,
+            analyticsOptIn: acceptedFlag,
+            analyticsConsentVersion: 1,
+            analyticsPromptedAt: localTimestamp,
+            analyticsUpdatedAt: localTimestamp,
+          });
+        } catch (err) {
+          console.warn('Failed to update local user store with consent', err);
+        }
+      }
+
       try {
-        await analyticsSetOptIn(!!accepted);
+        await analyticsSetOptIn(acceptedFlag);
+        await analyticsInit({
+          optedIn: acceptedFlag,
+          uid: user.uid,
+          props: {
+            plan: user?.plan || 'free',
+            interests_count: String(user?.interests?.length || 0),
+          },
+        });
+        await analyticsEvent('analytics_consent', {
+          status: acceptedFlag ? 'accepted' : 'declined',
+        });
       } catch {}
     },
-    [user?.uid]
+    [setUser, user]
   );
 
   const showLoadingOverlay = storeLoading || checking;

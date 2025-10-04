@@ -25,7 +25,7 @@ export default function AnalyticsConsentPrompt({
     >
       <View style={styles.backdrop}>
         <View style={styles.card}>
-          <Text style={styles.title}>Allow Anonymous Analytics?</Text>
+          <Text style={styles.title}>Allow Analytics?</Text>
           <Text style={styles.body}>
             We use privacy-safe analytics to understand which features are
             working and to improve the experience. Turn this on to help us make

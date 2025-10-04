@@ -33,22 +33,125 @@ function InterestsScreen({ navigation }) {
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const snapshot = await getDocs(collection(db, 'categories'));
-        const fetchedCategories = snapshot.docs.map((categoryDoc) => ({
-          id: categoryDoc.id,
-          name: categoryDoc.data().name,
-          interests: categoryDoc.data().interests || [],
-        }));
+        const categorySnap = await getDocs(collection(db, 'categories'));
+        let userSnap = null;
+        try {
+          userSnap = await getDocs(collection(db, 'users'));
+        } catch (countErr) {
+          console.warn('Failed to load interest adoption counts', countErr);
+        }
 
-        const allInterests = fetchedCategories.flatMap((cat) => cat.interests);
-        fetchedCategories.unshift({
-          id: 'all',
-          name: 'All',
-          interests: allInterests,
+        const counts = {};
+        if (userSnap) {
+          userSnap.forEach((docSnap) => {
+            const data = docSnap.data() || {};
+            const interests = Array.isArray(data.interests)
+              ? data.interests
+              : [];
+            interests.forEach((interest) => {
+              const key = String(interest || '').trim();
+              if (!key) return;
+              counts[key] = (counts[key] || 0) + 1;
+            });
+          });
+        }
+
+        const interestMap = new Map();
+        const interestOrder = [];
+        const orderIndex = new Map();
+        const normalizeInterest = (interest) => {
+          if (!interest) return null;
+          if (typeof interest === 'string') {
+            const name = interest.trim();
+            if (!name) return null;
+            const item = { name, count: counts[name] || 0 };
+            if (!interestMap.has(name)) {
+              interestMap.set(name, item);
+              interestOrder.push(name);
+              orderIndex.set(name, interestOrder.length - 1);
+            }
+            return { ...item };
+          }
+          const name = String(interest.name || '').trim();
+          if (!name) return null;
+          const item = {
+            ...interest,
+            name,
+            count: counts[name] || 0,
+          };
+          if (!interestMap.has(name)) {
+            interestMap.set(name, item);
+            interestOrder.push(name);
+            orderIndex.set(name, interestOrder.length - 1);
+          }
+          return { ...item };
+        };
+
+        const baseCategories = categorySnap.docs.map((categoryDoc) => {
+          const data = categoryDoc.data() || {};
+          const normalizedInterests = Array.isArray(data.interests)
+            ? data.interests
+                .map((interest) => normalizeInterest(interest))
+                .filter(Boolean)
+            : [];
+          return {
+            id: categoryDoc.id,
+            name: data.name || categoryDoc.id,
+            interests: normalizedInterests,
+          };
         });
 
-        setCategories(fetchedCategories);
-        setActiveCategory(fetchedCategories[0]?.id || '');
+        const filteredBaseCategories = baseCategories.filter((category) => {
+          const id = String(category.id || '').toLowerCase();
+          const name = String(category.name || '').toLowerCase();
+          return (
+            id !== 'all' &&
+            id !== 'popular' &&
+            name !== 'all' &&
+            name !== 'popular'
+          );
+        });
+
+        const uniqueInterests = interestOrder
+          .map((name) => interestMap.get(name))
+          .filter(Boolean);
+
+        const allCategory = {
+          id: 'all',
+          name: 'All',
+          interests: uniqueInterests,
+        };
+
+        const sortedPopular = [...uniqueInterests].sort((a, b) => {
+          const diff = (b.count || 0) - (a.count || 0);
+          if (diff !== 0) return diff;
+          const aIndex = orderIndex.get(a.name) ?? 0;
+          const bIndex = orderIndex.get(b.name) ?? 0;
+          return aIndex - bIndex;
+        });
+
+        const POPULAR_LIMIT = 30;
+        const withActivity = sortedPopular.filter(
+          (item) => (item.count || 0) > 0
+        );
+        const popularInterests =
+          withActivity.length >= POPULAR_LIMIT
+            ? withActivity.slice(0, POPULAR_LIMIT)
+            : sortedPopular.slice(0, POPULAR_LIMIT);
+
+        const popularCategory =
+          popularInterests.length > 0
+            ? { id: 'popular', name: 'Popular', interests: popularInterests }
+            : null;
+
+        const categoriesWithSpecials = [
+          ...(popularCategory ? [popularCategory] : []),
+          allCategory,
+          ...filteredBaseCategories,
+        ];
+
+        setCategories(categoriesWithSpecials);
+        setActiveCategory(popularCategory ? 'popular' : 'all');
         fadeIn();
       } catch (e) {
         console.error(e);
@@ -88,12 +191,32 @@ function InterestsScreen({ navigation }) {
         setLoading(false);
         return;
       }
+      // Update Firestore and local user store
       await updateDoc(doc(db, 'users', user.uid), { interests: selected });
+
+      // Update the user store with new interests immediately
+      useUserStore.getState().setUser({ ...user, interests: selected });
+
       await logOnboardingStepComplete('interests', {
         selected_count: selected.length,
       });
-      await logOnboardingDone({ source: 'core_onboarding' });
-      useUserStore.getState().setProfileComplete(true);
+
+      // Check if there are more onboarding steps after interests
+      const {
+        getNextOnboardingStep,
+      } = require('../../../../../utils/onboardingRouter');
+      const updatedUserData = { ...user, interests: selected };
+      const nextStep = getNextOnboardingStep(updatedUserData);
+
+      if (nextStep) {
+        // More steps remaining, navigate to the next one
+        navigation.navigate(nextStep);
+      } else {
+        // Onboarding complete, mark profile as complete
+        await logOnboardingDone({ source: 'core_onboarding' });
+        useUserStore.getState().setProfileComplete(true);
+        // The AppNavigator will automatically switch to main app when profileComplete becomes true
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -102,13 +225,7 @@ function InterestsScreen({ navigation }) {
   };
 
   const currentActivities =
-    activeCategory === 'all'
-      ? Array.from(
-          new Map(
-            categories.flatMap((cat) => cat.interests).map((a) => [a.name, a])
-          ).values()
-        )
-      : categories.find((cat) => cat.id === activeCategory)?.interests || [];
+    categories.find((cat) => cat.id === activeCategory)?.interests || [];
 
   const filteredActivities = currentActivities.filter((activity) =>
     activity.name.toLowerCase().includes(filterText.toLowerCase())
@@ -117,7 +234,10 @@ function InterestsScreen({ navigation }) {
   return (
     <AnimatedGradientBackground style={styles.safe}>
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.contentContainer}>
+        <ScrollView
+          contentContainerStyle={styles.contentContainer}
+          style={{ flex: 1 }}
+        >
           <View style={styles.header}>
             <TouchableOpacity
               onPress={() => {
@@ -197,12 +317,6 @@ function InterestsScreen({ navigation }) {
             />
           )}
 
-          <View style={styles.selectedCountRow}>
-            <Text style={styles.selectedCountText}>
-              {selected.length} Selected
-            </Text>
-          </View>
-
           <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
             <View style={styles.activitiesGrid}>
               {filteredActivities.length > 0 ? (
@@ -225,6 +339,20 @@ function InterestsScreen({ navigation }) {
                     >
                       {activity.name}
                     </Text>
+                    {(activity.count || 0) > 0 && (
+                      <>
+                        <View style={styles.countDivider} />
+                        <Text
+                          style={[
+                            styles.countText,
+                            selected.includes(activity.name) &&
+                              styles.selectedCountText,
+                          ]}
+                        >
+                          {activity.count}
+                        </Text>
+                      </>
+                    )}
                     {selected.includes(activity.name) && (
                       <Ionicons
                         name='checkmark'
@@ -242,16 +370,24 @@ function InterestsScreen({ navigation }) {
               )}
             </View>
           </Animated.View>
+        </ScrollView>
 
+        {/* Sticky Footer */}
+        <View style={styles.stickyFooter}>
+          <View style={styles.selectedCountBadge}>
+            <Text style={styles.selectedCountBadgeText}>
+              {selected.length} Selected
+            </Text>
+          </View>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
           {loading ? (
-            <ActivityIndicator style={{ marginVertical: 20 }} color='#fff' />
+            <ActivityIndicator style={{ marginVertical: 10 }} color='#fff' />
           ) : (
             <TouchableOpacity style={styles.nextButton} onPress={onNext}>
               <Text style={styles.nextButtonText}>Next</Text>
             </TouchableOpacity>
           )}
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </ScrollView>
+        </View>
       </SafeAreaView>
     </AnimatedGradientBackground>
   );
@@ -259,7 +395,7 @@ function InterestsScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  contentContainer: { paddingBottom: 24 },
+  contentContainer: { paddingBottom: 120 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -270,8 +406,8 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#222',
-    textShadowColor: 'rgba(255,255,255,0.25)',
+    color: '#fff',
+    textShadowColor: 'rgba(0,0,0,0.15)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
@@ -300,25 +436,25 @@ const styles = StyleSheet.create({
   activeCategoryChip: { backgroundColor: '#fff' },
   categoryChipText: {
     fontSize: 14,
-    color: '#222',
+    color: '#fff',
     fontWeight: '600',
-    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowColor: 'rgba(0,0,0,0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
   },
   activeCategoryChipText: {
     color: '#ff6b6b',
     fontWeight: '800',
-    textShadowColor: 'rgba(255,255,255,0.22)',
+    textShadowColor: 'rgba(0,0,0,0.05)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   selectedCountRow: { paddingHorizontal: 16, paddingTop: 8 },
   selectedCountText: {
     fontSize: 14,
-    color: '#222',
+    color: '#fff',
     fontWeight: '600',
-    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowColor: 'rgba(0,0,0,0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
   },
@@ -330,8 +466,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   activityChip: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 18,
     paddingVertical: 8,
     paddingHorizontal: 12,
     margin: 5,
@@ -344,55 +480,123 @@ const styles = StyleSheet.create({
   },
   activityText: {
     fontSize: 15,
-    color: '#222',
+    color: '#fff',
     fontWeight: '600',
-    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowColor: 'rgba(0,0,0,0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
+    flexShrink: 0,
   },
   selectedActivityText: {
     color: '#ff6b6b',
     fontWeight: '800',
-    textShadowColor: 'rgba(255,255,255,0.22)',
+    textShadowColor: 'rgba(0,0,0,0.05)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+    textShadowRadius: 1,
   },
-  checkIcon: { marginLeft: 5 },
+  countDivider: {
+    width: 1,
+    height: '80%',
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    marginHorizontal: 8,
+  },
+  countText: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '700',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+    flexShrink: 0,
+  },
+  selectedCountText: {
+    color: '#ff6b6b',
+    textShadowColor: 'rgba(0,0,0,0.05)',
+  },
+  checkIcon: {
+    marginLeft: 5,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
   emptyState: {
     fontSize: 15,
-    color: '#222',
+    color: '#fff',
     textAlign: 'center',
     marginTop: 20,
     width: '100%',
     fontWeight: '600',
-    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowColor: 'rgba(0,0,0,0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
+  },
+  stickyFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(168, 166, 166, 0.35)',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.4)',
+    alignItems: 'center',
+    backdropFilter: 'blur(40px)',
+  },
+  selectedCountBadge: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    marginBottom: 12,
+  },
+  selectedCountBadgeText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '700',
+    textShadowColor: 'rgba(0,0,0,0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
   },
   nextButton: {
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(255,255,255,0.3)',
     borderRadius: 25,
     paddingVertical: 14,
     alignItems: 'center',
-    margin: 16,
+    width: '100%',
+    marginBottom: 26,
   },
   nextButtonText: {
-    color: '#222',
+    color: '#fff',
     fontSize: 17,
     fontWeight: '700',
-    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowColor: 'rgba(0,0,0,0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
   },
-  error: { color: 'red', textAlign: 'center', marginBottom: 10 },
+  error: {
+    color: '#FF4A4A',
+    textAlign: 'center',
+    marginBottom: 10,
+    backgroundColor: 'rgba(255,74,74,0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    width: '100%',
+    fontWeight: '600',
+  },
   sectionLabel: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#222',
+    color: '#fff',
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 4,
-    textShadowColor: 'rgba(255,255,255,0.18)',
+    textShadowColor: 'rgba(0,0,0,0.1)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
   },

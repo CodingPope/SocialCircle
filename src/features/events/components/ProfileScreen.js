@@ -56,7 +56,12 @@ import { shareProfile } from '../../../services/share';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import { trackReportContent } from '../../../lib/analytics';
-import { getEventEndMs, getTimelineTimestamp, mergeUniqueEvents } from '../utils/dateUtils';
+import {
+  getEventEndMs,
+  getTimelineTimestamp,
+  mergeUniqueEvents,
+} from '../utils/dateUtils';
+import { getBadgeConfig, DEFAULT_BADGE } from '../../profile/utils/badgeConfig';
 
 export default function ProfileScreen({ navigation }) {
   // Description: Get current user from Zustand userStore
@@ -452,7 +457,9 @@ export default function ProfileScreen({ navigation }) {
           : Array.isArray(postsResult)
           ? postsResult
           : [];
-        setInterestPosts(timelinePosts.filter((post) => post?.isDeleted !== true));
+        setInterestPosts(
+          timelinePosts.filter((post) => post?.isDeleted !== true)
+        );
       } catch (err) {
         console.warn('Failed to refresh interest posts', err);
       }
@@ -579,7 +586,9 @@ export default function ProfileScreen({ navigation }) {
 
       if (isMounted) setUserEvents({ created, attending, attended });
       if (isMounted)
-        setInterestPosts(creatorPosts.filter((post) => post?.isDeleted !== true));
+        setInterestPosts(
+          creatorPosts.filter((post) => post?.isDeleted !== true)
+        );
       if (isMounted) setLoadingEvents(false);
     }
     fetchUserEvents();
@@ -1119,7 +1128,11 @@ export default function ProfileScreen({ navigation }) {
             <Text style={styles.statLabel}>Events</Text>
           </TouchableOpacity>
           <View style={styles.statCard}>
-            <MaterialIcons name='star' size={28} color='#FFD700' />
+            <Image
+              source={getBadgeConfig(user?.currentBadge || DEFAULT_BADGE).image}
+              style={styles.badgeImage}
+              resizeMode='contain'
+            />
             <Text style={styles.statLabel}>Badges</Text>
           </View>
         </View>
@@ -1253,10 +1266,7 @@ export default function ProfileScreen({ navigation }) {
                 }}
                 onPress={(e, dest) =>
                   handleEventClick(e.id, {
-                    source:
-                      dest === 'EventChat'
-                        ? 'EventChat'
-                        : undefined,
+                    source: dest === 'EventChat' ? 'EventChat' : undefined,
                   })
                 }
                 onEllipsisPress={(e) => handleEllipsisClick(e)}
@@ -1410,7 +1420,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   statValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  statLabel: { fontSize: 13, color: '#777', marginTop: 4 },
+  statLabel: { fontSize: 13, color: '#777', marginTop: 2 },
+  badgeImage: {
+    width: 40,
+    height: 40,
+  },
   bioContainer: {
     backgroundColor: '#fff',
     marginTop: 16,

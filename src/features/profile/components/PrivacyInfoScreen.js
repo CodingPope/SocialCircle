@@ -17,11 +17,13 @@ import { useUserStore } from '../stores/userStore';
 import {
   setOptIn as analyticsSetOptIn,
   analyticsInit,
+  event as analyticsEvent,
 } from '../../../services/analytics';
 
 // Description: Centralized screen to manage privacy and legal information
 export default function PrivacyInfoScreen({ navigation }) {
   const user = useUserStore((s) => s.user);
+  const setUser = useUserStore((s) => s.setUser);
   const [analyticsOptIn, setAnalyticsOptIn] = useState(!!user?.analyticsOptIn);
   useEffect(
     () => setAnalyticsOptIn(!!user?.analyticsOptIn),
@@ -30,30 +32,56 @@ export default function PrivacyInfoScreen({ navigation }) {
 
   const toggleAnalytics = async () => {
     const next = !analyticsOptIn;
-    setAnalyticsOptIn(next); // optimistic
-    try {
-      if (user?.uid) {
+    const now = new Date();
+    setAnalyticsOptIn(next);
+    let persisted = false;
+    if (user?.uid) {
+      try {
         await updateDoc(doc(db, 'users', user.uid), {
           analyticsOptIn: next,
-          analyticsUpdatedAt: new Date(),
+          analyticsUpdatedAt: now,
         });
-        // Initialize analytics immediately after successful update so
-        // we can set coarse props (plan, interests_count) right away.
-        try {
-          await analyticsInit({
-            optedIn: next,
-            uid: user.uid,
-            props: {
-              plan: user.plan || 'free',
-              interests_count: String(user.interests?.length || 0),
-            },
-          });
-        } catch {}
+        persisted = true;
+      } catch (error) {
+        console.warn('Failed to update analytics preference in Firestore', error);
       }
-    } catch {}
+    }
+
+    if (!persisted) {
+      setAnalyticsOptIn(!next);
+      return;
+    }
+
+    if (typeof setUser === 'function') {
+      try {
+        setUser({
+          ...user,
+          analyticsOptIn: next,
+          analyticsUpdatedAt: now,
+        });
+      } catch (error) {
+        console.warn('Failed to update local user store with analytics toggle', error);
+      }
+    }
+
     try {
       await analyticsSetOptIn(next);
-    } catch {}
+      if (user?.uid) {
+        await analyticsInit({
+          optedIn: next,
+          uid: user.uid,
+          props: {
+            plan: user.plan || 'free',
+            interests_count: String(user.interests?.length || 0),
+          },
+        });
+      }
+      await analyticsEvent('analytics_personalization_toggle', {
+        status: next ? 'enabled' : 'disabled',
+      });
+    } catch (error) {
+      console.warn('Failed to synchronize analytics preference', error);
+    }
   };
 
   const openArticle = (title, contentKey) => {

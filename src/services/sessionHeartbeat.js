@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { serverTimestamp } from 'firebase/firestore';
+import { mergeUserFields } from '../features/profile/services/userService';
 import { event as analyticsEvent } from './analytics';
 import { trackSessionStart } from '../lib/analytics';
 
@@ -42,14 +42,10 @@ export async function recordDailySessionHeartbeat(user) {
   }
 
   try {
-    await setDoc(
-      doc(db, 'users', uid),
-      {
-        lastActiveAt: serverTimestamp(),
-        lastSessionCadence: 'daily',
-      },
-      { merge: true }
-    );
+    await mergeUserFields(uid, {
+      lastActiveAt: serverTimestamp(),
+      lastSessionCadence: 'daily',
+    });
   } catch (err) {
     console.warn('sessionHeartbeat: failed to update user doc', err?.message || err);
   }

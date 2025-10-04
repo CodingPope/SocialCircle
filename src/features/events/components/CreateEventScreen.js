@@ -11,7 +11,10 @@ import {
   FlatList,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -44,21 +47,24 @@ const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
 const MAX_LEAD_DAYS = 7; // hard limit: at most 7 days in the future
 const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
 const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
+const MINUTE_INCREMENT = 5; // tweak to 10 or 30 if you want fewer choices in the picker
 
-// Description: Round UP to the next 5-minute boundary to avoid rounding backwards
-const roundUpToFiveMinutes = (inputDate) => {
+// Description: Round UP to the next configured minute boundary to avoid rounding backwards
+const roundUpToMinuteIncrement = (inputDate) => {
   const d = new Date(inputDate);
   d.setSeconds(0);
   d.setMilliseconds(0);
+  if (!MINUTE_INCREMENT || MINUTE_INCREMENT < 1) return d;
   const minutes = d.getMinutes();
-  const remainder = minutes % 5;
-  if (remainder !== 0) d.setMinutes(minutes + (5 - remainder));
+  const remainder = minutes % MINUTE_INCREMENT;
+  if (remainder !== 0) d.setMinutes(minutes + (MINUTE_INCREMENT - remainder));
   return d;
 };
 
 export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
+  const safeAreaInsets = useSafeAreaInsets();
 
   // Debug: print Firebase runtime info to help diagnose permission errors
   useEffect(() => {
@@ -77,9 +83,9 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   // Missing states restored
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  // Default date: 30 minutes in the future, rounded up to next 5-minute slot
+  // Default date: 30 minutes in the future, rounded up to the configured minute slot
   const [date, setDate] = useState(() =>
-    roundUpToFiveMinutes(new Date(Date.now() + MIN_MILLIS))
+    roundUpToMinuteIncrement(new Date(Date.now() + MIN_MILLIS))
   );
   const [manualAddress, setManualAddress] = useState('');
   const [manualLocation, setManualLocation] = useState(null);
@@ -110,14 +116,14 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const hideDatePicker = () => setIsDatePickerVisible(false);
 
   const handleConfirmDate = (selectedDate) => {
-    // Clamp to [now + 30min, now + 7days] and round up to next 5-min slot
+    // Clamp to [now + 30min, now + 7days] and round up to the configured minute slot
     const now = new Date();
     const min = new Date(now.getTime() + MIN_MILLIS);
     const max = new Date(now.getTime() + MAX_MILLIS);
 
-    let picked = roundUpToFiveMinutes(selectedDate);
-    if (picked < min) picked = roundUpToFiveMinutes(min);
-    if (picked > max) picked = roundUpToFiveMinutes(max);
+    let picked = roundUpToMinuteIncrement(selectedDate);
+    if (picked < min) picked = roundUpToMinuteIncrement(min);
+    if (picked > max) picked = roundUpToMinuteIncrement(max);
 
     setDate(picked);
     hideDatePicker();
@@ -228,7 +234,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       date: Timestamp.fromDate(date),
       createdAt: Timestamp.now(),
       ageRange,
-      capacity: capacity ? parseInt(capacity, 10) : 0,
+      capacity: capacity ? parseInt(capacity, 10) : null,
       privacy: privacyValue,
       genderFilter: 'any',
       ownerId: user.uid,
@@ -452,6 +458,22 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <TouchableOpacity
+        style={[
+          styles.closeButton,
+          {
+            top: (safeAreaInsets?.top || 0) + 8,
+            left: (safeAreaInsets?.left || 0) + 16,
+          },
+        ]}
+        onPress={() => onCancel?.()}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityRole='button'
+        accessibilityLabel='Close create event form'
+        activeOpacity={0.7}
+      >
+        <Ionicons name='close' size={22} color='#333' />
+      </TouchableOpacity>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -518,6 +540,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 onCancel={hideDatePicker}
                 minimumDate={new Date(Date.now() + MIN_MILLIS)}
                 maximumDate={new Date(Date.now() + MAX_MILLIS)}
+                minuteInterval={MINUTE_INCREMENT}
                 themeVariant='light' // Explicitly set theme to light
                 textColor='#000' // Ensure text is visible
               />
@@ -679,12 +702,30 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#fff',
+    position: 'relative',
   },
   container: {
     padding: 20,
     paddingBottom: 70,
     backgroundColor: '#fff',
     flex: 1,
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 12,
+    left: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   preview: { width: '100%', height: 200, borderRadius: 8, marginBottom: 10 },
   previewPlaceholder: {

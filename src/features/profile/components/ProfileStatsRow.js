@@ -1,12 +1,13 @@
 // src/components/profile/ProfileStatsRow.js
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { getBadgeConfig, DEFAULT_BADGE } from '../utils/badgeConfig';
 
 export default function ProfileStatsRow({
   friendsCount = 0,
   eventsCount = 0,
+  currentBadge = DEFAULT_BADGE,
   onFriendsPress,
   onEventsPress,
   onBadgesPress,
@@ -16,7 +17,11 @@ export default function ProfileStatsRow({
       <StatItem label='Friends' value={friendsCount} onPress={onFriendsPress} />
       <StatItem label='Events' value={eventsCount} onPress={onEventsPress} />
       <TouchableOpacity style={styles.item} onPress={onBadgesPress}>
-        <Ionicons name='star' size={18} color='#000' />
+        <Image
+          source={getBadgeConfig(currentBadge).image}
+          style={styles.badgeImage}
+          resizeMode='contain'
+        />
         <Text style={styles.label}>Badges</Text>
       </TouchableOpacity>
     </View>
@@ -41,4 +46,8 @@ const styles = StyleSheet.create({
   item: { alignItems: 'center' },
   value: { fontSize: 18, fontWeight: '700' },
   label: { fontSize: 12, color: '#777', marginTop: 2 },
+  badgeImage: {
+    width: 32,
+    height: 32,
+  },
 });

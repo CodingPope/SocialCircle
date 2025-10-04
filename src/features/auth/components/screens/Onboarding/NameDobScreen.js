@@ -13,13 +13,14 @@ import {
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
-import { Timestamp, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../../../../firebase/config';
+import { Timestamp } from 'firebase/firestore';
 import { useUserStore } from '../../../../profile';
+import { mergeUserFields } from '../../../../profile/services/userService';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
 
 export default function NameDobScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
+  const setUser = useUserStore((state) => state.setUser);
   // State for name fields
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -92,13 +93,25 @@ export default function NameDobScreen({ navigation }) {
       return;
     }
 
+    const trimmedFirst = firstName.trim();
+    const trimmedLast = lastName.trim();
+
     setLoading(true);
     setError('');
     try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        firstName,
-        lastName,
-        dob: Timestamp.fromDate(dob),
+      const firebaseDob = Timestamp.fromDate(dob);
+      await mergeUserFields(user.uid, {
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
+        dob: firebaseDob,
+        deviceToken: user?.deviceToken ?? null,
+        pushOptIn: user?.pushOptIn ?? false,
+      });
+      setUser({
+        ...user,
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
+        dob: firebaseDob,
       });
       await logOnboardingStepComplete('name_dob');
       navigation.reset({ index: 0, routes: [{ name: 'Sex' }] });

@@ -9,9 +9,11 @@ import {
   updateDoc,
   setDoc,
   getDoc,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { geohashForLocation } from 'geofire-common';
 import { track as trackClient } from '../../../lib/analytics';
+import { DEFAULT_BADGE } from '../utils/badgeConfig';
 
 /**
  * Checks if a user with the given email exists and is soft-deleted.
@@ -108,9 +110,36 @@ function coarseGeohash5(lat, lng) {
 // Description: Creates a new user document with all required fields and defaults
 // filepath: src/services/userService.js
 
-export async function createUser(uid, userData) {
+const CLIENT_RESTRICTED_USER_KEYS = [
+  'premiumTier',
+  'premiumSince',
+  'premiumUntil',
+  'popularScore',
+  'businessTier',
+  'plan',
+  'type',
+];
+
+function sanitizeUserPayload(data = {}) {
+  const clone = { ...data };
+  for (const key of CLIENT_RESTRICTED_USER_KEYS) {
+    if (key in clone) delete clone[key];
+  }
+  return clone;
+}
+
+function normalizeDeviceToken(token) {
+  if (typeof token !== 'string') return null;
+  return /^ExponentPushToken/.test(token) ? token : null;
+}
+
+export async function createUser(uid, userData = {}) {
   const db = getFirestore();
+  const sanitizedInput = sanitizeUserPayload(userData);
+
   const defaultUser = {
+    type: 'user',
+    email: '',
     firstName: '',
     lastName: '',
     dob: null,
@@ -131,26 +160,22 @@ export async function createUser(uid, userData) {
     referredBy: '',
     blocked: [],
     blockedBy: [],
-    // Add any other fields your app expects
-    createdAt: new Date(),
-    lastActive: new Date(),
-    isDeleted: false, // Soft delete flag
-    deletedAt: null, // Timestamp for deletion
-    coarseGeohash5: null, // analytics-friendly, privacy-preserving geohash
-    // Premium & popularity defaults
+    coarseGeohash5: null,
     premiumActive: false,
-    premiumTier: 'free', // free | premium | business (future)
-    premiumSince: null,
-    premiumUntil: null,
     isPopular: false,
-    popularScore: 0,
+    deviceToken: null,
+    pushOptIn: false,
+    isDeleted: false,
+    deletedAt: null,
+    // Badge system fields
+    badges: [DEFAULT_BADGE], // Array of earned badge IDs
+    currentBadge: DEFAULT_BADGE, // Currently displayed badge
   };
 
-  // Compute coarse geohash if a valid location is provided in userData
   let coarse = null;
   try {
-    const lat = userData?.location?.latitude;
-    const lng = userData?.location?.longitude;
+    const lat = sanitizedInput?.location?.latitude;
+    const lng = sanitizedInput?.location?.longitude;
     if (
       typeof lat === 'number' &&
       typeof lng === 'number' &&
@@ -161,22 +186,93 @@ export async function createUser(uid, userData) {
     }
   } catch {}
 
+  const now = serverTimestamp();
+  const deviceToken = normalizeDeviceToken(sanitizedInput.deviceToken);
   const payload = {
     ...defaultUser,
-    ...userData,
-    coarseGeohash5: coarse ?? null,
-    // Guard: if caller omitted, ensure defaults persist
-    premiumActive: userData?.premiumActive ?? defaultUser.premiumActive,
-    premiumTier: userData?.premiumTier ?? defaultUser.premiumTier,
-    premiumSince: userData?.premiumSince ?? defaultUser.premiumSince,
-    premiumUntil: userData?.premiumUntil ?? defaultUser.premiumUntil,
-    isPopular: userData?.isPopular ?? defaultUser.isPopular,
-    popularScore: userData?.popularScore ?? defaultUser.popularScore,
+    ...sanitizedInput,
+    email: sanitizedInput.email ?? defaultUser.email,
+    deviceToken,
+    pushOptIn: deviceToken ? true : Boolean(sanitizedInput.pushOptIn),
+    createdAt: sanitizedInput.createdAt ?? now,
+    lastActive: sanitizedInput.lastActive ?? now,
+    coarseGeohash5: coarse ?? defaultUser.coarseGeohash5,
   };
 
-  console.log('[userService] Creating user in Firestore:', uid, userData);
-  await setDoc(doc(db, 'users', uid), payload);
+  const minimalFallback = {
+    type: 'user',
+    email: payload.email,
+    premiumActive: false,
+    isPopular: false,
+    status: 'active',
+    verified: false,
+    pushOptIn: payload.pushOptIn,
+    deviceToken,
+    createdAt: now,
+    lastActive: now,
+    isDeleted: false,
+    deletedAt: null,
+  };
+
+  console.log('[userService] Creating user in Firestore:', uid, sanitizedInput);
+  try {
+    await setDoc(doc(db, 'users', uid), payload, { merge: true });
+  } catch (err) {
+    if (err?.code === 'permission-denied') {
+      console.warn(
+        '[userService] Primary createUser denied, attempting minimal fallback',
+        err?.message || err
+      );
+      await setDoc(doc(db, 'users', uid), minimalFallback, { merge: true });
+    } else {
+      throw err;
+    }
+  }
   console.log('[userService] User created in Firestore:', uid);
+}
+
+export async function mergeUserFields(uid, data = {}) {
+  if (!uid) return;
+  const db = getFirestore();
+  const sanitizedInput = sanitizeUserPayload(data);
+  const patch = { ...sanitizedInput };
+
+  if ('deviceToken' in patch) {
+    patch.deviceToken = normalizeDeviceToken(patch.deviceToken);
+  }
+  if ('pushOptIn' in patch) {
+    patch.pushOptIn = !!patch.pushOptIn;
+  }
+
+  const basePayload = {
+    type: 'user',
+    premiumActive: false,
+    isPopular: false,
+    status: 'active',
+    verified: false,
+    isDeleted: false,
+    deletedAt: null,
+  };
+
+  if ('deviceToken' in patch) {
+    basePayload.deviceToken = patch.deviceToken;
+  }
+  if ('pushOptIn' in patch) {
+    basePayload.pushOptIn = patch.pushOptIn;
+  }
+
+  try {
+    await setDoc(doc(db, 'users', uid), patch, { merge: true });
+  } catch (err) {
+    if (err?.code === 'permission-denied') {
+      await setDoc(doc(db, 'users', uid), basePayload, { merge: true });
+      if (Object.keys(patch).length > 0) {
+        await setDoc(doc(db, 'users', uid), patch, { merge: true });
+      }
+    } else {
+      throw err;
+    }
+  }
 }
 
 // Description: Update user location and persist coarse geohash-5 + optional city/postalCode

@@ -18,7 +18,7 @@
       "config": {
         "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}"
       },
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Social Circle uses your location to show nearby events and improve discovery.",
         "NSCameraUsageDescription": "Allow camera access to take photos for events and your profile.",

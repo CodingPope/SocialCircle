@@ -147,12 +147,6 @@ export default function AuthScreen({ navigation, route }) {
             email: result.user.email || '',
             deviceToken: token || null,
             pushOptIn: !!token,
-            premiumActive: false,
-            premiumTier: 'free',
-            premiumSince: null,
-            premiumUntil: null,
-            isPopular: false,
-            popularScore: 0,
           });
           if (token) initPushForUser(result.user.uid).catch(() => {});
         } else {
@@ -245,13 +239,6 @@ export default function AuthScreen({ navigation, route }) {
               email: result.user.email,
               deviceToken: token || null,
               pushOptIn: !!token,
-              // Premium & popularity defaults
-              premiumActive: false,
-              premiumTier: 'free',
-              premiumSince: null,
-              premiumUntil: null,
-              isPopular: false,
-              popularScore: 0,
             });
             if (token) initPushForUser(result.user.uid).catch(() => {});
           } else {
@@ -352,75 +339,40 @@ export default function AuthScreen({ navigation, route }) {
 
         // Consumer signup: create minimal, rule-compliant user profile
         const userDocRef = doc(db, 'users', result.user.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (!userDocSnap.exists()) {
-          try {
-            const token = await registerForPushTokenAsync().catch(() => null);
-            await setDoc(userDocRef, {
-              email: result.user.email,
-              createdAt: serverTimestamp(),
-              friends: [],
-              interests: [],
-              firstName: '',
-              lastName: '',
-              dob: null,
-              sex: '',
-              location: { latitude: null, longitude: null },
-              bio: '',
-              profileImage: '',
-              status: 'active',
-              verified: false,
-              attendedEvents: [],
-              createdEvents: [],
-              followerCount: 0,
-              followingCount: 0,
-              ratings: {},
-              savedCount: 0,
-              referralCode: '',
-              referredBy: '',
-              blocked: [],
-              blockedBy: [],
-              rating: 0,
-              ratingCount: 0,
-              eventCount: 0,
-              followCount: 0,
-              following: [],
-              lastActive: serverTimestamp(),
-              deviceToken: token || null,
-              pushOptIn: !!token,
-              isDeleted: false,
-              deletedAt: null,
-              // IMPORTANT: Do not include restricted keys (premiumTier/premiumSince/premiumUntil/popularScore)
-              // Firestore rules will reject creates that attempt to set them client-side.
-              premiumActive: false,
-              isPopular: false,
-            });
-          } catch (err) {
-            console.log(
-              '[AuthScreen] Error creating Firestore user doc:',
-              err?.message || err
-            );
-            Alert.alert(
-              'Account Creation Error',
-              'Could not create user profile. Please try again.'
-            );
-            setLoading(false);
-            return;
-          }
-
-          // Best-effort subcollection seed (non-blocking)
-          try {
-            const { collection } = require('firebase/firestore');
-            const profileviewsRef = collection(userDocRef, 'profileviews');
-            await setDoc(doc(profileviewsRef, 'initialSeed'), {
-              timestamp: serverTimestamp(),
-              viewerId: 'system',
-            });
-          } catch {}
+        const token = await registerForPushTokenAsync().catch(() => null);
+        try {
+          const { createUser } = require('../../../profile/services/userService');
+          await createUser(result.user.uid, {
+            email: result.user.email,
+            deviceToken: token || null,
+            pushOptIn: !!token,
+          });
+        } catch (err) {
+          console.log(
+            '[AuthScreen] Error creating Firestore user doc:',
+            err?.message || err
+          );
+          Alert.alert(
+            'Account Creation Error',
+            'Could not create user profile. Please try again.'
+          );
+          setLoading(false);
+          return;
         }
 
+        // Best-effort subcollection seed (non-blocking)
+        try {
+          const { collection } = require('firebase/firestore');
+          const profileviewsRef = collection(userDocRef, 'profileviews');
+          await setDoc(doc(profileviewsRef, 'initialSeed'), {
+            timestamp: serverTimestamp(),
+            viewerId: 'system',
+          });
+        } catch {}
+
         // Load into store and continue onboarding for consumers
-        const userData = (await getDoc(userDocRef)).data();
+        const userSnapshot = await getDoc(userDocRef);
+        const userData = userSnapshot.exists() ? userSnapshot.data() : {};
         setUser({ uid: result.user.uid, ...userData });
         setProfileComplete(false);
         await initPushForUser(result.user.uid).catch(() => {});
@@ -498,6 +450,10 @@ export default function AuthScreen({ navigation, route }) {
               onChangeText={setEmail}
               autoCapitalize='none'
               keyboardType='email-address'
+              autoCorrect={false}
+              spellCheck={false}
+              textContentType='emailAddress'
+              autoComplete='email'
               style={styles.input}
               placeholderTextColor='#999'
             />
@@ -506,6 +462,10 @@ export default function AuthScreen({ navigation, route }) {
               value={password}
               onChangeText={setPassword}
               secureTextEntry
+              textContentType='password'
+              autoComplete='password'
+              autoCorrect={false}
+              spellCheck={false}
               style={styles.input}
               placeholderTextColor='#999'
             />

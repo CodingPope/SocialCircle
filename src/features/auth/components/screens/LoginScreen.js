@@ -33,9 +33,9 @@ import {
   registerForPushTokenAsync,
   initPushForUser,
 } from '../../../notifications/services/pushService';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../../../../firebase/config';
+import { auth } from '../../../../firebase/config';
 import { track as trackClient } from '../../../../lib/analytics';
+import { createUser } from '../../../profile/services/userService';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
@@ -147,20 +147,10 @@ export default function LoginScreen({ navigation }) {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       // Request push permission (best-effort); do not block if denied
       const token = await registerForPushTokenAsync().catch(() => null);
-      await setDoc(doc(db, 'users', cred.user.uid), {
+      await createUser(cred.user.uid, {
         email,
-        createdAt: serverTimestamp(),
-        isDeleted: false,
-        deletedAt: null,
         deviceToken: token || null,
         pushOptIn: !!token,
-        // Premium & popularity defaults
-        premiumActive: false,
-        premiumTier: 'free',
-        premiumSince: null,
-        premiumUntil: null,
-        isPopular: false,
-        popularScore: 0,
       });
       // Best-effort init to store platform and timestamps
       initPushForUser(cred.user.uid).catch(() => {});

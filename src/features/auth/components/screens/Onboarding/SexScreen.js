@@ -10,17 +10,29 @@ import {
   Easing,
 } from 'react-native';
 import { useUserStore } from '../../../../profile';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../../../../firebase/config';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import { Ionicons } from '@expo/vector-icons';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
+import { mergeUserFields } from '../../../../profile/services/userService';
+import { normalizeSex } from '../../../../profile/utils/userProfile';
 
 const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary'];
 
+const VALUE_TO_LABEL = {
+  male: 'Male',
+  female: 'Female',
+  nonbinary: 'Non-binary',
+};
+
+const labelToValue = (label) => normalizeSex(label) || 'male';
+const valueToLabel = (value) => VALUE_TO_LABEL[value] || 'Male';
+
 export default function SexScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
-  const [selectedSex, setSelectedSex] = useState('Male');
+  const setUser = useUserStore((state) => state.setUser);
+  const [selectedSex, setSelectedSex] = useState(() =>
+    valueToLabel(normalizeSex(user?.sex) || 'male')
+  );
   const [loading, setLoading] = useState(false);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -48,12 +60,31 @@ export default function SexScreen({ navigation }) {
     ).start();
   }, []);
 
+  useEffect(() => {
+    const normalized = normalizeSex(user?.sex);
+    if (!normalized) return;
+    const label = valueToLabel(normalized);
+    setSelectedSex((prev) => (prev === label ? prev : label));
+  }, [user?.sex]);
+
   const onNext = async () => {
     setLoading(true);
     try {
-      await updateDoc(doc(db, 'users', user.uid), { sex: selectedSex });
+      if (!user?.uid) {
+        console.warn('SexScreen: missing user uid when saving sex selection.');
+        return;
+      }
+      const normalizedSex = labelToValue(selectedSex);
+      await mergeUserFields(user.uid, {
+        sex: normalizedSex,
+        deviceToken: user?.deviceToken ?? null,
+        pushOptIn: user?.pushOptIn ?? false,
+      });
+      if (user) {
+        setUser({ ...user, sex: normalizedSex });
+      }
       await logOnboardingStepComplete('sex', {
-        choice: selectedSex?.toLowerCase?.() || 'unknown',
+        choice: normalizedSex || 'unknown',
       });
       setLocationModalVisible(true);
     } finally {
@@ -76,8 +107,12 @@ export default function SexScreen({ navigation }) {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       };
-      await updateDoc(doc(db, 'users', user.uid), { location: coords });
-      useUserStore.getState().setUser({ ...user, location: coords });
+      await mergeUserFields(user.uid, {
+        location: coords,
+        deviceToken: user?.deviceToken ?? null,
+        pushOptIn: user?.pushOptIn ?? false,
+      });
+      setUser({ ...user, location: coords });
       await logOnboardingStepComplete('location', {
         method: 'gps_prompt',
         granted: true,
