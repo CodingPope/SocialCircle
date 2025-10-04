@@ -1012,7 +1012,11 @@ export default function ProfileScreen({ navigation }) {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            title=""
+          />
         }
       >
         {/* Header */}

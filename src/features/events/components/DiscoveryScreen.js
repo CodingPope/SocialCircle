@@ -583,7 +583,11 @@ export default function DiscoveryScreen() {
         scrollEventThrottle={400}
         ref={scrollViewRef}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            title=""
+          />
         }
       >
         {feedItems.length === 0 ? (

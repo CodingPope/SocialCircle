@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+  useCallback,
+} from 'react';
 import {
   View,
   Text,
@@ -29,6 +35,7 @@ import {
   orderBy,
   getDoc,
   updateDoc,
+  setDoc,
   arrayUnion,
   arrayRemove, // Added for attendee removal
   writeBatch, // Added for leave event batching
@@ -50,7 +57,10 @@ import {
 import smileDefault from '../../../../assets/smileDefault.png';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import ReportModal from '../../events/components/ReportModal'; // Import reusable modal component
-import { track as trackClient, trackReportContent } from '../../../lib/analytics';
+import {
+  track as trackClient,
+  trackReportContent,
+} from '../../../lib/analytics';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
@@ -170,11 +180,7 @@ const EventChatScreen = () => {
 
   const pinnedDraftTrimmed = pinnedDraft.trim();
   const pinnedActionLabel =
-    pinnedDraftTrimmed.length > 0
-      ? 'Save'
-      : pinned?.text
-      ? 'Clear'
-      : 'Save';
+    pinnedDraftTrimmed.length > 0 ? 'Save' : pinned?.text ? 'Clear' : 'Save';
   const canSubmitPinned = pinnedDraftTrimmed.length > 0 || !!pinned?.text;
 
   useEffect(() => {
@@ -370,17 +376,24 @@ const EventChatScreen = () => {
     const unsub = onSnapshot(
       doc(db, 'events', eventId),
       async (snap) => {
-        const data = snap.data();
+        if (!snap.exists()) {
+          setEvent(null);
+          setAttendees([]);
+          return;
+        }
+
+        const data = snap.data() || {};
+        const nextEvent = { id: snap.id, ...data };
+
         setEvent((prev) => {
           if (
             prev &&
-            data &&
-            prev.updatedAt?.seconds === data.updatedAt?.seconds &&
-            prev.attendees?.length === data.attendees?.length
+            prev.updatedAt?.seconds === nextEvent.updatedAt?.seconds &&
+            prev.attendees?.length === nextEvent.attendees?.length
           ) {
             return prev;
           }
-          return data;
+          return nextEvent;
         });
 
         // Prefer denormalized attendeeSnippets, fallback to batched user fetch
@@ -1106,24 +1119,57 @@ const EventChatScreen = () => {
   }, [isCreator, pinned?.text]);
 
   const handleSavePinned = useCallback(async () => {
-    if (!isCreator) return;
+    if (!isCreator || !eventId) return;
     setPinnedSaving(true);
     try {
       const trimmed = pinnedDraft.trim();
       const chatDocRef = doc(db, 'chats', eventId);
+
+      // Ensure chat document exists before attempting to update pinned data
+      const chatSnap = await getDoc(chatDocRef);
+      if (!chatSnap.exists()) {
+        const participantIds = new Set();
+        if (auth.currentUser?.uid) participantIds.add(auth.currentUser.uid);
+        if (Array.isArray(event?.attendees)) {
+          event.attendees.forEach((uid) => {
+            if (typeof uid === 'string' && uid) participantIds.add(uid);
+          });
+        }
+        // Include known host identifiers so they retain access without waiting on backend fan-out
+        hostIds.forEach((uid) => {
+          if (typeof uid === 'string' && uid) participantIds.add(uid);
+        });
+
+        await setDoc(
+          chatDocRef,
+          {
+            eventId,
+            createdAt: serverTimestamp(),
+            createdBy: auth.currentUser?.uid || null,
+            participants: Array.from(participantIds),
+            lastUpdated: serverTimestamp(),
+            messageCount: 0,
+            isArchived: false,
+            pinned: null,
+          },
+          { merge: true }
+        );
+      }
+
+      const lastUpdated = serverTimestamp();
       if (!trimmed.length) {
         await updateDoc(chatDocRef, {
           pinned: null,
-          lastUpdated: serverTimestamp(),
+          lastUpdated,
         });
       } else {
         await updateDoc(chatDocRef, {
           pinned: {
             text: trimmed,
-            updatedAt: serverTimestamp(),
+            updatedAt: lastUpdated,
             updatedBy: auth.currentUser?.uid || null,
           },
-          lastUpdated: serverTimestamp(),
+          lastUpdated,
         });
       }
       setPinnedEditorVisible(false);
@@ -1136,7 +1182,14 @@ const EventChatScreen = () => {
     } finally {
       setPinnedSaving(false);
     }
-  }, [auth.currentUser?.uid, eventId, isCreator, pinnedDraft]);
+  }, [
+    auth.currentUser?.uid,
+    event?.attendees,
+    eventId,
+    hostIds,
+    isCreator,
+    pinnedDraft,
+  ]);
 
   const handleEditDateConfirm = (pickedDate) => {
     setEditDate(pickedDate || new Date());
@@ -2011,7 +2064,7 @@ const EventChatScreen = () => {
                 style={[
                   styles.pinnedModalButton,
                   styles.pinnedModalSave,
-                  (!canSubmitPinned || pinnedSaving)
+                  !canSubmitPinned || pinnedSaving
                     ? styles.pinnedModalSaveDisabled
                     : null,
                 ]}

@@ -7,8 +7,6 @@ import {
   Image,
   Alert,
   StyleSheet,
-  KeyboardAvoidingView,
-  FlatList,
   Platform,
 } from 'react-native';
 import {
@@ -457,7 +455,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   }, [location]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
       <TouchableOpacity
         style={[
           styles.closeButton,
@@ -474,226 +472,227 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       >
         <Ionicons name='close' size={22} color='#333' />
       </TouchableOpacity>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+      <KeyboardAwareScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: (safeAreaInsets?.top || 0) + 16,
+            paddingBottom: (safeAreaInsets?.bottom || 0) + 32,
+          },
+        ]}
+        keyboardShouldPersistTaps='handled'
+        extraScrollHeight={Platform.OS === 'ios' ? 24 : 0}
+        enableOnAndroid
       >
-        <FlatList
-          data={[]} // Dummy data to allow FlatList to render
-          keyExtractor={() => 'dummy'} // Required prop
-          ListHeaderComponent={
-            <View>
-              {/* Image Preview */}
-              {imageUri ? (
-                <Image source={{ uri: imageUri }} style={styles.preview} />
-              ) : (
-                <View style={styles.previewPlaceholder}>
-                  <Text>No Image</Text>
-                </View>
-              )}
-              <TouchableOpacity
-                style={styles.photoBtn}
-                onPress={pickImageAndUpload}
-              >
-                <Text style={styles.photoBtnText}>
-                  {imageUri ? 'Change Photo' : 'Add Photo'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Title */}
-              <Text style={styles.label}>Title</Text>
-              <TextInput
-                style={styles.input}
-                value={title}
-                onChangeText={setTitle}
-                placeholder='Event title'
-                placeholderTextColor='grey' // Updated to a darker color
-              />
-
-              {/* Description */}
-              <Text style={styles.label}>Description</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={description}
-                onChangeText={setDescription}
-                placeholder='What’s your event about?'
-                placeholderTextColor='grey' // Updated to a darker color
-                multiline
-              />
-
-              {/* Date & Time */}
-              <Text style={styles.label}>Date & Time</Text>
-              <TouchableOpacity style={styles.input} onPress={showDatePicker}>
-                <Text>
-                  {date.toLocaleString('en-US', {
-                    dateStyle: 'medium',
-                    timeStyle: 'short',
-                  })}
-                </Text>
-              </TouchableOpacity>
-              <DateTimePickerModal
-                isVisible={isDatePickerVisible}
-                mode='datetime'
-                date={date}
-                onConfirm={handleConfirmDate}
-                onCancel={hideDatePicker}
-                minimumDate={new Date(Date.now() + MIN_MILLIS)}
-                maximumDate={new Date(Date.now() + MAX_MILLIS)}
-                minuteInterval={MINUTE_INCREMENT}
-                themeVariant='light' // Explicitly set theme to light
-                textColor='#000' // Ensure text is visible
-              />
-
-              {/* Address Input */}
-              <Text style={styles.label}>Location</Text>
-              <View style={{ zIndex: 10 }}>
-                <GooglePlacesAutocomplete
-                  placeholder='Enter address'
-                  placeholderTextColor='grey' // Updated to a darker color
-                  minLength={2}
-                  fetchDetails={true}
-                  debounce={300}
-                  enablePoweredByContainer={false}
-                  keyboardShouldPersistTaps='handled'
-                  predefinedPlaces={[]} // Prevents `.filter()` crash
-                  styles={{
-                    textInput: [styles.input, styles.flex],
-                    container: { flex: 1 },
-                    listView: {
-                      backgroundColor: '#fff',
-                      elevation: 5,
-                      position: 'absolute',
-                      top: 55,
-                      maxHeight: 200,
-                    },
-                  }}
-                  textInputProps={{
-                    value: placeInput,
-                    onChangeText: setPlaceInput,
-                  }}
-                  onPress={(data, details = null) => {
-                    if (details?.geometry?.location) {
-                      const { lat, lng } = details.geometry.location;
-                      setManualLocation({ latitude: lat, longitude: lng });
-                      setManualAddress(data?.description ?? '');
-                      Alert.alert('Location set', 'Pin will be placed on map.');
-                    }
-                  }}
-                  query={{
-                    key: GOOGLE_MAPS_API_KEY,
-                    language: 'en',
-                  }}
-                />
-              </View>
-              {manualLocation && (
-                <View style={styles.row}>
-                  <Ionicons
-                    name='location-outline'
-                    size={20}
-                    color='#666'
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text style={styles.pinLocationText}>
-                    Pin Location: {manualAddress || 'Unknown'}
-                  </Text>
-                </View>
-              )}
-
-              {/* Interests */}
-              <Text style={styles.label}>Interest</Text>
-              <InterestSelector
-                selectedInterests={selectedInterest ? [selectedInterest] : []}
-                toggleInterest={(interest) => setSelectedInterest(interest)}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
-              />
-
-              {/* Age Slider */}
-              <Text style={styles.label}>
-                Age Range: {ageRange[0]} - {ageRange[1]}
-              </Text>
-              <View style={styles.sliderWrapper}>
-                <MultiSlider
-                  values={ageRange}
-                  sliderLength={280}
-                  onValuesChange={setAgeRange}
-                  min={18}
-                  max={99}
-                  step={1}
-                  allowOverlap={false}
-                  snapped
-                />
-              </View>
-
-              {/* Privacy */}
-              <Text style={styles.label}>Privacy</Text>
-              {Platform.OS === 'ios' ? (
-                <SegmentedControl
-                  values={segments}
-                  selectedIndex={privacyIndex}
-                  onChange={(event) =>
-                    setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
-                  }
-                  style={styles.segment}
-                  backgroundColor='#f0f0f0'
-                  tintColor='#007AFF'
-                  fontStyle={{ color: '#333' }}
-                  activeFontStyle={{ color: '#fff' }}
-                />
-              ) : (
-                <View style={styles.androidPrivacyWrapper}>
-                  {segments.map((seg, idx) => (
-                    <TouchableOpacity
-                      key={idx}
-                      style={[
-                        styles.androidPrivacyBtn,
-                        privacyIndex === idx && styles.androidPrivacyBtnActive,
-                      ]}
-                      onPress={() => setPrivacyIndex(idx)}
-                    >
-                      <Text
-                        style={[
-                          styles.androidPrivacyTxt,
-                          privacyIndex === idx &&
-                            styles.androidPrivacyTxtActive,
-                        ]}
-                      >
-                        {seg}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              {/* Capacity */}
-              <Text style={styles.label}>Capacity (optional)</Text>
-              <TextInput
-                style={styles.input}
-                value={capacity}
-                onChangeText={setCapacity}
-                placeholder='Leave empty for unlimited'
-                placeholderTextColor='grey' // Updated to a darker color
-                keyboardType='numeric'
-              />
-
-              {/* Buttons */}
-              <TouchableOpacity
-                style={[styles.btn, uploading && styles.btnDis]}
-                onPress={handleCreate}
-                disabled={uploading}
-              >
-                <Text style={styles.btnTxt}>
-                  {uploading ? 'Creating...' : 'Create Event'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
+        <View>
+          {/* Image Preview */}
+          {imageUri ? (
+            <Image source={{ uri: imageUri }} style={styles.preview} />
+          ) : (
+            <View style={styles.previewPlaceholder}>
+              <Text>No Image</Text>
             </View>
-          }
-        />
-      </KeyboardAvoidingView>
+          )}
+          <TouchableOpacity
+            style={styles.photoBtn}
+            onPress={pickImageAndUpload}
+          >
+            <Text style={styles.photoBtnText}>
+              {imageUri ? 'Change Photo' : 'Add Photo'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Title */}
+          <Text style={styles.label}>Title</Text>
+          <TextInput
+            style={styles.input}
+            value={title}
+            onChangeText={setTitle}
+            placeholder='Event title'
+            placeholderTextColor='grey' // Updated to a darker color
+          />
+
+          {/* Description */}
+          <Text style={styles.label}>Description</Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            value={description}
+            onChangeText={setDescription}
+            placeholder='What’s your event about?'
+            placeholderTextColor='grey' // Updated to a darker color
+            multiline
+          />
+
+          {/* Date & Time */}
+          <Text style={styles.label}>Date & Time</Text>
+          <TouchableOpacity style={styles.input} onPress={showDatePicker}>
+            <Text>
+              {date.toLocaleString('en-US', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              })}
+            </Text>
+          </TouchableOpacity>
+          <DateTimePickerModal
+            isVisible={isDatePickerVisible}
+            mode='datetime'
+            date={date}
+            onConfirm={handleConfirmDate}
+            onCancel={hideDatePicker}
+            minimumDate={new Date(Date.now() + MIN_MILLIS)}
+            maximumDate={new Date(Date.now() + MAX_MILLIS)}
+            minuteInterval={MINUTE_INCREMENT}
+            themeVariant='light' // Explicitly set theme to light
+            textColor='#000' // Ensure text is visible
+          />
+
+          {/* Address Input */}
+          <Text style={styles.label}>Location</Text>
+          <View style={{ zIndex: 10 }}>
+            <GooglePlacesAutocomplete
+              placeholder='Enter address'
+              placeholderTextColor='grey' // Updated to a darker color
+              minLength={2}
+              fetchDetails={true}
+              debounce={300}
+              enablePoweredByContainer={false}
+              keyboardShouldPersistTaps='handled'
+              predefinedPlaces={[]} // Prevents `.filter()` crash
+              styles={{
+                textInput: [styles.input, styles.flex],
+                container: { flex: 1 },
+                listView: {
+                  backgroundColor: '#fff',
+                  elevation: 5,
+                  position: 'absolute',
+                  top: 55,
+                  maxHeight: 200,
+                },
+              }}
+              textInputProps={{
+                value: placeInput,
+                onChangeText: setPlaceInput,
+              }}
+              onPress={(data, details = null) => {
+                if (details?.geometry?.location) {
+                  const { lat, lng } = details.geometry.location;
+                  setManualLocation({ latitude: lat, longitude: lng });
+                  setManualAddress(data?.description ?? '');
+                  Alert.alert('Location set', 'Pin will be placed on map.');
+                }
+              }}
+              query={{
+                key: GOOGLE_MAPS_API_KEY,
+                language: 'en',
+              }}
+            />
+          </View>
+          {manualLocation && (
+            <View style={styles.row}>
+              <Ionicons
+                name='location-outline'
+                size={20}
+                color='#666'
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.pinLocationText}>
+                Pin Location: {manualAddress || 'Unknown'}
+              </Text>
+            </View>
+          )}
+
+          {/* Interests */}
+          <Text style={styles.label}>Interest</Text>
+          <InterestSelector
+            selectedInterests={selectedInterest ? [selectedInterest] : []}
+            toggleInterest={(interest) => setSelectedInterest(interest)}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+          />
+
+          {/* Age Slider */}
+          <Text style={styles.label}>
+            Age Range: {ageRange[0]} - {ageRange[1]}
+          </Text>
+          <View style={styles.sliderWrapper}>
+            <MultiSlider
+              values={ageRange}
+              sliderLength={280}
+              onValuesChange={setAgeRange}
+              min={18}
+              max={99}
+              step={1}
+              allowOverlap={false}
+              snapped
+            />
+          </View>
+
+          {/* Privacy */}
+          <Text style={styles.label}>Privacy</Text>
+          {Platform.OS === 'ios' ? (
+            <SegmentedControl
+              values={segments}
+              selectedIndex={privacyIndex}
+              onChange={(event) =>
+                setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
+              }
+              style={styles.segment}
+              backgroundColor='#f0f0f0'
+              tintColor='#007AFF'
+              fontStyle={{ color: '#333' }}
+              activeFontStyle={{ color: '#fff' }}
+            />
+          ) : (
+            <View style={styles.androidPrivacyWrapper}>
+              {segments.map((seg, idx) => (
+                <TouchableOpacity
+                  key={idx}
+                  style={[
+                    styles.androidPrivacyBtn,
+                    privacyIndex === idx && styles.androidPrivacyBtnActive,
+                  ]}
+                  onPress={() => setPrivacyIndex(idx)}
+                >
+                  <Text
+                    style={[
+                      styles.androidPrivacyTxt,
+                      privacyIndex === idx && styles.androidPrivacyTxtActive,
+                    ]}
+                  >
+                    {seg}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Capacity */}
+          <Text style={styles.label}>Capacity (optional)</Text>
+          <TextInput
+            style={styles.input}
+            value={capacity}
+            onChangeText={setCapacity}
+            placeholder='Leave empty for unlimited'
+            placeholderTextColor='grey' // Updated to a darker color
+            keyboardType='numeric'
+          />
+
+          {/* Buttons */}
+          <TouchableOpacity
+            style={[styles.btn, uploading && styles.btnDis]}
+            onPress={handleCreate}
+            disabled={uploading}
+          >
+            <Text style={styles.btnTxt}>
+              {uploading ? 'Creating...' : 'Create Event'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }
@@ -704,11 +703,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     position: 'relative',
   },
-  container: {
-    padding: 20,
-    paddingBottom: 70,
-    backgroundColor: '#fff',
+  scroll: {
     flex: 1,
+    backgroundColor: '#fff',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    backgroundColor: '#fff',
   },
   closeButton: {
     position: 'absolute',
