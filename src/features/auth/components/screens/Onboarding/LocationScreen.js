@@ -1,9 +1,8 @@
 // Description: Onboarding screen to request location permission and save user location to Firestore
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
-  Button,
   ActivityIndicator,
   Alert,
   TextInput,
@@ -18,6 +17,78 @@ import { useUserStore } from '../../../../profile';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
 import { geohashForLocation } from 'geofire-common';
 import { mergeUserFields } from '../../../../profile/services/userService';
+import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
+import Button from '../../../../../components/ui/Button';
+import { useTheme } from '../../../../../theme';
+
+const createStyles = (theme) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    overlay: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: theme.spacing.xl,
+    },
+    panel: {
+      width: '100%',
+      backgroundColor: 'rgba(255,255,255,0.9)',
+      borderRadius: theme.radii.lg,
+      padding: theme.spacing.lg,
+      alignItems: 'center',
+    },
+    title: {
+      fontSize: 22,
+      fontWeight: '700',
+      marginBottom: theme.spacing.md,
+      color: theme.colors.neutral900,
+      textAlign: 'center',
+    },
+    subtitle: {
+      fontSize: 16,
+      color: theme.colors.neutral700,
+      marginBottom: theme.spacing.xl,
+      textAlign: 'center',
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: theme.colors.overlay,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: theme.spacing.xl,
+    },
+    modalCard: {
+      width: '100%',
+      backgroundColor: theme.colors.neutral100,
+      borderRadius: theme.radii.lg,
+      padding: theme.spacing.lg,
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      marginBottom: theme.spacing.md,
+      color: theme.colors.neutral900,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.colors.neutral400,
+      borderRadius: theme.radii.md,
+      padding: theme.spacing.md,
+      marginBottom: theme.spacing.md,
+      color: theme.colors.neutral900,
+    },
+    modalButtons: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: theme.spacing.md,
+    },
+    modalButtonSpacing: {
+      flex: 1,
+      marginHorizontal: theme.spacing.sm / 2,
+    },
+  });
 
 export default function LocationScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
@@ -27,6 +98,8 @@ export default function LocationScreen({ navigation }) {
   const [manualSaving, setManualSaving] = useState(false);
   const user = useUserStore((state) => state.user);
   const setUser = useUserStore((state) => state.setUser);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const computeCoarseHash5 = (lat, lng) => {
     try {
@@ -181,30 +254,21 @@ export default function LocationScreen({ navigation }) {
   };
 
   return (
-    <View
-      style={{
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 24,
-      }}
-    >
-      <Text style={{ fontSize: 22, fontWeight: 'bold', marginBottom: 16 }}>
-        Share Your Location
-      </Text>
-      <Text style={{ fontSize: 16, color: '#555', marginBottom: 32 }}>
-        To help you discover local events and friends, we need your location.
-        Your data is private and only used for Social Circle features.
-      </Text>
-      {loading ? (
-        <ActivityIndicator size='large' color='#ff6b6b' />
-      ) : (
-        <Button
-          title='Share My Location'
-          onPress={handleGetLocation}
-          color='#ff6b6b'
-        />
-      )}
+    <AnimatedGradientBackground style={styles.container} variant='onboarding'>
+      <View style={styles.overlay}>
+        <View style={styles.panel}>
+          <Text style={styles.title}>Share Your Location</Text>
+          <Text style={styles.subtitle}>
+            To help you discover local events and friends, we need your location.
+            Your data is private and only used for Social Circle features.
+          </Text>
+          {loading ? (
+            <ActivityIndicator size='large' color='#ff6b6b' />
+          ) : (
+            <Button title='Share My Location' onPress={handleGetLocation} />
+          )}
+        </View>
+      </View>
 
       {/* Manual city/ZIP fallback */}
       <Modal
@@ -223,6 +287,7 @@ export default function LocationScreen({ navigation }) {
               style={styles.input}
               autoCapitalize='words'
               returnKeyType='next'
+              placeholderTextColor={theme.colors.neutral600}
             />
             <TextInput
               placeholder='ZIP (optional)'
@@ -231,55 +296,27 @@ export default function LocationScreen({ navigation }) {
               style={styles.input}
               keyboardType='number-pad'
               returnKeyType='done'
+              placeholderTextColor={theme.colors.neutral600}
             />
             {manualSaving ? (
-              <ActivityIndicator size='small' color='#ff6b6b' />
+              <ActivityIndicator size='small' color={theme.colors.primary} />
             ) : (
-              <View
-                style={{
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                }}
-              >
-                <Button
-                  title='Cancel'
-                  onPress={() => setManualVisible(false)}
-                />
-                <Button title='Save' onPress={saveManual} color='#ff6b6b' />
+              <View style={styles.modalButtons}>
+                <View style={styles.modalButtonSpacing}>
+                  <Button
+                    title='Cancel'
+                    variant='secondary'
+                    onPress={() => setManualVisible(false)}
+                  />
+                </View>
+                <View style={styles.modalButtonSpacing}>
+                  <Button title='Save' onPress={saveManual} />
+                </View>
               </View>
             )}
           </View>
         </View>
       </Modal>
-    </View>
+    </AnimatedGradientBackground>
   );
 }
-
-const styles = StyleSheet.create({
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-});

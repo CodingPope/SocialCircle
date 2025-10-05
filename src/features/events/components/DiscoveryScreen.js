@@ -45,6 +45,7 @@ import {
 } from '../../../services/analytics';
 import { trackCardClick } from '../../../lib/analytics';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import { useTheme } from '../../../theme';
 import { useNavigation } from '@react-navigation/native';
 import { filterBlockedEvents } from '../utils/blockUtils';
 
@@ -98,6 +99,7 @@ export default function DiscoveryScreen() {
   const createPostTutorialKey = useMemo(() => {
     return user?.uid ? `discovery_create_post_tutorial_${user.uid}` : null;
   }, [user?.uid]);
+  const theme = useTheme();
   const [showCreatePostTutorial, setShowCreatePostTutorial] = useState(false);
   const [createPostFabLayout, setCreatePostFabLayout] = useState(null);
   const createPostFabRef = useRef(null);
@@ -684,7 +686,13 @@ export default function DiscoveryScreen() {
         {tabs.map((tab) => (
           <TouchableOpacity
             key={tab}
-            style={[styles.tab, activeTab === tab && styles.activeTab]}
+            style={[
+              styles.tab,
+              activeTab === tab && [
+                styles.activeTab,
+                { backgroundColor: theme.colors.primary },
+              ],
+            ]}
             onPress={() => {
               setActiveTab(tab);
               if (tab === 'Hot') setSelectedInterest(null);
@@ -693,7 +701,10 @@ export default function DiscoveryScreen() {
             <Text
               style={[
                 styles.tabText,
-                activeTab === tab && styles.activeTabText,
+                activeTab === tab && [
+                  styles.activeTabText,
+                  { color: theme.colors.neutral100 },
+                ],
               ]}
             >
               {tab}
@@ -733,7 +744,10 @@ export default function DiscoveryScreen() {
               key={interest}
               style={[
                 styles.chip,
-                selectedInterest === interest && styles.activeChip,
+                selectedInterest === interest && [
+                  styles.activeChip,
+                  { backgroundColor: theme.colors.primary },
+                ],
               ]}
               onPress={() => selectInterest(interest)}
               onLongPress={() => pinInterest(interest)}
@@ -741,7 +755,10 @@ export default function DiscoveryScreen() {
               <Text
                 style={[
                   styles.chipText,
-                  selectedInterest === interest && styles.activeChipText,
+                  selectedInterest === interest && [
+                    styles.activeChipText,
+                    { color: theme.colors.neutral100 },
+                  ],
                 ]}
               >
                 {interest}
@@ -844,11 +861,15 @@ export default function DiscoveryScreen() {
       <TouchableOpacity
         ref={createPostFabRef}
         onLayout={handleCreatePostFabLayout}
-        style={styles.createPostFab}
+        style={[styles.createPostFab, { backgroundColor: theme.colors.primary }]}
         onPress={() => setShowCreatePost(true)}
         activeOpacity={0.85}
       >
-        <Ionicons name='create-outline' size={26} color='#fff' />
+        <Ionicons
+          name='create-outline'
+          size={26}
+          color={theme.colors.neutral100}
+        />
       </TouchableOpacity>
 
       <CreateInterestPostModal

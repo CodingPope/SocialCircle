@@ -31,6 +31,7 @@ import {
   handleIncomingLink,
   shouldEnableDeepLinking,
 } from './src/services/deepLinking';
+import { ThemeProvider } from './src/theme';
 console.log('Sentry initialization disabled - troubleshooting __extends error');
 
 function AppContent() {
@@ -384,7 +385,9 @@ export default function App() {
   // Description: No longer wrap with AuthProvider
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AppContent />
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }

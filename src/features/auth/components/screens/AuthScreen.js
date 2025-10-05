@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,14 +24,6 @@ import { auth, db } from '../../../../firebase/config';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  interpolateColor,
-} from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useUserStore, useSessionRole } from '../../../profile';
 import {
   registerForPushTokenAsync,
@@ -44,8 +36,107 @@ import {
 } from 'firebase/firestore';
 import { GOOGLE_CLIENT_ID } from '@env';
 import { track as trackClient } from '../../../../lib/analytics';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import LoadingOverlay from '../../../../components/ui/LoadingOverlay';
+import AnimatedGradientBackground from '../../../../components/ui/AnimatedGradientBackground';
+import Button from '../../../../components/ui/Button';
+import { useTheme } from '../../../../theme';
+
+const createStyles = (theme) => {
+  const { colors, radii, spacing } = theme;
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+    },
+    overlay: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: spacing.lg,
+      backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    logo: {
+      width: 220,
+      height: 90,
+      alignSelf: 'center',
+      marginBottom: spacing.xl + spacing.sm,
+    },
+    card: {
+      backgroundColor: colors.neutral100,
+      borderRadius: radii.lg,
+      padding: spacing.lg,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: 4,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.neutral400,
+      borderRadius: radii.md,
+      padding: spacing.md,
+      marginBottom: spacing.md,
+      fontSize: 16,
+      color: colors.neutral900,
+      backgroundColor: colors.neutral200,
+    },
+    linkButton: {
+      marginTop: spacing.md,
+      alignItems: 'center',
+    },
+    linkText: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    businessLabel: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.secondary,
+      marginBottom: spacing.sm,
+      textTransform: 'none',
+    },
+    businessFab: {
+      position: 'absolute',
+      left: spacing.lg,
+      bottom: spacing.lg,
+      backgroundColor: 'rgba(0,0,0,0.65)',
+      paddingVertical: spacing.sm + 2,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.lg,
+    },
+    businessFabText: {
+      color: colors.neutral100,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    appleButton: {
+      width: '100%',
+      height: 44,
+      marginTop: spacing.sm,
+    },
+    divider: {
+      height: 1,
+      backgroundColor: colors.neutral400,
+      marginVertical: spacing.lg,
+    },
+    buttonSpacing: {
+      marginTop: spacing.sm,
+      width: '100%',
+    },
+    secondaryButton: {
+      backgroundColor: colors.primaryLight,
+      paddingVertical: spacing.md,
+      borderRadius: radii.md,
+      alignItems: 'center',
+      marginTop: spacing.md,
+    },
+    secondaryButtonText: {
+      color: colors.neutral100,
+      fontWeight: '600',
+      fontSize: 15,
+    },
+  });
+};
 
 async function generateNonce(length = 32) {
   const bytes = await Crypto.getRandomBytesAsync(length);
@@ -62,6 +153,8 @@ export default function AuthScreen({ navigation, route }) {
   const setProfileComplete = useUserStore((state) => state.setProfileComplete);
   const setRole = useSessionRole((s) => s.setRole);
   const setNextBusinessRoute = useSessionRole((s) => s.setNextBusinessRoute);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   useEffect(() => {
     if (route?.params && 'business' in route.params) {
@@ -397,38 +490,8 @@ export default function AuthScreen({ navigation, route }) {
       .catch((err) => Alert.alert('Reset Password', err.message));
   };
 
-  // 🔥 ANIMATED GRADIENT LOGIC
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = withRepeat(withTiming(1, { duration: 6000 }), -1, true);
-  }, []);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const color1 = interpolateColor(
-      progress.value,
-      [0, 1],
-      ['#ff6b6b', '#4dabf7'] // coral -> light blue
-    );
-    const color2 = interpolateColor(
-      progress.value,
-      [0, 1],
-      ['#f7d794', '#a29bfe'] // peach -> soft purple
-    );
-    return { color1, color2 };
-  });
-
   return (
-    <Animated.View style={[styles.container]}>
-      <LinearGradient
-        colors={[
-          animatedStyle.color1?.backgroundColor || '#ff6b6b',
-          animatedStyle.color2?.backgroundColor || '#4dabf7',
-        ]}
-        style={StyleSheet.absoluteFill}
-      />
-
-      {/* Removed SafeAreaView to avoid inset rectangle; use plain View */}
+    <AnimatedGradientBackground style={styles.container} variant='onboarding'>
       <View style={{ flex: 1 }}>
         <View style={styles.overlay}>
           {/* Loading overlay */}
@@ -452,49 +515,46 @@ export default function AuthScreen({ navigation, route }) {
               keyboardType='email-address'
               autoCorrect={false}
               spellCheck={false}
-              textContentType='emailAddress'
-              autoComplete='email'
-              style={styles.input}
-              placeholderTextColor='#999'
-            />
-            <TextInput
-              placeholder='Password'
-              value={password}
-              onChangeText={setPassword}
+            textContentType='emailAddress'
+            autoComplete='email'
+            style={styles.input}
+            placeholderTextColor={theme.colors.neutral600}
+          />
+          <TextInput
+            placeholder='Password'
+            value={password}
+            onChangeText={setPassword}
               secureTextEntry
               textContentType='password'
-              autoComplete='password'
-              autoCorrect={false}
-              spellCheck={false}
-              style={styles.input}
-              placeholderTextColor='#999'
+            autoComplete='password'
+            autoCorrect={false}
+            spellCheck={false}
+            style={styles.input}
+            placeholderTextColor={theme.colors.neutral600}
+          />
+
+          {loading ? (
+            <ActivityIndicator
+              size='large'
+              color={theme.colors.secondary}
+              style={{ marginVertical: theme.spacing.md }}
             />
+          ) : (
+            <Button
+              title={mode === 'login' ? 'Login' : 'Create Account'}
+              onPress={handleSubmit}
+              style={styles.buttonSpacing}
+            />
+          )}
 
-            {loading ? (
-              <ActivityIndicator
-                size='large'
-                color='#ff6b6b'
-                style={{ marginVertical: 12 }}
-              />
-            ) : (
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={handleSubmit}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {mode === 'login' ? 'Login' : 'Create Account'}
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            {mode === 'signup' && (
-              <TouchableOpacity
-                style={[styles.secondaryButton, { opacity: 0.5 }]}
-                disabled
-              >
-                <Text style={styles.secondaryButtonText}>
-                  Sign up with Google (Coming Soon)
-                </Text>
+          {mode === 'signup' && (
+            <TouchableOpacity
+              style={[styles.secondaryButton, { opacity: 0.5 }]}
+              disabled
+            >
+              <Text style={styles.secondaryButtonText}>
+                Sign up with Google (Coming Soon)
+              </Text>
               </TouchableOpacity>
             )}
 
@@ -508,7 +568,7 @@ export default function AuthScreen({ navigation, route }) {
                   AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
                 }
                 cornerRadius={8}
-                style={{ width: '100%', height: 44, marginTop: 10 }}
+                style={styles.appleButton}
                 onPress={handleAppleSignIn}
               />
             )}
@@ -551,98 +611,6 @@ export default function AuthScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
       </View>
-    </Animated.View>
+    </AnimatedGradientBackground>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  overlay: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)', // soft overlay for readability
-  },
-  logo: {
-    width: 220,
-    height: 90,
-    alignSelf: 'center',
-    marginBottom: 30,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    fontSize: 16,
-    color: '#333',
-    backgroundColor: '#fafafa',
-  },
-  primaryButton: {
-    backgroundColor: '#ff6b6b',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  secondaryButton: {
-    backgroundColor: '#4285F4',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  secondaryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  linkButton: {
-    marginTop: 14,
-    alignItems: 'center',
-  },
-  linkText: {
-    color: '#4285F4',
-    fontSize: 14,
-  },
-  businessLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#ff6b6b',
-    marginBottom: 8,
-    textTransform: 'none',
-  },
-  businessFab: {
-    position: 'absolute',
-    left: 16,
-    bottom: 20,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-  },
-  businessFabText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-});

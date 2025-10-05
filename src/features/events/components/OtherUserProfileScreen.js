@@ -703,7 +703,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {/* Header */}
         <LinearGradient
-          colors={['#4DA0B0', '#D39D38']}
+          colors={['#4dabf7', '#ff6b6b']}
           style={styles.profileHeader}
         >
           <View style={styles.navBar}>

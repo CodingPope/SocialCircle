@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,10 +17,58 @@ import { Timestamp } from 'firebase/firestore';
 import { useUserStore } from '../../../../profile';
 import { mergeUserFields } from '../../../../profile/services/userService';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
+import Button from '../../../../../components/ui/Button';
+import { useTheme } from '../../../../../theme';
+
+const createStyles = (theme) =>
+  StyleSheet.create({
+    gradientContainer: {
+      flex: 1,
+    },
+    scrollContainer: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      padding: theme.spacing.xl,
+    },
+    header: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.colors.neutral100,
+      textAlign: 'center',
+      marginBottom: theme.spacing.lg,
+    },
+    input: {
+      backgroundColor: 'rgba(255,255,255,0.85)',
+      borderRadius: theme.radii.lg,
+      padding: theme.spacing.lg,
+      fontSize: 16,
+      marginBottom: theme.spacing.lg,
+      color: theme.colors.neutral900,
+    },
+    dateRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    dateText: {
+      fontSize: 16,
+      color: theme.colors.neutral800,
+    },
+    error: {
+      color: theme.colors.danger,
+      marginBottom: theme.spacing.md,
+      textAlign: 'center',
+    },
+    buttonWrapper: {
+      width: '100%',
+      marginTop: theme.spacing.md,
+    },
+  });
 
 export default function NameDobScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
   const setUser = useUserStore((state) => state.setUser);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   // State for name fields
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -127,14 +175,17 @@ export default function NameDobScreen({ navigation }) {
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <AnimatedGradientBackground style={styles.gradientContainer}>
+      <AnimatedGradientBackground
+        style={styles.gradientContainer}
+        variant='onboarding'
+      >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
           <Text style={styles.header}>Tell us about you</Text>
           {/* Description: First name input with maxLength and validation */}
           <TextInput
             style={styles.input}
             placeholder='First name'
-            placeholderTextColor='#555'
+            placeholderTextColor={theme.colors.neutral700}
             value={firstName}
             onChangeText={(text) => {
               setFirstName(text);
@@ -148,7 +199,7 @@ export default function NameDobScreen({ navigation }) {
           <TextInput
             style={styles.input}
             placeholder='Last name'
-            placeholderTextColor='#555'
+            placeholderTextColor={theme.colors.neutral700}
             value={lastName}
             onChangeText={(text) => {
               setLastName(text);
@@ -164,7 +215,7 @@ export default function NameDobScreen({ navigation }) {
               <Ionicons
                 name='calendar-outline'
                 size={20}
-                color='#555'
+                color={theme.colors.neutral700}
                 style={{ marginRight: 8 }}
               />
               <Text style={styles.dateText}>{dob.toDateString()}</Text>
@@ -192,71 +243,12 @@ export default function NameDobScreen({ navigation }) {
           <Animated.View
             style={{ transform: [{ scale: scaleAnim }], width: '100%' }}
           >
-            <TouchableOpacity
-              style={styles.nextButton}
-              onPress={onNext}
-              disabled={loading}
-            >
-              <Text style={styles.nextText}>
-                {loading ? 'Loading...' : 'Next'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.buttonWrapper}>
+              <Button title={loading ? 'Loading…' : 'Next'} onPress={onNext} disabled={loading} />
+            </View>
           </Animated.View>
         </ScrollView>
       </AnimatedGradientBackground>
     </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  gradientContainer: {
-    flex: 1,
-  },
-  scrollContainer: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-
-  header: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1E1E2F',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-
-  input: {
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 16,
-    marginBottom: 16,
-  },
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  dateText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  nextButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  nextText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  error: {
-    color: 'red',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-});

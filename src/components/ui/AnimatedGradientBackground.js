@@ -1,51 +1,26 @@
-// Description: Animated gradient background for Social Circle screens
-import React, { useEffect } from 'react';
-import { StyleSheet } from 'react-native';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  interpolateColor,
-} from 'react-native-reanimated';
+// Description: Gradient background that pulls hero colors from the theme
+import React from 'react';
+import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTheme } from '../../theme';
 
-const AnimatedGradientBackground = ({ children, style }) => {
-  // Shared value for animation progress
-  const progress = useSharedValue(0);
+const gradientPresets = {
+  onboarding: ['#ff6b6b', '#4dabf7'],
+  profile: ['#ff6b6b', '#4dabf7'],
+};
 
-  useEffect(() => {
-    progress.value = withRepeat(withTiming(1, { duration: 6000 }), -1, true);
-  }, []);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const color1 = interpolateColor(
-      progress.value,
-      [0, 1],
-      ['#ff6b6b', '#4dabf7']
-    );
-    const color2 = interpolateColor(
-      progress.value,
-      [0, 1],
-      ['#f7d794', '#a29bfe']
-    );
-    return {
-      color1,
-      color2,
-    };
-  });
+const AnimatedGradientBackground = ({ children, style, variant = 'hero' }) => {
+  const theme = useTheme();
+  const gradient =
+    gradientPresets[variant] ||
+    theme?.gradients?.[variant] ||
+    theme.gradients.hero;
 
   return (
-    <Animated.View style={[styles.container, style]}>
-      <LinearGradient
-        colors={[
-          animatedStyle.color1?.backgroundColor || '#ff6b6b',
-          animatedStyle.color2?.backgroundColor || '#4dabf7',
-        ]}
-        style={StyleSheet.absoluteFill}
-      />
+    <View style={[styles.container, style]}>
+      <LinearGradient colors={gradient} style={StyleSheet.absoluteFill} />
       {children}
-    </Animated.View>
+    </View>
   );
 };
 

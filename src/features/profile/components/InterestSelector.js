@@ -11,6 +11,53 @@ import {
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import categoriesData from '../../events/constants/categoriesData.json';
+import { useTheme } from '../../../theme';
+
+const createStyles = (theme) => {
+  const { colors, radii, spacing } = theme;
+  return StyleSheet.create({
+    searchBoxContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.neutral400,
+      borderRadius: radii.md,
+      paddingHorizontal: spacing.md,
+      marginBottom: spacing.md,
+      backgroundColor: colors.neutral100,
+    },
+    searchBox: {
+      flex: 1,
+      paddingVertical: spacing.sm,
+      color: colors.neutral900,
+    },
+    clearButton: {
+      padding: spacing.sm,
+      borderRadius: radii.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    clearButtonText: {
+      color: colors.neutral800,
+      fontWeight: 'bold',
+    },
+    interestSelector: { maxHeight: 200, marginBottom: spacing.xl },
+    interestItem: {
+      padding: spacing.md,
+      borderRadius: radii.md,
+      marginBottom: spacing.md,
+      backgroundColor: colors.neutral200,
+    },
+    selectedInterest: { backgroundColor: colors.primary },
+    interestText: { color: colors.neutral900 },
+    selectedInterestText: { color: colors.neutral100 },
+    noResultsText: {
+      textAlign: 'center',
+      color: colors.neutral600,
+      marginVertical: spacing.md,
+    },
+  });
+};
 
 const InterestSelector = ({
   selectedInterests = [],
@@ -28,6 +75,8 @@ const InterestSelector = ({
   const [activities, setActivities] = useState([]);
   const [filteredActivities, setFilteredActivities] = useState([]);
   const [loading, setLoading] = useState(true);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   useEffect(() => {
     const fetchActivities = async () => {
@@ -153,7 +202,7 @@ const InterestSelector = ({
           placeholder='Search interests...'
           value={effectiveSearch}
           onChangeText={setEffectiveSearch}
-          placeholderTextColor='grey'
+          placeholderTextColor={theme.colors.neutral600}
         />
         {effectiveSearch.length > 0 && (
           <TouchableOpacity
@@ -165,7 +214,7 @@ const InterestSelector = ({
         )}
       </View>
       {loading ? (
-        <ActivityIndicator size='large' color='#007BFF' />
+        <ActivityIndicator size='large' color={theme.colors.primary} />
       ) : filteredActivities.length === 0 ? (
         <Text style={styles.noResultsText}>No interests found.</Text>
       ) : (
@@ -180,9 +229,11 @@ const InterestSelector = ({
               onPress={() => toggleInterest(activity)}
             >
               <Text
-                style={{
-                  color: selectedInterests.includes(activity) ? '#fff' : '#000',
-                }}
+                style={[
+                  styles.interestText,
+                  selectedInterests.includes(activity) &&
+                    styles.selectedInterestText,
+                ]}
               >
                 {activity}
               </Text>
@@ -193,44 +244,5 @@ const InterestSelector = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  searchBoxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    marginBottom: 10,
-  },
-  searchBox: {
-    flex: 1,
-    paddingVertical: 8,
-    color: '#444',
-  },
-  clearButton: {
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  clearButtonText: {
-    color: '#000',
-    fontWeight: 'bold',
-  },
-  noResultsText: {
-    textAlign: 'center',
-    color: '#888',
-    marginVertical: 10,
-  },
-  interestSelector: { maxHeight: 200, marginBottom: 20 },
-  interestItem: {
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 10,
-    backgroundColor: '#f0f0f0',
-  },
-  selectedInterest: { backgroundColor: '#007BFF' },
-});
 
 export default InterestSelector;

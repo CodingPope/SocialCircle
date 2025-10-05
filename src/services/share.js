@@ -208,22 +208,15 @@ function buildProfileMessage(profile, link, preview = {}) {
 
   const city = sanitize(profile?.city || profile?.location || '');
 
-  const lines = [`👤 ${displayName}`];
-  if (headline) lines.push(headline);
+  const lines = [`${displayName}`];
   if (city) lines.push(`📍 ${city}`);
 
   lines.push('');
-  lines.push('✨ Meet people like this on Social Circle!');
-  lines.push(
-    'The fastest way to make friends and find spontaneous hangouts near you.'
-  );
+  lines.push('New to town? Just looking for friends? Find Your Circle!');
   lines.push('');
   lines.push('🚀 Join the beta now:');
   lines.push(testflightUrl);
   lines.push('');
-  lines.push(
-    'Ages 21-40+ • No dating, just genuine friendships • Events in 3-7 days'
-  );
 
   return lines.filter(Boolean).join('\n');
 }

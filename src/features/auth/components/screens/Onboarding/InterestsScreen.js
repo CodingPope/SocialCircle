@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,241 @@ import {
   logOnboardingStepComplete,
   logOnboardingDone,
 } from '../../../../../services/onboardingAnalytics';
+import Button from '../../../../../components/ui/Button';
+import { useTheme } from '../../../../../theme';
+
+const createStyles = (theme) => {
+  const { colors, radii, spacing } = theme;
+  return StyleSheet.create({
+    safe: { flex: 1 },
+    contentContainer: { paddingBottom: 120 },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md + 2,
+    },
+    headerTitle: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: colors.neutral100,
+      textShadowColor: 'rgba(0,0,0,0.15)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 2,
+    },
+    goBackButton: {
+      marginRight: spacing.lg,
+      padding: spacing.md,
+      backgroundColor: 'rgba(255,255,255,0.12)',
+      borderRadius: radii.md,
+    },
+    categoryRows: { paddingHorizontal: spacing.md },
+    categoryRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-start',
+      flexWrap: 'nowrap',
+      marginBottom: spacing.sm,
+    },
+    horizontalScroll: { marginBottom: spacing.sm },
+    categoryChip: {
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md + 2,
+      borderRadius: radii.pill,
+      backgroundColor: 'rgba(255,255,255,0.13)',
+      justifyContent: 'center',
+      marginRight: spacing.sm,
+    },
+    activeCategoryChip: { backgroundColor: colors.neutral100 },
+    categoryChipText: {
+      fontSize: 14,
+      color: colors.neutral100,
+      fontWeight: '600',
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+    },
+    activeCategoryChipText: {
+      color: colors.secondary,
+      fontWeight: '800',
+      textShadowColor: 'rgba(0,0,0,0.05)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 2,
+    },
+    selectedCountRow: {
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.sm,
+    },
+    selectedCountSummary: {
+      fontSize: 14,
+      color: colors.neutral100,
+      fontWeight: '600',
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+    },
+    activitiesGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'flex-start',
+      paddingHorizontal: spacing.md,
+      marginTop: spacing.xs,
+    },
+    activityChip: {
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      borderRadius: radii.pill,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      margin: spacing.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    selectedActivityChip: {
+      backgroundColor: colors.neutral100,
+      transform: [{ scale: 1.05 }],
+    },
+    activityText: {
+      fontSize: 15,
+      color: colors.neutral100,
+      fontWeight: '600',
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+      flexShrink: 0,
+    },
+    selectedActivityText: {
+      color: colors.secondary,
+      fontWeight: '800',
+      textShadowColor: 'rgba(0,0,0,0.05)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+    },
+    countDivider: {
+      width: 1,
+      height: '80%',
+      backgroundColor: 'rgba(255,255,255,0.4)',
+      marginHorizontal: spacing.sm,
+    },
+    countText: {
+      fontSize: 15,
+      color: colors.neutral100,
+      fontWeight: '700',
+      textAlign: 'center',
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+      flexShrink: 0,
+    },
+    selectedCountText: {
+      color: colors.secondary,
+      textShadowColor: 'rgba(0,0,0,0.05)',
+    },
+    checkIcon: {
+      marginLeft: spacing.sm,
+      backgroundColor: 'rgba(255,255,255,0.3)',
+      borderRadius: 10,
+      width: 20,
+      height: 20,
+      textAlign: 'center',
+      textAlignVertical: 'center',
+    },
+    emptyState: {
+      fontSize: 15,
+      color: colors.neutral100,
+      textAlign: 'center',
+      marginTop: spacing.lg,
+      width: '100%',
+      fontWeight: '600',
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+    },
+    stickyFooter: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: 'rgba(168, 166, 166, 0.35)',
+      paddingVertical: spacing.lg,
+      paddingHorizontal: spacing.lg,
+      borderTopWidth: 1,
+      borderTopColor: 'rgba(255,255,255,0.4)',
+      alignItems: 'center',
+    },
+    selectedCountBadge: {
+      backgroundColor: 'rgba(255,255,255,0.25)',
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.pill,
+      marginBottom: spacing.md,
+    },
+    selectedCountBadgeText: {
+      fontSize: 14,
+      color: colors.neutral100,
+      fontWeight: '700',
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+    },
+    footerButton: {
+      width: '100%',
+    },
+    error: {
+      color: colors.danger,
+      textAlign: 'center',
+      marginBottom: spacing.sm,
+      backgroundColor: 'rgba(220,38,38,0.15)',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: radii.md,
+      width: '100%',
+      fontWeight: '600',
+    },
+    sectionLabel: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.neutral100,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xs,
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 1,
+    },
+    filterInput: {
+      marginHorizontal: spacing.lg,
+      marginVertical: spacing.sm,
+      padding: spacing.md,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.45)',
+      borderRadius: radii.md,
+      backgroundColor: 'rgba(255,255,255,0.13)',
+      color: colors.neutral100,
+    },
+    searchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.neutral400,
+      borderRadius: radii.md,
+      paddingHorizontal: spacing.md,
+      marginBottom: spacing.md,
+      backgroundColor: colors.neutral100,
+    },
+    searchInput: {
+      flex: 1,
+      paddingVertical: spacing.sm,
+      color: colors.neutral900,
+    },
+    interestSelector: { maxHeight: 200, marginBottom: spacing.xl },
+    interestItem: {
+      padding: spacing.md,
+      borderRadius: radii.md,
+      marginBottom: spacing.md,
+      backgroundColor: colors.neutral200,
+    },
+  });
+};
 
 function InterestsScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
@@ -29,6 +264,8 @@ function InterestsScreen({ navigation }) {
   const [activeCategory, setActiveCategory] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0));
   const [filterText, setFilterText] = useState('');
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -232,7 +469,7 @@ function InterestsScreen({ navigation }) {
   );
 
   return (
-    <AnimatedGradientBackground style={styles.safe}>
+    <AnimatedGradientBackground style={styles.safe} variant='onboarding'>
       <SafeAreaView style={{ flex: 1 }}>
         <ScrollView
           contentContainerStyle={styles.contentContainer}
@@ -357,7 +594,7 @@ function InterestsScreen({ navigation }) {
                       <Ionicons
                         name='checkmark'
                         size={14}
-                        color='#ff6b6b'
+                        color={theme.colors.secondary}
                         style={styles.checkIcon}
                       />
                     )}
@@ -381,11 +618,16 @@ function InterestsScreen({ navigation }) {
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {loading ? (
-            <ActivityIndicator style={{ marginVertical: 10 }} color='#fff' />
+            <ActivityIndicator
+              style={{ marginVertical: theme.spacing.sm }}
+              color={theme.colors.neutral100}
+            />
           ) : (
-            <TouchableOpacity style={styles.nextButton} onPress={onNext}>
-              <Text style={styles.nextButtonText}>Next</Text>
-            </TouchableOpacity>
+            <Button
+              title='Next'
+              onPress={onNext}
+              style={styles.footerButton}
+            />
           )}
         </View>
       </SafeAreaView>
@@ -393,223 +635,5 @@ function InterestsScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  contentContainer: { paddingBottom: 120 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#fff',
-    textShadowColor: 'rgba(0,0,0,0.15)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  goBackButton: {
-    marginRight: 16,
-    padding: 10,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 8,
-  },
-  categoryRows: { paddingHorizontal: 10 },
-  categoryRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
-    flexWrap: 'nowrap',
-    marginBottom: 8,
-  },
-  horizontalScroll: { marginBottom: 8 },
-  categoryChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.13)',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  activeCategoryChip: { backgroundColor: '#fff' },
-  categoryChipText: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
-  activeCategoryChipText: {
-    color: '#ff6b6b',
-    fontWeight: '800',
-    textShadowColor: 'rgba(0,0,0,0.05)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  selectedCountRow: { paddingHorizontal: 16, paddingTop: 8 },
-  selectedCountText: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
-  activitiesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    paddingHorizontal: 10,
-    marginTop: 4,
-  },
-  activityChip: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 18,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    margin: 5,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  selectedActivityChip: {
-    backgroundColor: '#fff',
-    transform: [{ scale: 1.05 }],
-  },
-  activityText: {
-    fontSize: 15,
-    color: '#fff',
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-    flexShrink: 0,
-  },
-  selectedActivityText: {
-    color: '#ff6b6b',
-    fontWeight: '800',
-    textShadowColor: 'rgba(0,0,0,0.05)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
-  countDivider: {
-    width: 1,
-    height: '80%',
-    backgroundColor: 'rgba(255,255,255,0.4)',
-    marginHorizontal: 8,
-  },
-  countText: {
-    fontSize: 15,
-    color: '#fff',
-    fontWeight: '700',
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-    flexShrink: 0,
-  },
-  selectedCountText: {
-    color: '#ff6b6b',
-    textShadowColor: 'rgba(0,0,0,0.05)',
-  },
-  checkIcon: {
-    marginLeft: 5,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  emptyState: {
-    fontSize: 15,
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 20,
-    width: '100%',
-    fontWeight: '600',
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
-  stickyFooter: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(168, 166, 166, 0.35)',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.4)',
-    alignItems: 'center',
-    backdropFilter: 'blur(40px)',
-  },
-  selectedCountBadge: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    marginBottom: 12,
-  },
-  selectedCountBadgeText: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '700',
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
-  nextButton: {
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 25,
-    paddingVertical: 14,
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 26,
-  },
-  nextButtonText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
-  error: {
-    color: '#FF4A4A',
-    textAlign: 'center',
-    marginBottom: 10,
-    backgroundColor: 'rgba(255,74,74,0.15)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    width: '100%',
-    fontWeight: '600',
-  },
-  sectionLabel: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 1,
-  },
-  filterInput: {
-    marginHorizontal: 16,
-    marginVertical: 8,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.45)',
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.13)',
-    color: '#fff',
-  },
-});
 
 export default InterestsScreen;

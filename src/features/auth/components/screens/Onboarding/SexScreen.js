@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import * as Location from 'expo-location';
 import { Modal, ActivityIndicator } from 'react-native';
 import {
@@ -15,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
 import { mergeUserFields } from '../../../../profile/services/userService';
 import { normalizeSex } from '../../../../profile/utils/userProfile';
+import Button from '../../../../../components/ui/Button';
+import { useTheme } from '../../../../../theme';
 
 const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary'];
 
@@ -27,9 +29,102 @@ const VALUE_TO_LABEL = {
 const labelToValue = (label) => normalizeSex(label) || 'male';
 const valueToLabel = (value) => VALUE_TO_LABEL[value] || 'Male';
 
+const createStyles = (theme) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      padding: theme.spacing.xl,
+      justifyContent: 'center',
+    },
+    header: {
+      fontSize: 28,
+      fontWeight: '700',
+      textAlign: 'center',
+      marginBottom: theme.spacing.lg,
+      color: theme.colors.neutral100,
+      marginTop: theme.spacing.xl,
+    },
+    goBackButton: {
+      position: 'absolute',
+      top: 60,
+      left: 24,
+      backgroundColor: 'rgba(255,255,255,0.85)',
+      borderRadius: theme.radii.md,
+      paddingVertical: 6,
+      paddingHorizontal: 16,
+    },
+    goBackText: {
+      color: theme.colors.primary,
+      fontSize: 16,
+      fontWeight: '500',
+    },
+    genderContainer: {
+      marginBottom: theme.spacing.xl,
+    },
+    genderOption: {
+      backgroundColor: 'rgba(255,255,255,0.75)',
+      paddingVertical: 14,
+      borderRadius: theme.radii.lg,
+      marginVertical: theme.spacing.sm,
+      alignItems: 'center',
+    },
+    selectedOption: {
+      backgroundColor: theme.colors.primary,
+    },
+    genderText: {
+      fontSize: 18,
+      color: theme.colors.neutral800,
+    },
+    selectedText: {
+      color: theme.colors.neutral100,
+      fontWeight: '600',
+    },
+    nextButtonContainer: {
+      marginTop: theme.spacing.lg,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: theme.colors.overlay,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalCard: {
+      backgroundColor: theme.colors.neutral100,
+      padding: theme.spacing.xl,
+      borderRadius: theme.radii.lg,
+      width: '85%',
+      alignItems: 'center',
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      marginBottom: theme.spacing.md,
+      color: theme.colors.neutral900,
+      textAlign: 'center',
+    },
+    modalDescription: {
+      fontSize: 15,
+      color: theme.colors.neutral800,
+      marginBottom: theme.spacing.lg,
+      textAlign: 'center',
+    },
+    modalError: {
+      color: theme.colors.danger,
+      fontSize: 15,
+      marginBottom: theme.spacing.md,
+      textAlign: 'center',
+    },
+    modalActions: {
+      marginTop: theme.spacing.md,
+      width: '100%',
+    },
+  });
+
 export default function SexScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
   const setUser = useUserStore((state) => state.setUser);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [selectedSex, setSelectedSex] = useState(() =>
     valueToLabel(normalizeSex(user?.sex) || 'male')
   );
@@ -127,7 +222,7 @@ export default function SexScreen({ navigation }) {
   };
 
   return (
-    <AnimatedGradientBackground style={styles.container}>
+    <AnimatedGradientBackground style={styles.container} variant='onboarding'>
       <Text style={styles.header}>What's your gender?</Text>
       <TouchableOpacity
         onPress={() => {
@@ -159,15 +254,9 @@ export default function SexScreen({ navigation }) {
         ))}
       </View>
       <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
-        <TouchableOpacity
-          style={styles.nextButton}
-          onPress={onNext}
-          disabled={loading}
-        >
-          <Text style={styles.nextButtonText}>
-            {loading ? 'Saving…' : 'Next'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.nextButtonContainer}>
+          <Button title={loading ? 'Saving…' : 'Next'} onPress={onNext} disabled={loading} />
+        </View>
       </Animated.View>
 
       {/* Location Modal */}
@@ -177,36 +266,10 @@ export default function SexScreen({ navigation }) {
         transparent
         onRequestClose={() => {}}
       >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: '#fff',
-              padding: 28,
-              borderRadius: 16,
-              width: '85%',
-              alignItems: 'center',
-            }}
-          >
-            <Text
-              style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 12 }}
-            >
-              Share Your Location
-            </Text>
-            <Text
-              style={{
-                fontSize: 15,
-                color: '#555',
-                marginBottom: 18,
-                textAlign: 'center',
-              }}
-            >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Share Your Location</Text>
+            <Text style={styles.modalDescription}>
               To help you discover local events and friends, we need your
               location. Your data is private and only used for Social Circle
               features.
@@ -214,47 +277,22 @@ export default function SexScreen({ navigation }) {
             {locationLoading ? (
               <ActivityIndicator
                 size='large'
-                color='#ff6b6b'
+                color={theme.colors.primary}
                 style={{ marginVertical: 16 }}
               />
             ) : (
-              <TouchableOpacity
-                style={{
-                  backgroundColor: '#ff6b6b',
-                  borderRadius: 10,
-                  paddingVertical: 14,
-                  paddingHorizontal: 32,
-                  marginTop: 8,
-                }}
-                onPress={handleGetLocation}
-              >
-                <Text
-                  style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}
-                >
-                  Share My Location
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.modalActions}>
+                <Button title='Share My Location' onPress={handleGetLocation} />
+              </View>
             )}
             {locationError ? (
-              <View style={{ marginTop: 18, alignItems: 'center' }}>
-                <Text style={{ color: '#d00', fontSize: 15, marginBottom: 8 }}>
-                  {locationError}
-                </Text>
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: '#4285F4',
-                    borderRadius: 8,
-                    paddingVertical: 10,
-                    paddingHorizontal: 24,
-                  }}
+              <View style={{ marginTop: theme.spacing.lg, width: '100%' }}>
+                <Text style={styles.modalError}>{locationError}</Text>
+                <Button
+                  title='Try Again'
                   onPress={handleGetLocation}
-                >
-                  <Text
-                    style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}
-                  >
-                    Try Again
-                  </Text>
-                </TouchableOpacity>
+                  variant='secondary'
+                />
               </View>
             ) : null}
           </View>
@@ -263,85 +301,3 @@ export default function SexScreen({ navigation }) {
     </AnimatedGradientBackground>
   );
 }
-
-const styles = StyleSheet.create({
-  header: {
-    fontSize: 28,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 24,
-    color: '#1E1E2F',
-    marginTop: 32,
-  },
-  container: {
-    flex: 1,
-    padding: 24,
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 8,
-    color: '#1E1E2F',
-  },
-  subtitle: {
-    fontSize: 20,
-    fontWeight: '500',
-    textAlign: 'center',
-    marginBottom: 24,
-    color: '#2C2C3A',
-  },
-  genderContainer: {
-    marginBottom: 32,
-  },
-  genderOption: {
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginVertical: 8,
-    alignItems: 'center',
-  },
-  selectedOption: {
-    backgroundColor: '#007AFF',
-  },
-  genderText: {
-    fontSize: 18,
-    color: '#333',
-  },
-  selectedText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  nextButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    elevation: 5,
-    alignItems: 'center',
-  },
-  nextButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  goBackButton: {
-    position: 'absolute',
-    top: 60,
-    left: 24,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderRadius: 14,
-    paddingVertical: 6,
-    paddingHorizontal: 16,
-  },
-  goBackText: {
-    color: '#007AFF',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-});

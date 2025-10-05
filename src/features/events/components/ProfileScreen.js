@@ -63,12 +63,14 @@ import {
   mergeUniqueEvents,
 } from '../utils/dateUtils';
 import { getBadgeConfig, DEFAULT_BADGE } from '../../profile/utils/badgeConfig';
+import { useTheme } from '../../../theme';
 
 export default function ProfileScreen({ navigation }) {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
   const myEvents = useMyEvents(user?.uid || '');
   const now = new Date();
+  const theme = useTheme();
   const tutorialStorageKey = useMemo(() => {
     return user?.uid ? `profile_tutorial_seen_${user.uid}` : null;
   }, [user?.uid]);
@@ -1188,7 +1190,7 @@ export default function ProfileScreen({ navigation }) {
       >
         {/* Header */}
         <LinearGradient
-          colors={['#4DA0B0', 'coral']}
+          colors={['#ff6b6b', '#4dabf7']}
           style={styles.profileHeader}
         >
           <View style={styles.navBar}>
@@ -1200,7 +1202,11 @@ export default function ProfileScreen({ navigation }) {
                 accessibilityLabel='Share profile'
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons name='share-social-outline' size={26} color='#fff' />
+                <Ionicons
+                  name='share-social-outline'
+                  size={26}
+                  color={theme.colors.neutral100}
+                />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleNotificationsPress}
@@ -1211,7 +1217,7 @@ export default function ProfileScreen({ navigation }) {
                   <MaterialCommunityIcons
                     name='bell-outline'
                     size={28}
-                    color='#fff'
+                    color={theme.colors.neutral100}
                   />
                   {unreadCount > 0 && (
                     <View
@@ -1310,7 +1316,6 @@ export default function ProfileScreen({ navigation }) {
               style={styles.badgeImage}
               resizeMode='contain'
             />
-            <Text style={styles.statLabel}>Badges</Text>
           </View>
         </View>
         {/* Bio */}
@@ -1649,8 +1654,8 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   statLabel: { fontSize: 13, color: '#777', marginTop: 2 },
   badgeImage: {
-    width: 40,
-    height: 40,
+    width: 50,
+    height: 50,
   },
   bioContainer: {
     backgroundColor: '#fff',

@@ -49,6 +49,7 @@ import { useEventStore } from '../stores/eventStore';
 import joinEvent from '../services/joinEvent';
 import { trackCardClick, trackOpenEvent } from '../../../lib/analytics';
 import { filterBlockedEvents } from '../utils/blockUtils';
+import { useTheme } from '../../../theme';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const PREVIEW_WIDTH = Math.min(300, SCREEN_W - 16); // slightly narrower preview for smaller overall footprint
@@ -83,6 +84,7 @@ export default function MapScreen() {
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
   const navigation = useNavigation();
   const route = useRoute();
+  const theme = useTheme();
 
   const tutorialKeys = useMemo(() => {
     if (!user?.uid) return null;
@@ -95,7 +97,7 @@ export default function MapScreen() {
   if (!user) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size='large' color='#007AFF' />
+        <ActivityIndicator size='large' color={theme.colors.primary} />
       </View>
     );
   }
@@ -1252,7 +1254,7 @@ export default function MapScreen() {
   if (initialLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size='large' color='#007AFF' />
+        <ActivityIndicator size='large' color={theme.colors.primary} />
       </View>
     );
   }
@@ -1389,6 +1391,10 @@ export default function MapScreen() {
               style={[
                 styles.quickDateChip,
                 isActive && styles.quickDateChipActive,
+                isActive && {
+                  backgroundColor: theme.colors.primary,
+                  borderColor: theme.colors.primaryDark,
+                },
               ]}
               onPress={() => handleQuickDateChipPress(chip)}
               activeOpacity={0.85}
@@ -1448,7 +1454,7 @@ export default function MapScreen() {
             })}
           {newEventLocation && (
             <Marker coordinate={newEventLocation}>
-              <CustomDotMarker color='#007AFF' scale={1} />
+              <CustomDotMarker color={theme.colors.primary} scale={1} />
             </Marker>
           )}
         </MapView>
@@ -1479,21 +1485,29 @@ export default function MapScreen() {
       {/* Left FABs */}
       <View style={styles.leftFabContainer}>
         <TouchableOpacity
-          style={styles.listFab}
+          style={[styles.listFab, { backgroundColor: theme.colors.primary }]}
           onPress={handleToggleListView}
           activeOpacity={0.8}
         >
-          <Ionicons name='list' size={28} color='#fff' />
+          <Ionicons
+            name='list'
+            size={28}
+            color={theme.colors.neutral100}
+          />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.compassFab}
+          style={[styles.compassFab, { backgroundColor: theme.colors.primary }]}
           onPress={handleCenterOnUser}
           activeOpacity={0.8}
         >
           {isLocating ? (
-            <ActivityIndicator color='#fff' />
+            <ActivityIndicator color={theme.colors.neutral100} />
           ) : (
-            <Ionicons name='navigate' size={22} color='#fff' />
+            <Ionicons
+              name='navigate'
+              size={22}
+              color={theme.colors.neutral100}
+            />
           )}
         </TouchableOpacity>
       </View>
@@ -1502,13 +1516,18 @@ export default function MapScreen() {
       <TouchableOpacity
         ref={createFabRef}
         onLayout={handleCreateFabLayout}
-        style={styles.fab}
+        style={[styles.fab, { backgroundColor: theme.colors.primary }]}
         onPress={() => {
           markInteraction();
           setShowCreateModal(true);
         }}
       >
-        <Ionicons name='add' size={32} color='#fff' style={styles.fabIcon} />
+        <Ionicons
+          name='add'
+          size={32}
+          color={theme.colors.neutral100}
+          style={styles.fabIcon}
+        />
       </TouchableOpacity>
 
       {/* Event List Overlay */}
