@@ -15,7 +15,10 @@ import {
   Alert,
   Platform,
   ScrollView,
+  Animated,
+  Easing,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import {
@@ -81,6 +84,14 @@ export default function MapScreen() {
   const navigation = useNavigation();
   const route = useRoute();
 
+  const tutorialKeys = useMemo(() => {
+    if (!user?.uid) return null;
+    return {
+      create: `map_create_fab_tutorial_${user.uid}`,
+      filter: `map_filter_tutorial_${user.uid}`,
+    };
+  }, [user?.uid]);
+
   if (!user) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -113,6 +124,16 @@ export default function MapScreen() {
   const [showListView, setShowListView] = useState(false);
   const [showFilterWindow, setShowFilterWindow] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [activeTutorial, setActiveTutorial] = useState(null);
+  const [pendingTutorial, setPendingTutorial] = useState(null);
+  const [tutorialProgress, setTutorialProgress] = useState({
+    create: true,
+    filter: true,
+  });
+  const [tutorialLayouts, setTutorialLayouts] = useState({
+    create: null,
+    filter: null,
+  });
 
   // Debug selectedEvent changes
   useEffect(() => {
@@ -124,6 +145,14 @@ export default function MapScreen() {
   const previewsCooldownRef = useRef(0);
   const mapRef = useRef(null);
   const eventStoreRef = useRef(useEventStore.getState());
+  const createFabRef = useRef(null);
+  const filterButtonRef = useRef(null);
+  const latestLayoutsRef = useRef({
+    create: null,
+    filter: null,
+  });
+  const tutorialOpacity = useRef(new Animated.Value(0)).current;
+  const lastInteractionRef = useRef(Date.now());
 
   const [isLocating, setIsLocating] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -139,6 +168,282 @@ export default function MapScreen() {
   const hasInitializedInterestsRef = useRef(false);
 
   const unsubscribeRef = useRef(null);
+
+  const markInteraction = useCallback(() => {
+    lastInteractionRef.current = Date.now();
+  }, []);
+
+  useEffect(() => {
+    if (!tutorialKeys) {
+      setTutorialProgress({ create: true, filter: true });
+      setActiveTutorial(null);
+      setPendingTutorial(null);
+      setTutorialLayouts({ create: null, filter: null });
+      latestLayoutsRef.current = { create: null, filter: null };
+      return;
+    }
+
+    let isMounted = true;
+    Promise.all([
+      AsyncStorage.getItem(tutorialKeys.create),
+      AsyncStorage.getItem(tutorialKeys.filter),
+    ])
+      .then(([createValue, filterValue]) => {
+        if (!isMounted) return;
+        const progress = {
+          create: createValue === 'true',
+          filter: filterValue === 'true',
+        };
+        setTutorialProgress(progress);
+        const nextTutorial = !progress.create
+          ? 'create'
+          : !progress.filter
+          ? 'filter'
+          : null;
+        setActiveTutorial(null);
+        setPendingTutorial(nextTutorial);
+        setTutorialLayouts({ create: null, filter: null });
+        latestLayoutsRef.current = { create: null, filter: null };
+      })
+      .catch((err) => {
+        console.warn('Map tutorials load failed:', err?.message || err);
+        if (!isMounted) return;
+        const progress = { create: false, filter: false };
+        setTutorialProgress(progress);
+        setActiveTutorial(null);
+        setPendingTutorial('create');
+        setTutorialLayouts({ create: null, filter: null });
+        latestLayoutsRef.current = { create: null, filter: null };
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [tutorialKeys]);
+
+  const measureTutorialTarget = useCallback(
+    (type) => {
+      const ref = type === 'create' ? createFabRef.current : filterButtonRef.current;
+      if (!ref || typeof ref.measureInWindow !== 'function') return;
+      ref.measureInWindow((x, y, width, height) => {
+        if (!width && !height) return;
+        const layout = { x, y, width, height };
+        latestLayoutsRef.current[type] = layout;
+        setTutorialLayouts((prev) => {
+          const prevLayout = prev[type];
+          if (
+            prevLayout &&
+            Math.abs(prevLayout.x - layout.x) < 1 &&
+            Math.abs(prevLayout.y - layout.y) < 1 &&
+            Math.abs(prevLayout.width - layout.width) < 1 &&
+            Math.abs(prevLayout.height - layout.height) < 1
+          ) {
+            return prev;
+          }
+          return { ...prev, [type]: layout };
+        });
+      });
+    },
+    []
+  );
+
+  const handleCreateFabLayout = useCallback(() => {
+    measureTutorialTarget('create');
+  }, [measureTutorialTarget]);
+
+  useEffect(() => {
+    if (!activeTutorial) return;
+    tutorialOpacity.setValue(0);
+    Animated.timing(tutorialOpacity, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [activeTutorial, tutorialOpacity]);
+
+  const handleFilterButtonLayout = useCallback(() => {
+    measureTutorialTarget('filter');
+  }, [measureTutorialTarget]);
+
+  useEffect(() => {
+    if (!activeTutorial) return;
+    const timer = setTimeout(() => {
+      measureTutorialTarget(activeTutorial);
+    }, 220);
+
+    let subscription;
+    if (typeof Dimensions?.addEventListener === 'function') {
+      subscription = Dimensions.addEventListener('change', () =>
+        measureTutorialTarget(activeTutorial)
+      );
+    }
+
+    return () => {
+      clearTimeout(timer);
+      if (subscription && typeof subscription.remove === 'function') {
+        subscription.remove();
+      }
+    };
+  }, [activeTutorial, measureTutorialTarget]);
+
+  useEffect(() => {
+    if (!pendingTutorial || activeTutorial || !mapReady) return;
+
+    let cancelled = false;
+    const baseDelay = pendingTutorial === 'create' ? 1400 : 1100;
+
+    const ensureLayout = () => {
+      if (!latestLayoutsRef.current[pendingTutorial]) {
+        measureTutorialTarget(pendingTutorial);
+      }
+    };
+
+    ensureLayout();
+
+    let rescheduleTimer;
+    const attemptShow = () => {
+      if (cancelled) return;
+      ensureLayout();
+      if (Date.now() - lastInteractionRef.current < 900) {
+        rescheduleTimer = setTimeout(attemptShow, 600);
+        return;
+      }
+      setActiveTutorial(pendingTutorial);
+      setPendingTutorial(null);
+    };
+
+    const delayTimer = setTimeout(attemptShow, baseDelay);
+    return () => {
+      cancelled = true;
+      clearTimeout(delayTimer);
+      if (rescheduleTimer) clearTimeout(rescheduleTimer);
+    };
+  }, [pendingTutorial, activeTutorial, mapReady, measureTutorialTarget]);
+
+  const dismissActiveTutorial = useCallback(() => {
+    if (!activeTutorial) return;
+    const current = activeTutorial;
+    const storageKey = tutorialKeys?.[current];
+    const queueFilter = current === 'create' && tutorialProgress.filter !== true;
+
+    markInteraction();
+
+    const finalize = () => {
+      tutorialOpacity.setValue(0);
+      setTutorialLayouts((prev) => ({ ...prev, [current]: null }));
+      latestLayoutsRef.current[current] = null;
+      setTutorialProgress((prev) => ({ ...prev, [current]: true }));
+      setActiveTutorial(null);
+      setPendingTutorial((prev) => prev ?? (queueFilter ? 'filter' : null));
+      if (storageKey) {
+        AsyncStorage.setItem(storageKey, 'true').catch((err) =>
+          console.warn('Map tutorial write failed:', err?.message || err)
+        );
+      }
+    };
+
+    Animated.timing(tutorialOpacity, {
+      toValue: 0,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      finalize();
+    });
+  }, [activeTutorial, tutorialKeys, tutorialProgress.filter, tutorialOpacity, markInteraction]);
+
+  const tutorialHighlightStyle = useMemo(() => {
+    if (!activeTutorial) return null;
+    const layout = tutorialLayouts[activeTutorial];
+    if (!layout) return null;
+    const windowSize = Dimensions.get('window');
+
+    if (activeTutorial === 'create') {
+      const size = Math.max(layout.width, layout.height) + 36;
+      const provisionalTop = layout.y + layout.height / 2 - size / 2;
+      const provisionalLeft = layout.x + layout.width / 2 - size / 2;
+      return {
+        top: Math.max(Math.min(provisionalTop, windowSize.height - size), 0),
+        left: Math.max(Math.min(provisionalLeft, windowSize.width - size), 0),
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+      };
+    }
+
+    const padding = 14;
+    const width = layout.width + padding * 2;
+    const height = layout.height + padding * 2;
+    const provisionalTop = layout.y - padding;
+    const provisionalLeft = layout.x - padding;
+    return {
+      top: Math.max(Math.min(provisionalTop, windowSize.height - height), 0),
+      left: Math.max(Math.min(provisionalLeft, windowSize.width - width), 0),
+      width,
+      height,
+      borderRadius: 18,
+    };
+  }, [activeTutorial, tutorialLayouts]);
+
+  const tutorialTooltipPosition = useMemo(() => {
+    if (!activeTutorial) return null;
+    const windowSize = Dimensions.get('window');
+    const tooltipWidth = 280;
+    const fallback = {
+      top: Math.max(
+        Math.min(windowSize.height * 0.4, windowSize.height - 220),
+        16
+      ),
+      left: Math.max(
+        Math.min(
+          (windowSize.width - tooltipWidth) / 2,
+          windowSize.width - tooltipWidth - 16
+        ),
+        16
+      ),
+      width: tooltipWidth,
+    };
+
+    const layout = tutorialLayouts[activeTutorial];
+    if (!layout) return fallback;
+
+    if (activeTutorial === 'create') {
+      const top = Math.max(layout.y - 170, 16);
+      const left = Math.max(
+        Math.min(layout.x + layout.width - tooltipWidth, windowSize.width - tooltipWidth - 16),
+        16
+      );
+      return { top, left, width: tooltipWidth };
+    }
+
+    const top = Math.min(layout.y + layout.height + 18, windowSize.height - 200);
+    const left = Math.max(
+      Math.min(layout.x + layout.width - tooltipWidth, windowSize.width - tooltipWidth - 16),
+      16
+    );
+    return { top, left, width: tooltipWidth };
+  }, [activeTutorial, tutorialLayouts]);
+
+  const tutorialCopy = useMemo(() => {
+    if (activeTutorial === 'create') {
+      return {
+        title: 'Create an event',
+        description:
+          'Tap the plus button to host your own meetup. Long-press the map first if you want to drop a pin before adding details.',
+        cta: "Let's go",
+      };
+    }
+    if (activeTutorial === 'filter') {
+      return {
+        title: 'Adjust your filters',
+        description:
+          'The map starts with events that match your interests. Open filters or try the date chips to explore more events.',
+        cta: 'Got it',
+      };
+    }
+    return null;
+  }, [activeTutorial]);
 
   const openEventById = useCallback(
     async (eventId) => {
@@ -472,6 +777,7 @@ export default function MapScreen() {
   };
 
   const handleRegionChangeComplete = (newRegion) => {
+    markInteraction();
     setRegion(newRegion);
     fetchEventsInRegion(newRegion);
     // Schedule previews after idle delay if cooldown allows
@@ -480,6 +786,7 @@ export default function MapScreen() {
 
   // Hide previews while actively moving the map
   const handleRegionChange = () => {
+    markInteraction();
     if (previewsIdleTimerRef.current) {
       clearTimeout(previewsIdleTimerRef.current);
       previewsIdleTimerRef.current = null;
@@ -731,6 +1038,7 @@ export default function MapScreen() {
   );
 
   const handleMapLongPress = async (e) => {
+    markInteraction();
     const coordinate = e.nativeEvent.coordinate;
     try {
       const res = await fetch(
@@ -799,6 +1107,7 @@ export default function MapScreen() {
   };
 
   const handlePlaceSelect = (data, details) => {
+    markInteraction();
     if (details?.geometry?.location) {
       const { lat, lng } = details.geometry.location;
       const newRegion = {
@@ -813,9 +1122,14 @@ export default function MapScreen() {
     }
   };
 
-  const handleToggleListView = () => setShowListView((prev) => !prev);
+  const handleToggleListView = () => {
+    markInteraction();
+    setShowListView((prev) => !prev);
+  };
 
   const handleCenterOnUser = async () => {
+    if (isLocating) return;
+    markInteraction();
     setIsLocating(true);
     try {
       const location = await Location.getCurrentPositionAsync({});
@@ -959,6 +1273,39 @@ export default function MapScreen() {
 
   return (
     <View style={styles.container}>
+      {activeTutorial && tutorialCopy && (
+        <Animated.View
+          style={[styles.tutorialOverlay, { opacity: tutorialOpacity }]}
+          pointerEvents='auto'
+        >
+          <View style={styles.tutorialBackdrop} />
+          {tutorialHighlightStyle && (
+            <View
+              pointerEvents='none'
+              style={[styles.tutorialHighlight, tutorialHighlightStyle]}
+            />
+          )}
+          {tutorialTooltipPosition && (
+            <View
+              style={[styles.tutorialTooltip, tutorialTooltipPosition]}
+              accessibilityLabel='Map tutorial tooltip'
+            >
+              <Text style={styles.tutorialTitle}>{tutorialCopy.title}</Text>
+              <Text style={styles.tutorialDescription}>
+                {tutorialCopy.description}
+              </Text>
+              <TouchableOpacity
+                style={styles.tutorialButton}
+                onPress={dismissActiveTutorial}
+                accessibilityRole='button'
+                accessibilityLabel='Dismiss map tutorial'
+              >
+                <Text style={styles.tutorialButtonText}>{tutorialCopy.cta}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </Animated.View>
+      )}
       {/* Search + Filter Bar */}
       <View style={styles.searchBarUnified} pointerEvents='box-none'>
         <Ionicons
@@ -972,11 +1319,16 @@ export default function MapScreen() {
           predefinedPlaces={[]}
           minLength={2}
           fetchDetails={true}
+          timeout={20000}
           textInputProps={{
-            onFocus: () =>
-              Platform.OS === 'android' && setIsSearchFocused(true),
-            onBlur: () =>
-              Platform.OS === 'android' && setIsSearchFocused(false),
+            onFocus: () => {
+              markInteraction();
+              if (Platform.OS === 'android') setIsSearchFocused(true);
+            },
+            onBlur: () => {
+              markInteraction();
+              if (Platform.OS === 'android') setIsSearchFocused(false);
+            },
           }}
           onPress={(data, details = null) => handlePlaceSelect(data, details)}
           query={{
@@ -1011,8 +1363,13 @@ export default function MapScreen() {
           }}
         />
         <TouchableOpacity
+          ref={filterButtonRef}
+          onLayout={handleFilterButtonLayout}
           style={styles.filterButtonUnified}
-          onPress={() => setShowFilterWindow((prev) => !prev)}
+          onPress={() => {
+            markInteraction();
+            setShowFilterWindow((prev) => !prev);
+          }}
         >
           <Text style={styles.filterButtonTextUnified}>Filter</Text>
         </TouchableOpacity>
@@ -1143,8 +1500,13 @@ export default function MapScreen() {
 
       {/* Create Event FAB */}
       <TouchableOpacity
+        ref={createFabRef}
+        onLayout={handleCreateFabLayout}
         style={styles.fab}
-        onPress={() => setShowCreateModal(true)}
+        onPress={() => {
+          markInteraction();
+          setShowCreateModal(true);
+        }}
       >
         <Ionicons name='add' size={32} color='#fff' style={styles.fabIcon} />
       </TouchableOpacity>
@@ -1224,6 +1586,59 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  tutorialOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+  },
+  tutorialBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10,14,21,0.45)',
+  },
+  tutorialHighlight: {
+    position: 'absolute',
+    borderColor: '#ffffff',
+    borderWidth: 2,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 16,
+  },
+  tutorialTooltip: {
+    position: 'absolute',
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#101824',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  tutorialTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  tutorialDescription: {
+    color: '#e5edff',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  tutorialButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#3A7BFF',
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+  },
+  tutorialButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   map: { flex: 1 },
   dot: {
     height: 18,
@@ -1293,6 +1708,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 15,
     height: 44,
+    overflow: 'visible',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,

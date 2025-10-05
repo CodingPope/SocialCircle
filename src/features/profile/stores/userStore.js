@@ -16,12 +16,14 @@ export const useUserStore = create((set) => ({
   user: null,
   // Loading state for async actions
   loading: true,
+  // Onboarding completion flag (derived from profile data)
+  profileComplete: false,
 
   // Set user object
   setUser: (user) => set({ user }),
   // Set loading state
   setLoading: (loading) => set({ loading }),
-  setProfileComplete: (complete) => set({ profileComplete: complete }), // <-- Add this line
+  setProfileComplete: (complete) => set({ profileComplete: !!complete }),
 
   // Login action
   login: async (email, password) => {
@@ -46,9 +48,11 @@ export const useUserStore = create((set) => ({
           'Your account has been deleted. Please contact support if you believe this is a mistake.'
         );
       }
+      const profileComplete = getNextOnboardingStep(userData) === null;
       set({
         user: { uid: result.user.uid, email: result.user.email, ...userData },
         loading: false,
+        profileComplete,
       });
       return true;
     } catch (err) {
@@ -157,7 +161,8 @@ export const useUserStore = create((set) => ({
         set({ user: null, loading: false });
         return;
       }
-      set({ user: { uid, ...userData }, loading: false });
+      const profileComplete = getNextOnboardingStep(userData) === null;
+      set({ user: { uid, ...userData }, loading: false, profileComplete });
     } catch (err) {
       set({ loading: false });
       throw err;
@@ -171,7 +176,8 @@ export const useUserStore = create((set) => ({
     try {
       await updateUserData(uid, data);
       const userData = await getUserData(uid);
-      set({ user: { uid, ...userData }, loading: false });
+      const profileComplete = getNextOnboardingStep(userData) === null;
+      set({ user: { uid, ...userData }, loading: false, profileComplete });
     } catch (err) {
       set({ loading: false });
       throw err;
@@ -187,6 +193,7 @@ export const useUserStore = create((set) => ({
           await enableNetwork(db);
         } catch {}
         const userData = await getUserData(firebaseUser.uid);
+        const complete = getNextOnboardingStep(userData) === null;
         set({
           user: {
             uid: firebaseUser.uid,
@@ -194,9 +201,8 @@ export const useUserStore = create((set) => ({
             ...userData,
           },
           loading: false,
+          profileComplete: complete,
         });
-        const complete = getNextOnboardingStep(userData) === null;
-        set({ profileComplete: complete });
       } else {
         set({ user: null, loading: false, profileComplete: false });
         // Do not reset navigation here; AppNavigator will render AuthStack when user is null

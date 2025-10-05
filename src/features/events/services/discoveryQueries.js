@@ -233,7 +233,7 @@ export async function fetchThisWeekEvents(
 }
 
 /**
- * 3a5 Fetch "Today" events within radius (local day)
+ * Fetch "Today" events within radius (local day)
  */
 export async function fetchTodayEvents(
   selectedInterest,

@@ -22,6 +22,7 @@ import {
   Platform,
   StatusBar,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -68,6 +69,9 @@ export default function ProfileScreen({ navigation }) {
   const user = useUserStore((state) => state.user);
   const myEvents = useMyEvents(user?.uid || '');
   const now = new Date();
+  const tutorialStorageKey = useMemo(() => {
+    return user?.uid ? `profile_tutorial_seen_${user.uid}` : null;
+  }, [user?.uid]);
 
   // Keep a stable reference to myEvents to avoid effect dependency loops
   const myEventsRef = useRef(myEvents);
@@ -129,6 +133,31 @@ export default function ProfileScreen({ navigation }) {
     };
   }, [user?.uid]);
 
+  useEffect(() => {
+    if (!tutorialStorageKey) return;
+    let isMounted = true;
+    AsyncStorage.getItem(tutorialStorageKey)
+      .then((value) => {
+        if (isMounted && value !== 'true') {
+          setShowProfileTutorial(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('Profile tutorial flag read failed:', err?.message || err);
+        if (isMounted) setShowProfileTutorial(true);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [tutorialStorageKey]);
+
+  useEffect(() => {
+    if (tutorialStorageKey) return;
+    setShowProfileTutorial(false);
+    setMenuHighlightLayout(null);
+    menuHighlightLatestRef.current = null;
+  }, [tutorialStorageKey]);
+
   // Optimistically clear badge and mark unread as read
   const handleNotificationsPress = async () => {
     // Optimistic UI: clear badge immediately
@@ -162,6 +191,69 @@ export default function ProfileScreen({ navigation }) {
       navigation.navigate('Notifications');
     }
   };
+
+  const measureMenuButton = useCallback(() => {
+    if (
+      !menuButtonRef.current ||
+      typeof menuButtonRef.current.measureInWindow !== 'function'
+    ) {
+      return;
+    }
+    menuButtonRef.current.measureInWindow((x, y, width, height) => {
+      if (!width && !height) return;
+      const layout = { x, y, width, height };
+      menuHighlightLatestRef.current = layout;
+      setMenuHighlightLayout(layout);
+    });
+  }, []);
+
+  const handleMenuButtonLayout = useCallback(() => {
+    requestAnimationFrame(() => measureMenuButton());
+  }, [measureMenuButton]);
+
+  const dismissProfileTutorial = useCallback(async () => {
+    setShowProfileTutorial(false);
+    setMenuHighlightLayout(null);
+    menuHighlightLatestRef.current = null;
+    if (!tutorialStorageKey) return;
+    try {
+      await AsyncStorage.setItem(tutorialStorageKey, 'true');
+    } catch (err) {
+      console.warn('Profile tutorial flag write failed:', err?.message || err);
+    }
+  }, [tutorialStorageKey]);
+
+  useEffect(() => {
+    if (!showProfileTutorial) return;
+    const timer = setTimeout(() => {
+      measureMenuButton();
+    }, 200);
+
+    let attempts = 0;
+    const retryInterval = setInterval(() => {
+      if (menuHighlightLatestRef.current || attempts >= 5) {
+        clearInterval(retryInterval);
+        return;
+      }
+      attempts += 1;
+      measureMenuButton();
+    }, 220);
+
+    let subscription;
+    if (typeof Dimensions?.addEventListener === 'function') {
+      subscription = Dimensions.addEventListener('change', measureMenuButton);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(retryInterval);
+      if (subscription && typeof subscription.remove === 'function') {
+        subscription.remove();
+      } else if (typeof Dimensions?.removeEventListener === 'function') {
+        Dimensions.removeEventListener('change', measureMenuButton);
+      }
+    };
+  }, [measureMenuButton, showProfileTutorial]);
 
   const handleShareProfile = useCallback(async () => {
     if (!user?.uid) {
@@ -249,6 +341,8 @@ export default function ProfileScreen({ navigation }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [showProfileTutorial, setShowProfileTutorial] = useState(false);
+  const [menuHighlightLayout, setMenuHighlightLayout] = useState(null);
 
   // Add animated sidebar state/refs
   const sidebarPan = useRef(null);
@@ -256,6 +350,8 @@ export default function ProfileScreen({ navigation }) {
     new Animated.Value(Dimensions.get('window').width)
   ).current;
   const sidebarClosing = useRef(false);
+  const menuButtonRef = useRef(null);
+  const menuHighlightLatestRef = useRef(null);
 
   // PanResponder for swipe-to-close gesture
   sidebarPan.current =
@@ -736,6 +832,46 @@ export default function ProfileScreen({ navigation }) {
     return 'Location not specified';
   };
 
+  const tutorialHighlightStyle = useMemo(() => {
+    if (!menuHighlightLayout) return null;
+    const padding = 12;
+    return {
+      top: Math.max(menuHighlightLayout.y - padding, 0),
+      left: Math.max(menuHighlightLayout.x - padding, 0),
+      width: menuHighlightLayout.width + padding * 2,
+      height: menuHighlightLayout.height + padding * 2,
+    };
+  }, [menuHighlightLayout]);
+
+  const tutorialTooltipPosition = useMemo(() => {
+    const windowSize = Dimensions.get('window');
+    const tooltipWidth = 260;
+
+    if (!menuHighlightLayout) {
+      const centeredLeft = (windowSize.width - tooltipWidth) / 2;
+      const safeLeft = Math.min(
+        Math.max(centeredLeft, 16),
+        windowSize.width - tooltipWidth - 16
+      );
+      return {
+        width: tooltipWidth,
+        top: Math.min(windowSize.height * 0.25, windowSize.height - 180),
+        left: safeLeft,
+      };
+    }
+
+    const horizontalOrigin =
+      menuHighlightLayout.x + menuHighlightLayout.width - tooltipWidth;
+    const left = Math.min(
+      Math.max(horizontalOrigin, 16),
+      windowSize.width - tooltipWidth - 16
+    );
+    const preferredTop =
+      menuHighlightLayout.y + menuHighlightLayout.height + 18;
+    const top = Math.min(preferredTop, windowSize.height - 180);
+    return { top, left, width: tooltipWidth };
+  }, [menuHighlightLayout]);
+
   const handleImageUpload = async () => {
     try {
       const permissionResult =
@@ -898,6 +1034,37 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {showProfileTutorial && (
+        <View style={styles.tutorialOverlay} pointerEvents='auto'>
+          <View style={styles.tutorialBackdrop} />
+          {tutorialHighlightStyle && (
+            <View
+              pointerEvents='none'
+              style={[styles.tutorialHighlight, tutorialHighlightStyle]}
+            />
+          )}
+          {tutorialTooltipPosition && (
+            <View
+              style={[styles.tutorialTooltip, tutorialTooltipPosition]}
+              accessibilityLabel='Profile tutorial tooltip'
+            >
+              <Text style={styles.tutorialTitle}>Profile menu</Text>
+              <Text style={styles.tutorialDescription}>
+                Open the menu to add a profile photo, edit your bio, and manage
+                your account details.
+              </Text>
+              <TouchableOpacity
+                style={styles.tutorialButton}
+                onPress={dismissProfileTutorial}
+                accessibilityRole='button'
+                accessibilityLabel='Got it, close profile tutorial'
+              >
+                <Text style={styles.tutorialButtonText}>Got it</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      )}
       {/* Sidebar Menu (Animated right-to-left slide-in) */}
       {sidebarVisible && (
         <View style={styles.sidebarAbsoluteOverlay}>
@@ -1012,10 +1179,10 @@ export default function ProfileScreen({ navigation }) {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
+          <RefreshControl
+            refreshing={refreshing}
             onRefresh={onRefresh}
-            title=""
+            title=''
           />
         }
       >
@@ -1075,9 +1242,15 @@ export default function ProfileScreen({ navigation }) {
                   )}
                 </View>
               </TouchableOpacity>
-              <TouchableOpacity onPress={openSidebar}>
-                <Ionicons name='menu' size={28} color='#fff' />
-              </TouchableOpacity>
+              <View
+                ref={menuButtonRef}
+                onLayout={handleMenuButtonLayout}
+                collapsable={false}
+              >
+                <TouchableOpacity onPress={openSidebar}>
+                  <Ionicons name='menu' size={28} color='#fff' />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
           <View style={styles.avatarWrapper}>
@@ -1369,6 +1542,56 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, // Add padding for Android
+  },
+  tutorialOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+  },
+  tutorialBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  tutorialHighlight: {
+    position: 'absolute',
+    borderRadius: 24,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  tutorialTooltip: {
+    position: 'absolute',
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#101824',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  tutorialTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  tutorialDescription: {
+    color: '#e5edff',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  tutorialButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#3A7BFF',
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+  },
+  tutorialButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   scrollContent: { paddingBottom: 20 },
   profileHeader: {

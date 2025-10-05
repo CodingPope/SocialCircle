@@ -50,7 +50,10 @@ module.exports = ({ config }) => {
       firebaseAppPluginOptions.androidGoogleServicesFile =
         androidGoogleServicesFile;
     }
-    firebasePlugins.push(['@react-native-firebase/app', firebaseAppPluginOptions]);
+    firebasePlugins.push([
+      '@react-native-firebase/app',
+      firebaseAppPluginOptions,
+    ]);
     firebasePlugins.push('@react-native-firebase/analytics');
     firebasePlugins.push('@react-native-firebase/dynamic-links');
   }
@@ -60,7 +63,7 @@ module.exports = ({ config }) => {
     name: 'SocialCircle',
     slug: 'socialcircle',
     scheme: 'socialcircle',
-    version: '1.0.2',
+    version: '1.0.3',
     orientation: 'portrait',
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',

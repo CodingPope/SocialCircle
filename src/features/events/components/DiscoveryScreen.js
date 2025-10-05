@@ -16,6 +16,7 @@ import {
   Platform,
   StatusBar,
   RefreshControl,
+  Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
 import {
@@ -94,6 +95,13 @@ export default function DiscoveryScreen() {
   const user = useUserStore((s) => s.user);
   const personalizationEnabled = !!user?.analyticsOptIn;
   const navigation = useNavigation();
+  const createPostTutorialKey = useMemo(() => {
+    return user?.uid ? `discovery_create_post_tutorial_${user.uid}` : null;
+  }, [user?.uid]);
+  const [showCreatePostTutorial, setShowCreatePostTutorial] = useState(false);
+  const [createPostFabLayout, setCreatePostFabLayout] = useState(null);
+  const createPostFabRef = useRef(null);
+  const createPostLayoutRef = useRef(null);
 
   const blockKey = useMemo(() => {
     const blocked = Array.isArray(user?.blocked)
@@ -157,6 +165,147 @@ export default function DiscoveryScreen() {
   useEffect(() => {
     trackEvent('discovery_tab_select', { tab: activeTab });
   }, [activeTab]);
+
+  const measureCreatePostFab = useCallback(() => {
+    const ref = createPostFabRef.current;
+    if (!ref || typeof ref.measureInWindow !== 'function') return;
+    ref.measureInWindow((x, y, width, height) => {
+      if (!width && !height) return;
+      const layout = { x, y, width, height };
+      createPostLayoutRef.current = layout;
+      setCreatePostFabLayout((prev) => {
+        if (
+          prev &&
+          Math.abs(prev.x - layout.x) < 1 &&
+          Math.abs(prev.y - layout.y) < 1 &&
+          Math.abs(prev.width - layout.width) < 1 &&
+          Math.abs(prev.height - layout.height) < 1
+        ) {
+          return prev;
+        }
+        return layout;
+      });
+    });
+  }, []);
+
+  const handleCreatePostFabLayout = useCallback(() => {
+    measureCreatePostFab();
+  }, [measureCreatePostFab]);
+
+  useEffect(() => {
+    if (!showCreatePostTutorial) return;
+    const timer = setTimeout(() => {
+      measureCreatePostFab();
+    }, 220);
+
+    let subscription;
+    if (typeof Dimensions?.addEventListener === 'function') {
+      subscription = Dimensions.addEventListener('change', measureCreatePostFab);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      if (subscription && typeof subscription.remove === 'function') {
+        subscription.remove();
+      }
+    };
+  }, [measureCreatePostFab, showCreatePostTutorial]);
+
+  const dismissCreatePostTutorial = useCallback(async () => {
+    setShowCreatePostTutorial(false);
+    setCreatePostFabLayout(null);
+    createPostLayoutRef.current = null;
+    if (!createPostTutorialKey) return;
+    try {
+      await AsyncStorage.setItem(createPostTutorialKey, 'true');
+    } catch (err) {
+      console.warn('Discovery tutorial write failed:', err?.message || err);
+    }
+  }, [createPostTutorialKey]);
+
+  const createPostHighlightStyle = useMemo(() => {
+    if (!showCreatePostTutorial || !createPostFabLayout) return null;
+    const windowSize = Dimensions.get('window');
+    const size = Math.max(createPostFabLayout.width, createPostFabLayout.height) + 36;
+    const provisionalTop =
+      createPostFabLayout.y + createPostFabLayout.height / 2 - size / 2;
+    const provisionalLeft =
+      createPostFabLayout.x + createPostFabLayout.width / 2 - size / 2;
+    return {
+      top: Math.max(Math.min(provisionalTop, windowSize.height - size), 0),
+      left: Math.max(Math.min(provisionalLeft, windowSize.width - size), 0),
+      width: size,
+      height: size,
+      borderRadius: size / 2,
+    };
+  }, [createPostFabLayout, showCreatePostTutorial]);
+
+  const createPostTooltipPosition = useMemo(() => {
+    if (!showCreatePostTutorial) return null;
+    const windowSize = Dimensions.get('window');
+    const tooltipWidth = 280;
+    const fallback = {
+      top: Math.max(
+        Math.min(windowSize.height * 0.4, windowSize.height - 220),
+        16
+      ),
+      left: Math.max(
+        Math.min(
+          (windowSize.width - tooltipWidth) / 2,
+          windowSize.width - tooltipWidth - 16
+        ),
+        16
+      ),
+      width: tooltipWidth,
+    };
+
+    if (!createPostFabLayout) return fallback;
+
+    const top = Math.max(createPostFabLayout.y - 170, 16);
+    const left = Math.max(
+      Math.min(
+        createPostFabLayout.x + createPostFabLayout.width - tooltipWidth,
+        windowSize.width - tooltipWidth - 16
+      ),
+      16
+    );
+    return { top, left, width: tooltipWidth };
+  }, [createPostFabLayout, showCreatePostTutorial]);
+
+  const createPostTutorialCopy = useMemo(
+    () => ({
+      title: 'Create an interest post',
+      description:
+        'Share photos, plans, or updates with your interests. Posts show up in Discovery and for people who follow you.',
+      cta: 'Got it',
+    }),
+    []
+  );
+
+  useEffect(() => {
+    if (!createPostTutorialKey) {
+      setShowCreatePostTutorial(false);
+      setCreatePostFabLayout(null);
+      createPostLayoutRef.current = null;
+      return;
+    }
+
+    let isMounted = true;
+    AsyncStorage.getItem(createPostTutorialKey)
+      .then((value) => {
+        if (!isMounted) return;
+        setShowCreatePostTutorial(value !== 'true');
+      })
+      .catch((err) => {
+        console.warn('Discovery tutorial load failed:', err?.message || err);
+        if (!isMounted) return;
+        setShowCreatePostTutorial(true);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [createPostTutorialKey]);
 
   useEffect(() => {
     setEvents((prev) => {
@@ -493,6 +642,40 @@ export default function DiscoveryScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {showCreatePostTutorial && (
+        <View style={styles.tutorialOverlay} pointerEvents='auto'>
+          <View style={styles.tutorialBackdrop} />
+          {createPostHighlightStyle && (
+            <View
+              pointerEvents='none'
+              style={[styles.tutorialHighlight, createPostHighlightStyle]}
+            />
+          )}
+          {createPostTooltipPosition && (
+            <View
+              style={[styles.tutorialTooltip, createPostTooltipPosition]}
+              accessibilityLabel='Discovery tutorial tooltip'
+            >
+              <Text style={styles.tutorialTitle}>
+                {createPostTutorialCopy.title}
+              </Text>
+              <Text style={styles.tutorialDescription}>
+                {createPostTutorialCopy.description}
+              </Text>
+              <TouchableOpacity
+                style={styles.tutorialButton}
+                onPress={dismissCreatePostTutorial}
+                accessibilityRole='button'
+                accessibilityLabel='Dismiss discovery tutorial'
+              >
+                <Text style={styles.tutorialButtonText}>
+                  {createPostTutorialCopy.cta}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      )}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Discovery</Text>
       </View>
@@ -583,10 +766,10 @@ export default function DiscoveryScreen() {
         scrollEventThrottle={400}
         ref={scrollViewRef}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
+          <RefreshControl
+            refreshing={refreshing}
             onRefresh={onRefresh}
-            title=""
+            title=''
           />
         }
       >
@@ -659,6 +842,8 @@ export default function DiscoveryScreen() {
       )}
 
       <TouchableOpacity
+        ref={createPostFabRef}
+        onLayout={handleCreatePostFabLayout}
         style={styles.createPostFab}
         onPress={() => setShowCreatePost(true)}
         activeOpacity={0.85}
@@ -687,6 +872,55 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
+  tutorialOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+  },
+  tutorialBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  tutorialHighlight: {
+    position: 'absolute',
+    borderColor: '#ffffff',
+    borderWidth: 2,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  tutorialTooltip: {
+    position: 'absolute',
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#101824',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  tutorialTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  tutorialDescription: {
+    color: '#e5edff',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 14,
+  },
+  tutorialButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#3A7BFF',
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+  },
+  tutorialButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   header: {
     paddingTop: 10,
