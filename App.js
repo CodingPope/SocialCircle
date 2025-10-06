@@ -1,15 +1,28 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from 'react';
 import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { NavigationContainer } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DefaultTheme,
+  DarkTheme,
+} from '@react-navigation/native';
 import { navigationRef, navigate } from './src/navigation/RootNavigation';
 import { useUserStore } from './src/features/profile';
 import { db } from './src/firebase/config';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
-import { initPushForUser, useNotificationStore } from './src/features/notifications';
+import {
+  initPushForUser,
+  useNotificationStore,
+} from './src/features/notifications';
 import Constants from 'expo-constants';
 import {
   initErrorReporting,
@@ -31,7 +44,8 @@ import {
   handleIncomingLink,
   shouldEnableDeepLinking,
 } from './src/services/deepLinking';
-import { ThemeProvider } from './src/theme';
+import { ThemeProvider, lightTheme, darkTheme } from './src/theme';
+import { useThemeStore } from './src/store/themeStore';
 console.log('Sentry initialization disabled - troubleshooting __extends error');
 
 function AppContent() {
@@ -44,8 +58,39 @@ function AppContent() {
   const [onboardingStep, setOnboardingStep] = useState(null);
   const [showAnalyticsPrompt, setShowAnalyticsPrompt] = useState(false);
   const [consentBusy, setConsentBusy] = useState(false);
+  const themeMode = useThemeStore((state) => state.mode);
   // Import onboarding router utility
   const { getNextOnboardingStep } = require('./src/utils/onboardingRouter');
+
+  // Create navigation theme based on current theme mode
+  const navigationTheme = useMemo(() => {
+    if (themeMode === 'dark') {
+      return {
+        ...DarkTheme,
+        colors: {
+          ...DarkTheme.colors,
+          primary: darkTheme.colors.primary,
+          background: darkTheme.colors.background,
+          card: darkTheme.colors.card,
+          text: darkTheme.colors.text,
+          border: darkTheme.colors.border,
+          notification: darkTheme.colors.primary,
+        },
+      };
+    }
+    return {
+      ...DefaultTheme,
+      colors: {
+        ...DefaultTheme.colors,
+        primary: lightTheme.colors.primary,
+        background: lightTheme.colors.background,
+        card: lightTheme.colors.card,
+        text: lightTheme.colors.text,
+        border: lightTheme.colors.border,
+        notification: lightTheme.colors.primary,
+      },
+    };
+  }, [themeMode]);
 
   const subscribeNotifications = useNotificationStore((s) => s.subscribe);
   const clearNotifications = useNotificationStore((s) => s.unsubscribe);
@@ -322,6 +367,7 @@ function AppContent() {
     user && onboardingStep ? (
       <NavigationContainer
         ref={navigationRef}
+        theme={navigationTheme}
         onReady={() => {
           try {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
@@ -347,6 +393,7 @@ function AppContent() {
     ) : (
       <NavigationContainer
         ref={navigationRef}
+        theme={navigationTheme}
         onReady={() => {
           try {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
@@ -382,10 +429,12 @@ function AppContent() {
 }
 
 export default function App() {
-  // Description: No longer wrap with AuthProvider
+  // Description: Get theme mode from store and pass to ThemeProvider
+  const themeMode = useThemeStore((state) => state.mode);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
+      <ThemeProvider mode={themeMode}>
         <AppContent />
       </ThemeProvider>
     </GestureHandlerRootView>

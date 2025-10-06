@@ -21,6 +21,8 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import smileDefault from '../../../../assets/smileDefault.png';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 const MAX_TEXT_LENGTH = 600;
 
@@ -31,6 +33,8 @@ export default function CreateInterestPostModal({
 }) {
   const user = useUserStore((state) => state.user);
   const insets = useSafeAreaInsets();
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [content, setContent] = useState('');
   const [selectedInterest, setSelectedInterest] = useState(null);
@@ -330,7 +334,7 @@ export default function CreateInterestPostModal({
                     multiline
                     style={styles.editorInput}
                     maxLength={MAX_TEXT_LENGTH}
-                    placeholderTextColor='#A1A3AF'
+                    placeholderTextColor={theme.colors.textSecondary}
                   />
                   <Text style={[styles.charCount, { color: charColor }]}>
                     {content.length}/{MAX_TEXT_LENGTH}
@@ -401,249 +405,277 @@ export default function CreateInterestPostModal({
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
-    justifyContent: 'flex-end',
-    alignItems: 'stretch',
-  },
-  sheetContainer: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: 'hidden',
-    maxHeight: '100%',
-    alignSelf: 'stretch',
-  },
-  sheetHeader: {
-    paddingTop: 12,
-    paddingBottom: 16,
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  identityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 18,
-    backgroundColor: '#E2E4EA',
-    marginRight: 14,
-  },
-  identityMeta: {
-    flex: 1,
-  },
-  identityName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  identitySubtitle: {
-    marginTop: 2,
-    fontSize: 13,
-    color: '#64748B',
-  },
-  interestRail: {
-    paddingVertical: 4,
-    paddingRight: 12,
-  },
-  interestChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(91, 15, 245, 0.18)',
-    backgroundColor: 'rgba(241, 244, 255, 0.8)',
-    marginRight: 10,
-  },
-  interestChipActive: {
-    backgroundColor: 'rgba(91, 15, 245, 0.12)',
-    borderColor: 'rgba(0, 184, 217, 0.45)',
-  },
-  interestChipText: {
-    fontSize: 14,
-    color: '#475569',
-    fontWeight: '600',
-  },
-  interestChipTextActive: {
-    color: '#0F172A',
-  },
-  interestEmpty: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(226,232,240,0.6)',
-    borderRadius: 16,
-  },
-  interestEmptyText: {
-    fontSize: 13,
-    color: '#64748B',
-  },
-  interestLoading: {
-    fontSize: 13,
-    color: '#64748B',
-    fontStyle: 'italic',
-    paddingRight: 12,
-  },
-  bodyScroll: {
-    flex: 1,
-  },
-  bodyContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 180,
-  },
-  editorCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 18,
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 16,
-    elevation: 3,
-  },
-  editorInput: {
-    fontSize: 18,
-    lineHeight: 26,
-    color: '#0F172A',
-    minHeight: 140,
-    textAlignVertical: 'top',
-  },
-  charCount: {
-    alignSelf: 'flex-end',
-    marginTop: 12,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  mediaDropZone: {
-    marginTop: 24,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(91, 15, 245, 0.15)',
-    backgroundColor: 'rgba(247, 249, 255, 0.85)',
-    padding: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mediaDropZoneActive: {
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: '#FFFFFF',
-  },
-  mediaEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mediaIconWrapper: {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    backgroundColor: 'rgba(91, 15, 245, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  mediaEmptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  mediaEmptySubtitle: {
-    marginTop: 6,
-    textAlign: 'center',
-    fontSize: 13,
-    color: '#64748B',
-  },
-  mediaPreviewWrapper: {
-    width: '100%',
-    borderRadius: 22,
-    overflow: 'hidden',
-  },
-  mediaPreview: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-  },
-  mediaOverlay: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  mediaOverlayButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 16,
-    backgroundColor: 'rgba(15, 23, 42, 0.72)',
-  },
-  mediaOverlayButtonGhost: {
-    backgroundColor: 'rgba(255,255,255,0.92)',
-  },
-  mediaOverlayText: {
-    marginLeft: 6,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  mediaOverlayTextDark: {
-    color: '#0F172A',
-  },
-  footerBar: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  footerCancel: {
-    color: '#EF4444',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footerStatus: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  footerSubmit: {
-    width: 90,
-    alignItems: 'flex-end',
-  },
-  footerSubmitGradient: {
-    borderRadius: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-  },
-  footerSubmitDisabled: {
-    backgroundColor: '#E2E8F0',
-  },
-  footerSubmitText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  footerSubmitTextDisabled: {
-    color: '#94A3B8',
-  },
-});
+// Description: Create theme-aware styles for CreateInterestPostModal
+const createStyles = (theme) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    overlay: {
+      flex: 1,
+      backgroundColor: theme.isDark
+        ? 'rgba(15, 23, 42, 0.7)'
+        : 'rgba(15, 23, 42, 0.55)',
+      justifyContent: 'flex-end',
+      alignItems: 'stretch',
+    },
+    sheetContainer: {
+      flex: 1,
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      overflow: 'hidden',
+      maxHeight: '100%',
+      alignSelf: 'stretch',
+    },
+    sheetHeader: {
+      paddingTop: 12,
+      paddingBottom: 16,
+      paddingHorizontal: 20,
+      backgroundColor: theme.isDark
+        ? 'rgba(30,41,59,0.75)'
+        : 'rgba(255,255,255,0.75)',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.isDark
+        ? 'rgba(71,85,105,0.2)'
+        : 'rgba(15, 23, 42, 0.08)',
+    },
+    identityRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 18,
+      backgroundColor: theme.colors.backgroundSecondary,
+      marginRight: 14,
+    },
+    identityMeta: {
+      flex: 1,
+    },
+    identityName: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    identitySubtitle: {
+      marginTop: 2,
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    interestRail: {
+      paddingVertical: 4,
+      paddingRight: 12,
+    },
+    interestChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.isDark
+        ? 'rgba(91, 15, 245, 0.3)'
+        : 'rgba(91, 15, 245, 0.18)',
+      backgroundColor: theme.isDark
+        ? 'rgba(91, 15, 245, 0.1)'
+        : 'rgba(241, 244, 255, 0.8)',
+      marginRight: 10,
+    },
+    interestChipActive: {
+      backgroundColor: theme.isDark
+        ? 'rgba(91, 15, 245, 0.25)'
+        : 'rgba(91, 15, 245, 0.12)',
+      borderColor: theme.isDark
+        ? 'rgba(0, 184, 217, 0.6)'
+        : 'rgba(0, 184, 217, 0.45)',
+    },
+    interestChipText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      fontWeight: '600',
+    },
+    interestChipTextActive: {
+      color: theme.colors.text,
+    },
+    interestEmpty: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      backgroundColor: theme.isDark
+        ? 'rgba(71,85,105,0.3)'
+        : 'rgba(226,232,240,0.6)',
+      borderRadius: 16,
+    },
+    interestEmptyText: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    interestLoading: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      fontStyle: 'italic',
+      paddingRight: 12,
+    },
+    bodyScroll: {
+      flex: 1,
+    },
+    bodyContent: {
+      paddingHorizontal: 20,
+      paddingBottom: 180,
+    },
+    editorCard: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 20,
+      padding: 18,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.3 : 0.05,
+      shadowOffset: { width: 0, height: 8 },
+      shadowRadius: 16,
+      elevation: 3,
+    },
+    editorInput: {
+      fontSize: 18,
+      lineHeight: 26,
+      color: theme.colors.text,
+      minHeight: 140,
+      textAlignVertical: 'top',
+    },
+    charCount: {
+      alignSelf: 'flex-end',
+      marginTop: 12,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    mediaDropZone: {
+      marginTop: 24,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: theme.isDark
+        ? 'rgba(91, 15, 245, 0.25)'
+        : 'rgba(91, 15, 245, 0.15)',
+      backgroundColor: theme.isDark
+        ? 'rgba(30,41,59,0.6)'
+        : 'rgba(247, 249, 255, 0.85)',
+      padding: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mediaDropZoneActive: {
+      padding: 0,
+      borderWidth: 0,
+      backgroundColor: theme.colors.card,
+    },
+    mediaEmpty: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mediaIconWrapper: {
+      width: 56,
+      height: 56,
+      borderRadius: 18,
+      backgroundColor: theme.isDark
+        ? 'rgba(91, 15, 245, 0.15)'
+        : 'rgba(91, 15, 245, 0.08)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+    mediaEmptyTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    mediaEmptySubtitle: {
+      marginTop: 6,
+      textAlign: 'center',
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    mediaPreviewWrapper: {
+      width: '100%',
+      borderRadius: 22,
+      overflow: 'hidden',
+    },
+    mediaPreview: {
+      width: '100%',
+      aspectRatio: 4 / 3,
+    },
+    mediaOverlay: {
+      position: 'absolute',
+      left: 12,
+      right: 12,
+      bottom: 12,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    mediaOverlayButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 16,
+      backgroundColor: 'rgba(15, 23, 42, 0.72)',
+    },
+    mediaOverlayButtonGhost: {
+      backgroundColor: 'rgba(255,255,255,0.92)',
+    },
+    mediaOverlayText: {
+      marginLeft: 6,
+      fontSize: 13,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    mediaOverlayTextDark: {
+      color: '#0F172A',
+    },
+    footerBar: {
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: Platform.OS === 'ios' ? 28 : 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: theme.isDark
+        ? 'rgba(30,41,59,0.9)'
+        : 'rgba(255,255,255,0.9)',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.isDark
+        ? 'rgba(71,85,105,0.2)'
+        : 'rgba(15, 23, 42, 0.08)',
+    },
+    footerCancel: {
+      color: '#EF4444',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    footerStatus: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    footerSubmit: {
+      width: 90,
+      alignItems: 'flex-end',
+    },
+    footerSubmitGradient: {
+      borderRadius: 16,
+      paddingVertical: 10,
+      paddingHorizontal: 18,
+      alignItems: 'center',
+    },
+    footerSubmitDisabled: {
+      backgroundColor: theme.isDark ? '#475569' : '#E2E8F0',
+    },
+    footerSubmitText: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    footerSubmitTextDisabled: {
+      color: theme.isDark ? '#94A3B8' : '#94A3B8',
+    },
+  });

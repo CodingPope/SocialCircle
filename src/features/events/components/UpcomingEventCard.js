@@ -11,10 +11,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Avatar from '../../../components/ui/Avatar';
 import AttendeeBubbleRow from './AttendeeBubbleRow';
 import { shareEventDetails } from '../utils/shareUtils';
+import { useTheme } from '../../../theme';
 
 const FALLBACK_IMAGE = 'https://via.placeholder.com/400x300?text=Social+Circle';
 
 export default function UpcomingEventCard({ event, onOpen, onPrimaryAction }) {
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const eventDate = useMemo(() => {
     if (!event?.date) return null;
     if (typeof event.date?.toDate === 'function') return event.date.toDate();
@@ -183,173 +186,175 @@ export default function UpcomingEventCard({ event, onOpen, onPrimaryAction }) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    width: 208,
-    height: 320,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    elevation: 4,
-    shadowColor: '#1f2937',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-  },
-  media: {
-    height: 140,
-    width: '100%',
-  },
-  mediaImage: {
-    width: '100%',
-    height: '100%',
-  },
-  mediaOverlay: {
-    flex: 1,
-    justifyContent: 'space-between',
-    padding: 12,
-  },
-  overlayHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  overlayFooter: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  badge: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 14,
-  },
-  overlayShareButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  badgeText: {
-    fontSize: 11,
-    letterSpacing: 0.4,
-    color: '#fff',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  datePill: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#fff',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  categoryPillOverlay: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    maxWidth: 120,
-  },
-  categoryPillWithDate: {
-    marginLeft: 8,
-    marginTop: 16,
-  },
-  categoryPillText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  dateMonth: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#1f2937',
-  },
-  dateDay: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1f2937',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1f2937',
-  },
-  hostRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  hostDetails: {
-    marginLeft: 8,
-    flex: 1,
-  },
-  hostName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  dateText: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  metaSeparator: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#d1d5db',
-    marginHorizontal: 6,
-  },
-  categoryText: {
-    fontSize: 12,
-    color: '#4b5563',
-    fontWeight: '600',
-  },
-  locationText: {
-    fontSize: 12,
-    color: '#3b82f6',
-    marginTop: 4,
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  attendeeBlock: {
-    flex: 1,
-    marginRight: 12,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-  },
-  attendeesLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  attendeesLabelMuted: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#6b7280',
-  },
-  primaryButton: {
-    backgroundColor: '#2563eb',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-});
+// Description: Create theme-aware styles for UpcomingEventCard
+const createStyles = (theme) =>
+  StyleSheet.create({
+    card: {
+      width: 208,
+      height: 320,
+      borderRadius: 20,
+      overflow: 'hidden',
+      backgroundColor: theme.colors.card,
+      elevation: 4,
+      shadowColor: '#1f2937',
+      shadowOpacity: theme.isDark ? 0.5 : 0.12,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+    },
+    media: {
+      height: 140,
+      width: '100%',
+    },
+    mediaImage: {
+      width: '100%',
+      height: '100%',
+    },
+    mediaOverlay: {
+      flex: 1,
+      justifyContent: 'space-between',
+      padding: 12,
+    },
+    overlayHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    overlayFooter: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+    },
+    badge: {
+      alignSelf: 'flex-start',
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 14,
+    },
+    overlayShareButton: {
+      padding: 4,
+      marginLeft: 8,
+    },
+    badgeText: {
+      fontSize: 11,
+      letterSpacing: 0.4,
+      color: '#fff',
+      fontWeight: '600',
+      textTransform: 'uppercase',
+    },
+    datePill: {
+      alignSelf: 'flex-start',
+      backgroundColor: '#fff',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 12,
+    },
+    categoryPillOverlay: {
+      alignSelf: 'flex-start',
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 12,
+      maxWidth: 120,
+    },
+    categoryPillWithDate: {
+      marginLeft: 8,
+      marginTop: 16,
+    },
+    categoryPillText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: '#fff',
+    },
+    dateMonth: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#1f2937',
+    },
+    dateDay: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#1f2937',
+    },
+    content: {
+      flex: 1,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 10,
+    },
+    title: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    hostRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    hostDetails: {
+      marginLeft: 8,
+      flex: 1,
+    },
+    hostName: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    metaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 2,
+    },
+    dateText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    metaSeparator: {
+      width: 4,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: theme.isDark ? '#475569' : '#d1d5db',
+      marginHorizontal: 6,
+    },
+    categoryText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      fontWeight: '600',
+    },
+    locationText: {
+      fontSize: 12,
+      color: theme.colors.primary,
+      marginTop: 4,
+    },
+    footer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    attendeeBlock: {
+      flex: 1,
+      marginRight: 12,
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+    },
+    attendeesLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    attendeesLabelMuted: {
+      fontSize: 12,
+      fontWeight: '500',
+      color: theme.colors.textSecondary,
+    },
+    primaryButton: {
+      backgroundColor: theme.colors.primary,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 999,
+    },
+    primaryButtonText: {
+      color: theme.colors.chipTextActive,
+      fontWeight: '600',
+      fontSize: 12,
+    },
+  });

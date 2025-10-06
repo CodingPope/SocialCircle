@@ -89,6 +89,8 @@ module.exports = ({ config }) => {
           'Allow calendar access so you can add events to your calendar.',
         NSRemindersUsageDescription:
           'Allow reminders access if you choose to manage reminders in Social Circle.',
+        FIREBASE_ANALYTICS_COLLECTION_ENABLED: false,
+        FIREBASE_ANALYTICS_COLLECTION_DEACTIVATED: true,
       },
       config: {
         usesNonExemptEncryption: false,

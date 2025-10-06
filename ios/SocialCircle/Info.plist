@@ -42,10 +42,14 @@
     </array>
     <key>CFBundleVersion</key>
     <string>3</string>
-    <key>GMSApiKey</key>
-    <string>${GOOGLE_MAPS_API_KEY}</string>
-    <key>ITSAppUsesNonExemptEncryption</key>
-    <false/>
+	<key>GMSApiKey</key>
+	<string>${GOOGLE_MAPS_API_KEY}</string>
+	<key>FIREBASE_ANALYTICS_COLLECTION_DEACTIVATED</key>
+	<true/>
+	<key>FIREBASE_ANALYTICS_COLLECTION_ENABLED</key>
+	<false/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>

@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react';
 import {
   View,
   Text,
@@ -28,22 +34,22 @@ import UpcomingEventCard from './UpcomingEventCard';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSavedEventsStore } from '../stores/savedEventsStore';
-import {
-  removeSavedEventForUser,
-} from '../services/savedEvents';
-import {
-  getBlockContext,
-  isEventVisibleForUser,
-} from '../utils/blockUtils';
+import { removeSavedEventForUser } from '../services/savedEvents';
+import { getBlockContext, isEventVisibleForUser } from '../utils/blockUtils';
 import {
   trackSaveEvent,
   AnalyticsSurfaces,
   AnalyticsSources,
 } from '../../../lib/analytics';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 export default function MyCircle({ navigation }) {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
   const [hostingEvents, setHostingEvents] = useState([]);
   const [attendingEvents, setAttendingEvents] = useState([]);
@@ -88,8 +94,8 @@ export default function MyCircle({ navigation }) {
     const blockedBySet = new Set(
       Array.isArray(user?.blockedBy) ? user.blockedBy.filter(Boolean) : []
     );
-    return (followingIds || []).filter((id) =>
-      id && !blockedSet.has(id) && !blockedBySet.has(id)
+    return (followingIds || []).filter(
+      (id) => id && !blockedSet.has(id) && !blockedBySet.has(id)
     );
   }, [followingIds, blockKey]);
 
@@ -608,9 +614,7 @@ export default function MyCircle({ navigation }) {
       const isUnsaving = !!unsavingMap[event.id];
       const previewImage =
         event.imageUrl || event.cardImage || 'https://via.placeholder.com/60';
-      const hostLabel = event.hostName
-        ? `Hosted by ${event.hostName}`
-        : null;
+      const hostLabel = event.hostName ? `Hosted by ${event.hostName}` : null;
       const interestLabel =
         (item.record?.interest && item.record.interest.trim()) ||
         (typeof event.interest === 'string' ? event.interest : null);
@@ -634,7 +638,9 @@ export default function MyCircle({ navigation }) {
                   </Text>
                 </View>
               ) : null}
-              <Text style={styles.savedMeta}>{formatSavedEventDate(event)}</Text>
+              <Text style={styles.savedMeta}>
+                {formatSavedEventDate(event)}
+              </Text>
               {hostLabel ? (
                 <Text style={styles.savedHost} numberOfLines={1}>
                   {hostLabel}
@@ -657,7 +663,12 @@ export default function MyCircle({ navigation }) {
         </View>
       );
     },
-    [formatSavedEventDate, handleRemoveSavedEvent, handleSavedEventPress, unsavingMap]
+    [
+      formatSavedEventDate,
+      handleRemoveSavedEvent,
+      handleSavedEventPress,
+      unsavingMap,
+    ]
   );
 
   const renderFriendActivity = ({ item }) => (
@@ -834,168 +845,173 @@ export default function MyCircle({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  pageContainer: {
-    flex: 1,
-    backgroundColor: '#f8f9fb',
-    padding: 16,
-  },
-  header: {
-    alignItems: 'center',
-    marginTop: 35,
-    marginBottom: 20,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#222',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontWeight: '700',
-    fontSize: 18,
-    marginBottom: 12,
-    color: '#222',
-  },
-  emptyState: {
-    color: '#888',
-    fontSize: 14,
-    fontStyle: 'italic',
-  },
-  carouselContent: {
-    paddingVertical: 4,
-  },
-  carouselCard: {
-    flexShrink: 0,
-  },
-  activityCard: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  friendAvatar: {
-    width: 45,
-    height: 45,
-    borderRadius: 12,
-    marginRight: 10,
-  },
-  friendName: {
-    fontWeight: '700',
-    color: '#222',
-  },
-  activityText: {
-    fontSize: 14,
-    color: '#444',
-  },
-  activityEvent: {
-    fontWeight: '600',
-    color: '#222',
-  },
-  activityDate: {
-    fontSize: 12,
-    color: '#777',
-    marginTop: 2,
-  },
-  activityEventImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    marginLeft: 10,
-  },
-  savedCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  savedMain: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  savedImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 14,
-    marginRight: 12,
-    backgroundColor: '#eef1f6',
-  },
-  savedTitle: {
-    fontWeight: '700',
-    color: '#222',
-    fontSize: 15,
-    marginBottom: 2,
-  },
-  savedMeta: {
-    color: '#555',
-    fontSize: 13,
-  },
-  savedChip: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#E8F1FF',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 999,
-    marginTop: 4,
-    marginBottom: 2,
-  },
-  savedChipText: {
-    color: '#1D4ED8',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  savedHost: {
-    color: '#888',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  savedIconButton: {
-    padding: 6,
-    marginLeft: 8,
-  },
-  friendsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  seeAll: {
-    color: '#4da6ff',
-    fontWeight: '600',
-  },
-  friendAvatarWrapper: {
-    marginRight: 12,
-  },
-  friendQuickAvatar: {
-    width: 55,
-    height: 55,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: '#4da6ff',
-  },
-  friendNameText: {
-    marginTop: 4,
-    textAlign: 'center',
-    color: '#222',
-    fontWeight: '500',
-  },
-});
+// Description: Create theme-aware styles for MyCircle
+const createStyles = (theme) =>
+  StyleSheet.create({
+    pageContainer: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      padding: 16,
+    },
+    header: {
+      alignItems: 'center',
+      marginTop: 35,
+      marginBottom: 20,
+    },
+    headerTitle: {
+      fontSize: 28,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    headerSubtitle: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    section: {
+      marginBottom: 24,
+    },
+    sectionTitle: {
+      fontWeight: '700',
+      fontSize: 18,
+      marginBottom: 12,
+      color: theme.colors.text,
+    },
+    emptyState: {
+      color: theme.colors.textSecondary,
+      fontSize: 14,
+      fontStyle: 'italic',
+    },
+    carouselContent: {
+      paddingVertical: 4,
+    },
+    carouselCard: {
+      flexShrink: 0,
+    },
+    activityCard: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 12,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.05,
+      shadowRadius: 5,
+      elevation: 2,
+    },
+    friendAvatar: {
+      width: 45,
+      height: 45,
+      borderRadius: 12,
+      marginRight: 10,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    friendName: {
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    activityText: {
+      fontSize: 14,
+      color: theme.colors.text,
+    },
+    activityEvent: {
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    activityDate: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    activityEventImage: {
+      width: 50,
+      height: 50,
+      borderRadius: 8,
+      marginLeft: 10,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    savedCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 12,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.04,
+      shadowRadius: 5,
+      elevation: 2,
+    },
+    savedMain: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+    },
+    savedImage: {
+      width: 60,
+      height: 60,
+      borderRadius: 14,
+      marginRight: 12,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    savedTitle: {
+      fontWeight: '700',
+      color: theme.colors.text,
+      fontSize: 15,
+      marginBottom: 2,
+    },
+    savedMeta: {
+      color: theme.colors.textSecondary,
+      fontSize: 13,
+    },
+    savedChip: {
+      alignSelf: 'flex-start',
+      backgroundColor: theme.isDark ? 'rgba(59,130,246,0.2)' : '#E8F1FF',
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+      borderRadius: 999,
+      marginTop: 4,
+      marginBottom: 2,
+    },
+    savedChipText: {
+      color: theme.isDark ? '#60A5FA' : '#1D4ED8',
+      fontWeight: '600',
+      fontSize: 12,
+    },
+    savedHost: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      marginTop: 4,
+    },
+    savedIconButton: {
+      padding: 6,
+      marginLeft: 8,
+    },
+    friendsHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    seeAll: {
+      color: theme.colors.primary,
+      fontWeight: '600',
+    },
+    friendAvatarWrapper: {
+      marginRight: 12,
+    },
+    friendQuickAvatar: {
+      width: 55,
+      height: 55,
+      borderRadius: 16,
+      borderWidth: 2,
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    friendNameText: {
+      marginTop: 4,
+      textAlign: 'center',
+      color: theme.colors.text,
+      fontWeight: '500',
+    },
+  });

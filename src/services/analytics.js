@@ -7,6 +7,7 @@
 let rnfa = null; // cached firebase analytics instance (or null)
 let enabled = false; // runtime flag
 let currentUid = null;
+let warnedMissingAnalytics = false;
 
 function maskId(value) {
   try {
@@ -66,7 +67,16 @@ export async function analyticsInit({ optedIn, uid, props } = {}) {
   currentUid = uid || null;
 
   const a = await getRNFA();
-  if (!a) return;
+  if (!a) {
+    if (enabled && !warnedMissingAnalytics && !isExpoGo()) {
+      warnedMissingAnalytics = true;
+      console.warn(
+        '[analytics] Firebase Analytics native module unavailable; events will not be sent.'
+      );
+    }
+    return;
+  }
+  warnedMissingAnalytics = false;
 
   try {
     // Explicitly control collection at runtime (plist default should be OFF)

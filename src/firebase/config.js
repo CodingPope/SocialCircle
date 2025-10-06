@@ -70,9 +70,19 @@ export const updateUserData = async (uid, data) => {
 
 // Upload profile image to Firebase Storage
 export const uploadProfileImage = async (uid, imageFile) => {
-  const imageRef = ref(storage, `profileImages/${uid}`);
-  await uploadBytes(imageRef, imageFile);
-  return await getDownloadURL(imageRef);
+  if (!uid) throw new Error('profile-image/missing-uid');
+  if (!imageFile) throw new Error('profile-image/missing-file');
+
+  const fileName = `${Date.now()}.jpg`;
+  const imageRef = ref(storage, `profileImages/${uid}/${fileName}`);
+  const metadata = {
+    contentType: (typeof imageFile === 'object' && imageFile?.type)
+      ? imageFile.type
+      : 'image/jpeg',
+  };
+
+  const snapshot = await uploadBytes(imageRef, imageFile, metadata);
+  return await getDownloadURL(snapshot.ref);
 };
 
 // Update event count for the user

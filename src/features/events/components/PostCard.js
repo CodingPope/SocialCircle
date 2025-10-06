@@ -45,10 +45,15 @@ import {
   removeSavedEventForUser,
 } from '../services/savedEvents';
 import { useSavedEventsStore } from '../stores/savedEventsStore';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 export default function PostCard({ event, onPress, onJoinPress }) {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [menuVisible, setMenuVisible] = useState(false);
   const [resolvedAddress, setResolvedAddress] = useState(
     event.address || 'Fetching address...'
@@ -771,197 +776,206 @@ export default function PostCard({ event, onPress, onJoinPress }) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 14,
-    marginTop: 6,
-    marginHorizontal: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 6,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    overflow: 'hidden',
-  },
-  media: {
-    width: '100%',
-    height: 250,
-  },
-  info: {
-    padding: 14,
-  },
-  headerActions: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  saveIcon: {
-    padding: 6,
-    marginRight: 6,
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    borderRadius: 999,
-  },
-  shareIcon: {
-    padding: 6,
-    marginRight: 6,
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    borderRadius: 999,
-  },
-  ellipsisButtonAbsolute: {
-    padding: 5,
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    borderRadius: 999,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 8,
-    marginRight: 40,
-  },
-  hostRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  hostName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  rating: {
-    fontSize: 13,
-    color: '#FFB300',
-    fontWeight: '600',
-  },
-  dateTime: {
-    fontSize: 14,
-    color: '#555',
-  },
-  location: {
-    fontSize: 13,
-    color: '#007AFF',
-  },
-  bubbleRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: 6,
-    rowGap: 4,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  interestBubble: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-  },
-  interestText: {
-    fontSize: 12,
-    color: '#555',
-  },
-  attendeeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 16,
-  },
-  attendeesText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  rsvpLow: {
-    backgroundColor: '#FFF3F4',
-  },
-  rsvpMid: {
-    backgroundColor: '#FFFBE6',
-  },
-  rsvpHigh: {
-    backgroundColor: '#FFF5F0',
-  },
-  rsvpFull: {
-    backgroundColor: '#FFE6EC',
-  },
-  rsvpTextLow: {
-    color: '#D72638',
-  },
-  rsvpTextMid: {
-    color: '#D48C00',
-  },
-  rsvpTextHigh: {
-    color: '#D46400',
-  },
-  rsvpTextFull: {
-    color: '#C2185B',
-  },
-  capacityText: {
-    fontSize: 12,
-    color: '#555',
-    fontWeight: '500',
-  },
-  noAttendeesText: {
-    fontSize: 13,
-    color: '#888',
-    fontStyle: 'italic',
-    marginLeft: 4,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-  },
-  actionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    minHeight: 40,
-  },
-  actionRight: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  joinButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-  },
-  joinButtonDisabled: {
-    backgroundColor: '#C9CCD1', // dull/grey when disabled
-  },
-  joinText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  joinTextDisabled: {
-    color: '#f2f2f2',
-  },
-  joinFeedbackContainer: {
-    marginHorizontal: 14,
-    marginTop: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#E8F1FF',
-  },
-  joinFeedbackSuccess: {
-    backgroundColor: '#E4F7E7',
-  },
-  joinFeedbackError: {
-    backgroundColor: '#FDE8E8',
-  },
-  joinFeedbackText: {
-    textAlign: 'center',
-    color: '#1F2937',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-});
+// Description: Create theme-aware styles for PostCard
+const createStyles = (theme) =>
+  StyleSheet.create({
+    card: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 16,
+      marginBottom: 14,
+      marginTop: 6,
+      marginHorizontal: 8,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.12,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 6,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      overflow: 'hidden',
+    },
+    media: {
+      width: '100%',
+      height: 250,
+    },
+    info: {
+      padding: 14,
+    },
+    headerActions: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      zIndex: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    saveIcon: {
+      padding: 6,
+      marginRight: 6,
+      backgroundColor: theme.isDark
+        ? 'rgba(30,41,59,0.85)'
+        : 'rgba(255,255,255,0.85)',
+      borderRadius: 999,
+    },
+    shareIcon: {
+      padding: 6,
+      marginRight: 6,
+      backgroundColor: theme.isDark
+        ? 'rgba(30,41,59,0.85)'
+        : 'rgba(255,255,255,0.85)',
+      borderRadius: 999,
+    },
+    ellipsisButtonAbsolute: {
+      padding: 5,
+      backgroundColor: theme.isDark
+        ? 'rgba(30,41,59,0.85)'
+        : 'rgba(255,255,255,0.85)',
+      borderRadius: 999,
+    },
+    title: {
+      fontSize: 18,
+      fontWeight: '700',
+      marginBottom: 8,
+      marginRight: 40,
+      color: theme.colors.text,
+    },
+    hostRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    hostName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    rating: {
+      fontSize: 13,
+      color: '#FFB300',
+      fontWeight: '600',
+    },
+    dateTime: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    location: {
+      fontSize: 13,
+      color: theme.colors.primary,
+    },
+    bubbleRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      columnGap: 6,
+      rowGap: 4,
+      alignItems: 'center',
+      marginTop: 6,
+    },
+    interestBubble: {
+      backgroundColor: theme.colors.chipBackground,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: 16,
+    },
+    interestText: {
+      fontSize: 12,
+      color: theme.colors.chipText,
+    },
+    attendeeBadge: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 16,
+    },
+    attendeesText: {
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    rsvpLow: {
+      backgroundColor: '#FFF3F4',
+    },
+    rsvpMid: {
+      backgroundColor: '#FFFBE6',
+    },
+    rsvpHigh: {
+      backgroundColor: '#FFF5F0',
+    },
+    rsvpFull: {
+      backgroundColor: '#FFE6EC',
+    },
+    rsvpTextLow: {
+      color: '#D72638',
+    },
+    rsvpTextMid: {
+      color: '#D48C00',
+    },
+    rsvpTextHigh: {
+      color: '#D46400',
+    },
+    rsvpTextFull: {
+      color: '#C2185B',
+    },
+    capacityText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      fontWeight: '500',
+    },
+    noAttendeesText: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      fontStyle: 'italic',
+      marginLeft: 4,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingBottom: 14,
+    },
+    actionLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      minHeight: 40,
+    },
+    actionRight: {
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    },
+    joinButton: {
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 8,
+      paddingHorizontal: 20,
+      borderRadius: 10,
+    },
+    joinButtonDisabled: {
+      backgroundColor: theme.isDark ? '#475569' : '#C9CCD1',
+    },
+    joinText: {
+      color: '#fff',
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    joinTextDisabled: {
+      color: theme.isDark ? '#94A3B8' : '#f2f2f2',
+    },
+    joinFeedbackContainer: {
+      marginHorizontal: 14,
+      marginTop: 6,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.isDark ? 'rgba(59,130,246,0.15)' : '#E8F1FF',
+    },
+    joinFeedbackSuccess: {
+      backgroundColor: theme.isDark ? 'rgba(34,197,94,0.15)' : '#E4F7E7',
+    },
+    joinFeedbackError: {
+      backgroundColor: theme.isDark ? 'rgba(239,68,68,0.15)' : '#FDE8E8',
+    },
+    joinFeedbackText: {
+      textAlign: 'center',
+      color: theme.colors.text,
+      fontSize: 13,
+      fontWeight: '500',
+    },
+  });

@@ -1,4 +1,11 @@
-import React, { useState, useEffect, memo, useRef, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  memo,
+  useRef,
+  useCallback,
+  useMemo,
+} from 'react';
 import { Image, ActivityIndicator, Pressable } from 'react-native';
 import {
   SafeAreaView,
@@ -23,9 +30,11 @@ import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import { db, functions } from '../../../firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 // --- Helpers ---
-const TypeIcon = ({ type }) => {
+const TypeIcon = ({ type, styles }) => {
   const map = {
     friend_request: { name: 'account-plus', color: '#2563EB' },
     rsvp_request: { name: 'account-check', color: '#0EA5E9' },
@@ -43,7 +52,7 @@ const TypeIcon = ({ type }) => {
 
 // Description: Renders a notification card based on type (polished UI)
 const NotificationCard = memo(
-  ({ item, onAccept, onDeny, navigation, markAsRead }) => {
+  ({ item, onAccept, onDeny, navigation, markAsRead, styles }) => {
     const [eventTitle, setEventTitle] = useState(item.eventTitle || null);
     const [requester, setRequester] = useState(null);
     const [loading, setLoading] = useState(false);
@@ -262,7 +271,7 @@ const NotificationCard = memo(
             {item.type === 'rsvp_request' ? (
               renderRSVPLeft()
             ) : (
-              <TypeIcon type={item.type} />
+              <TypeIcon type={item.type} styles={styles} />
             )}
             <View style={styles.cardBody}>
               <View style={styles.titleRow}>
@@ -299,6 +308,8 @@ const NotificationScreen = () => {
   const navigation = useNavigation();
   // Description: Get user from Zustand store
   const user = useUserStore((state) => state.user);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Notification store
   const notifications = useNotificationStore((s) => s.notifications);
@@ -402,6 +413,7 @@ const NotificationScreen = () => {
         onDeny={handleDeny}
         navigation={navigation}
         markAsRead={markAsRead}
+        styles={styles}
       />
     </View>
   );
@@ -434,7 +446,7 @@ const NotificationScreen = () => {
             onPress={() => navigation.goBack()}
             accessibilityLabel='Go back'
           >
-            <Ionicons name='arrow-back' size={24} color='#1F2937' />
+            <Ionicons name='arrow-back' size={24} color={theme.colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Notifications</Text>
           <TouchableOpacity
@@ -513,185 +525,222 @@ const NotificationScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F7F8FA' },
+// Description: Create theme-aware styles for NotificationScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    safe: { flex: 1, backgroundColor: theme.colors.background },
 
-  header: {
-    backgroundColor: '#fff',
-    paddingTop: 10,
-    paddingBottom: 15,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    padding: 6,
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  headerAction: { color: '#007AFF', fontWeight: '600', fontSize: 14 },
+    header: {
+      backgroundColor: theme.colors.card,
+      paddingTop: 10,
+      paddingBottom: 15,
+      paddingHorizontal: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    backButton: {
+      padding: 6,
+    },
+    headerTitle: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 22,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    headerAction: {
+      color: theme.colors.primary,
+      fontWeight: '600',
+      fontSize: 14,
+    },
 
-  // list spacing
-  list: { padding: 16 },
-  rowContainer: {
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
+    // list spacing
+    list: { padding: 16 },
+    rowContainer: {
+      borderRadius: 14,
+      overflow: 'hidden',
+      marginBottom: 12,
+    },
 
-  // Card look
-  cardWrap: { padding: 0 },
-  cardRow: {
-    flexDirection: 'row',
-    padding: 14,
-    gap: 12,
-    alignItems: 'flex-start',
-  },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#E2E8F0',
-  },
-  cardBody: { flex: 1 },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  metaRow: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
-  titleTxt: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  subtitleTxt: { marginTop: 2, fontSize: 13.5, color: '#334155' },
-  metaTxt: { marginTop: 6, fontSize: 12.5, color: '#64748B' },
-  timeTxt: { marginTop: 6, fontSize: 12, color: '#94A3B8' },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#3B82F6',
-    marginLeft: 4,
-  },
+    // Card look
+    cardWrap: { padding: 0 },
+    cardRow: {
+      flexDirection: 'row',
+      padding: 14,
+      gap: 12,
+      alignItems: 'flex-start',
+    },
+    iconWrap: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    cardBody: { flex: 1 },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    metaRow: { flexDirection: 'row', alignItems: 'center', marginLeft: 8 },
+    titleTxt: { fontSize: 15, fontWeight: '700', color: theme.colors.text },
+    subtitleTxt: {
+      marginTop: 2,
+      fontSize: 13.5,
+      color: theme.colors.textSecondary,
+    },
+    metaTxt: {
+      marginTop: 6,
+      fontSize: 12.5,
+      color: theme.colors.textSecondary,
+    },
+    timeTxt: {
+      marginTop: 6,
+      fontSize: 12,
+      color: theme.isDark ? '#94A3B8' : '#94A3B8',
+    },
+    unreadDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: theme.colors.primary,
+      marginLeft: 4,
+    },
 
-  // Actions under card (for RSVP)
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingBottom: 12,
-  },
-  pillBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10 },
-  acceptBtn: { backgroundColor: '#22C55E' },
-  denyBtn: { backgroundColor: '#EF4444' },
-  pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+    // Actions under card (for RSVP)
+    actionsRow: {
+      flexDirection: 'row',
+      gap: 10,
+      paddingHorizontal: 14,
+      paddingBottom: 12,
+    },
+    pillBtn: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10 },
+    acceptBtn: { backgroundColor: theme.colors.success },
+    denyBtn: { backgroundColor: theme.colors.danger },
+    pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
-  // Hidden row (revealed on swipe)
-  hiddenRow: {
-    height: '100%', // ensure it matches measured container height
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'stretch',
-    backgroundColor: 'transparent',
-  },
-  deleteBtn: {
-    width: 96,
-    backgroundColor: '#dc3545',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderTopRightRadius: 14,
-    borderBottomRightRadius: 18,
-    height: '100%', // stretch to match row height
-  },
-  deleteText: { color: '#fff', fontWeight: 'bold', marginTop: 2, fontSize: 16 },
+    // Hidden row (revealed on swipe)
+    hiddenRow: {
+      height: '100%',
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'stretch',
+      backgroundColor: 'transparent',
+    },
+    deleteBtn: {
+      width: 96,
+      backgroundColor: theme.colors.danger,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderTopRightRadius: 14,
+      borderBottomRightRadius: 18,
+      height: '100%',
+    },
+    deleteText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      marginTop: 2,
+      fontSize: 16,
+    },
 
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.25)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 24,
-    width: 300,
-    alignItems: 'center',
-    elevation: 4,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    color: '#222',
-  },
-  modalDesc: {
-    fontSize: 15,
-    color: '#444',
-    marginBottom: 18,
-    textAlign: 'center',
-  },
-  modalActions: { flexDirection: 'row', gap: 12 },
-  modalButton: {
-    borderRadius: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 18,
-    marginHorizontal: 4,
-  },
-  modalCancel: { backgroundColor: '#eee' },
-  modalDelete: { backgroundColor: '#dc3545' },
-  modalButtonText: { color: '#222', fontWeight: 'bold', fontSize: 15 },
+    // Modal
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: theme.isDark
+        ? 'rgba(0, 0, 0, 0.5)'
+        : 'rgba(0, 0, 0, 0.25)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalContent: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 24,
+      width: 300,
+      alignItems: 'center',
+      elevation: 4,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.4 : 0.1,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      marginBottom: 8,
+      color: theme.colors.text,
+    },
+    modalDesc: {
+      fontSize: 15,
+      color: theme.colors.textSecondary,
+      marginBottom: 18,
+      textAlign: 'center',
+    },
+    modalActions: { flexDirection: 'row', gap: 12 },
+    modalButton: {
+      borderRadius: 6,
+      paddingVertical: 8,
+      paddingHorizontal: 18,
+      marginHorizontal: 4,
+    },
+    modalCancel: {
+      backgroundColor: theme.isDark ? '#475569' : '#eee',
+    },
+    modalDelete: { backgroundColor: theme.colors.danger },
+    modalButtonText: {
+      color: theme.colors.text,
+      fontWeight: 'bold',
+      fontSize: 15,
+    },
 
-  // Empty state
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  emptyImage: { width: 140, height: 140, marginBottom: 10, opacity: 0.9 },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 6,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#64748B',
-    textAlign: 'center',
-    maxWidth: 280,
-  },
+    // Empty state
+    emptyContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 32,
+    },
+    emptyImage: { width: 140, height: 140, marginBottom: 10, opacity: 0.9 },
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: theme.colors.text,
+      marginBottom: 6,
+    },
+    emptyText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      maxWidth: 280,
+    },
 
-  // Toast
-  toast: {
-    position: 'absolute',
-    bottom: 24,
-    left: 24,
-    right: 24,
-    backgroundColor: 'rgba(17,17,17,0.92)',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  toastText: { color: '#fff', fontWeight: '700' },
-});
+    // Toast
+    toast: {
+      position: 'absolute',
+      bottom: 24,
+      left: 24,
+      right: 24,
+      backgroundColor: theme.isDark
+        ? 'rgba(51,65,85,0.95)'
+        : 'rgba(17,17,17,0.92)',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    toastText: { color: '#fff', fontWeight: '700' },
+  });
 
 export default NotificationScreen;

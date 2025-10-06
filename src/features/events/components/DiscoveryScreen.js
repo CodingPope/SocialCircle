@@ -46,6 +46,7 @@ import {
 import { trackCardClick } from '../../../lib/analytics';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 import { useNavigation } from '@react-navigation/native';
 import { filterBlockedEvents } from '../utils/blockUtils';
 
@@ -96,10 +97,12 @@ export default function DiscoveryScreen() {
   const user = useUserStore((s) => s.user);
   const personalizationEnabled = !!user?.analyticsOptIn;
   const navigation = useNavigation();
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const createPostTutorialKey = useMemo(() => {
     return user?.uid ? `discovery_create_post_tutorial_${user.uid}` : null;
   }, [user?.uid]);
-  const theme = useTheme();
   const [showCreatePostTutorial, setShowCreatePostTutorial] = useState(false);
   const [createPostFabLayout, setCreatePostFabLayout] = useState(null);
   const createPostFabRef = useRef(null);
@@ -202,7 +205,10 @@ export default function DiscoveryScreen() {
 
     let subscription;
     if (typeof Dimensions?.addEventListener === 'function') {
-      subscription = Dimensions.addEventListener('change', measureCreatePostFab);
+      subscription = Dimensions.addEventListener(
+        'change',
+        measureCreatePostFab
+      );
     }
 
     return () => {
@@ -228,7 +234,8 @@ export default function DiscoveryScreen() {
   const createPostHighlightStyle = useMemo(() => {
     if (!showCreatePostTutorial || !createPostFabLayout) return null;
     const windowSize = Dimensions.get('window');
-    const size = Math.max(createPostFabLayout.width, createPostFabLayout.height) + 36;
+    const size =
+      Math.max(createPostFabLayout.width, createPostFabLayout.height) + 36;
     const provisionalTop =
       createPostFabLayout.y + createPostFabLayout.height / 2 - size / 2;
     const provisionalLeft =
@@ -643,7 +650,13 @@ export default function DiscoveryScreen() {
   const tabs = ['Hot', 'New', 'Today', 'This Week'];
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView
+      style={[styles.safe, { backgroundColor: theme.colors.background }]}
+    >
+      <StatusBar
+        barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.colors.background}
+      />
       {showCreatePostTutorial && (
         <View style={styles.tutorialOverlay} pointerEvents='auto'>
           <View style={styles.tutorialBackdrop} />
@@ -678,11 +691,23 @@ export default function DiscoveryScreen() {
           )}
         </View>
       )}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Discovery</Text>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: theme.colors.card,
+            borderBottomColor: theme.colors.border,
+          },
+        ]}
+      >
+        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
+          Discovery
+        </Text>
       </View>
 
-      <View style={styles.tabRow}>
+      <View
+        style={[styles.tabRow, { backgroundColor: theme.colors.background }]}
+      >
         {tabs.map((tab) => (
           <TouchableOpacity
             key={tab}
@@ -861,14 +886,14 @@ export default function DiscoveryScreen() {
       <TouchableOpacity
         ref={createPostFabRef}
         onLayout={handleCreatePostFabLayout}
-        style={[styles.createPostFab, { backgroundColor: theme.colors.primary }]}
+        style={styles.createPostFab}
         onPress={() => setShowCreatePost(true)}
         activeOpacity={0.85}
       >
         <Ionicons
           name='create-outline'
           size={26}
-          color={theme.colors.neutral100}
+          color={theme.colors.fabForeground}
         />
       </TouchableOpacity>
 
@@ -888,150 +913,152 @@ export default function DiscoveryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
-  tutorialOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
-  },
-  tutorialBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  tutorialHighlight: {
-    position: 'absolute',
-    borderColor: '#ffffff',
-    borderWidth: 2,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  tutorialTooltip: {
-    position: 'absolute',
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#101824',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 12,
-  },
-  tutorialTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  tutorialDescription: {
-    color: '#e5edff',
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 14,
-  },
-  tutorialButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#3A7BFF',
-    paddingVertical: 8,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-  },
-  tutorialButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  header: {
-    paddingTop: 10,
-    paddingBottom: 15,
-    paddingHorizontal: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#333',
-  },
-  container: {
-    flex: 1,
-    paddingHorizontal: 10,
-  },
-  feedContent: {
-    paddingBottom: 120,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
-  tab: {
-    backgroundColor: '#eee',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    marginRight: 8,
-  },
-  activeTab: {
-    backgroundColor: '#007AFF',
-  },
-  tabText: {
-    color: '#333',
-    fontWeight: '600',
-  },
-  activeTabText: {
-    color: '#fff',
-  },
-  chipRow: {
-    backgroundColor: '#fff',
-    paddingVertical: 6,
-    paddingLeft: 10,
-    marginBottom: 6,
-    maxHeight: 46,
-  },
-  chip: {
-    backgroundColor: '#f1f1f1',
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 15,
-    marginRight: 8,
-    alignSelf: 'center',
-  },
-  activeChip: {
-    backgroundColor: '#007AFF',
-  },
-  chipText: {
-    color: '#333',
-    fontWeight: '500',
-    fontSize: 14,
-  },
-  activeChipText: {
-    color: '#fff',
-  },
-  emptyMessage: {
-    textAlign: 'center',
-    marginTop: 20,
-    fontSize: 16,
-    color: '#666',
-  },
-  createPostFab: {
-    position: 'absolute',
-    right: 24,
-    bottom: 32,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 8,
-    elevation: 6,
-  },
-});
+// Description: Create theme-aware styles for DiscoveryScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    },
+    tutorialOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 1000,
+    },
+    tutorialBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+    },
+    tutorialHighlight: {
+      position: 'absolute',
+      borderColor: theme.colors.neutral100,
+      borderWidth: 2,
+      backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    tutorialTooltip: {
+      position: 'absolute',
+      padding: 16,
+      borderRadius: 12,
+      backgroundColor: theme.colors.tooltipBackground,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 12,
+    },
+    tutorialTitle: {
+      color: theme.colors.tooltipText,
+      fontSize: 16,
+      fontWeight: '600',
+      marginBottom: 6,
+    },
+    tutorialDescription: {
+      color: theme.colors.tooltipText,
+      fontSize: 14,
+      lineHeight: 20,
+      marginBottom: 14,
+    },
+    tutorialButton: {
+      alignSelf: 'flex-start',
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 8,
+      paddingHorizontal: 18,
+      borderRadius: 20,
+    },
+    tutorialButtonText: {
+      color: theme.colors.neutral100,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    header: {
+      paddingTop: 10,
+      paddingBottom: 15,
+      paddingHorizontal: 16,
+      backgroundColor: theme.colors.card,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    headerTitle: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    container: {
+      flex: 1,
+      paddingHorizontal: 10,
+    },
+    feedContent: {
+      paddingBottom: 120,
+    },
+    tabRow: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.card,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+    },
+    tab: {
+      backgroundColor: theme.colors.chipBackground,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 15,
+      marginRight: 8,
+    },
+    activeTab: {
+      backgroundColor: theme.colors.chipBackgroundActive,
+    },
+    tabText: {
+      color: theme.colors.chipText,
+      fontWeight: '600',
+    },
+    activeTabText: {
+      color: theme.colors.chipTextActive,
+    },
+    chipRow: {
+      backgroundColor: theme.colors.card,
+      paddingVertical: 6,
+      paddingLeft: 10,
+      marginBottom: 6,
+      maxHeight: 46,
+    },
+    chip: {
+      backgroundColor: theme.colors.chipBackground,
+      paddingVertical: 4,
+      paddingHorizontal: 12,
+      borderRadius: 15,
+      marginRight: 8,
+      alignSelf: 'center',
+    },
+    activeChip: {
+      backgroundColor: theme.colors.chipBackgroundActive,
+    },
+    chipText: {
+      color: theme.colors.chipText,
+      fontWeight: '500',
+      fontSize: 14,
+    },
+    activeChipText: {
+      color: theme.colors.chipTextActive,
+    },
+    emptyMessage: {
+      textAlign: 'center',
+      marginTop: 20,
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+    },
+    createPostFab: {
+      position: 'absolute',
+      right: 24,
+      bottom: 32,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: theme.colors.fabBackground,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 8,
+      elevation: 6,
+    },
+  });

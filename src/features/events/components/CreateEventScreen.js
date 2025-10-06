@@ -39,6 +39,9 @@ import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplet
 import InterestSelector from '../../profile/components/InterestSelector'; // Import the reusable InterestSelector
 import categoriesData from '../constants/categoriesData.json';
 import { track as trackClient } from '../../../lib/analytics';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
+import { useMemo } from 'react';
 
 // --- Date/Time constraints ---
 const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
@@ -46,6 +49,7 @@ const MAX_LEAD_DAYS = 7; // hard limit: at most 7 days in the future
 const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
 const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
 const MINUTE_INCREMENT = 5; // tweak to 10 or 30 if you want fewer choices in the picker
+const MAX_EVENT_IMAGE_BYTES = 10 * 1024 * 1024;
 
 // Description: Round UP to the next configured minute boundary to avoid rounding backwards
 const roundUpToMinuteIncrement = (inputDate) => {
@@ -63,6 +67,9 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
   const safeAreaInsets = useSafeAreaInsets();
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   // Debug: print Firebase runtime info to help diagnose permission errors
   useEffect(() => {
@@ -299,55 +306,64 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
           const blob = await resp.blob();
           const contentType = blob.type || 'image/jpeg';
 
-          // Retry upload a few times to avoid transient rule/propagation issues
-          const tryUpload = async () => {
-            const storageRef = ref(
-              storage,
-              `event-images/${docRef.id}/${Date.now()}.jpg`
-            );
-            const snap = await uploadBytes(storageRef, blob, { contentType });
-            return await getDownloadURL(snap.ref);
-          };
-
-          let downloadUrl = null;
-          let lastErr = null;
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-              downloadUrl = await tryUpload();
-              break;
-            } catch (e) {
-              lastErr = e;
-              console.warn(`Upload attempt ${attempt} failed:`, e?.code || e);
-              await new Promise((r) => setTimeout(r, 500 * attempt));
-            }
-          }
-
-          // Fallback: if Storage rule still denies under event-images, upload under user's profileImages (still public-read per rules)
-          if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
-            try {
-              const altRef = ref(
-                storage,
-                `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
-              );
-              const altSnap = await uploadBytes(altRef, blob, { contentType });
-              downloadUrl = await getDownloadURL(altSnap.ref);
-            } catch (altErr) {
-              console.warn('Fallback upload also failed:', altErr);
-            }
-          }
-
-          if (downloadUrl) {
-            // Update event document with the uploaded image URL
-            await updateDoc(doc(db, 'events', docRef.id), {
-              imageUrl: downloadUrl,
-            });
-            setImageUrl(downloadUrl);
-          } else if (lastErr) {
-            console.warn('Image upload failed:', lastErr);
+          if (blob?.size && blob.size > MAX_EVENT_IMAGE_BYTES) {
             Alert.alert(
-              'Image upload failed',
-              'Your event was created without a photo due to permissions.'
+              'Image too large',
+              'Your event was created, but the selected photo exceeds the 10MB limit.'
             );
+          } else {
+            // Retry upload a few times to avoid transient rule/propagation issues
+            const tryUpload = async () => {
+              const storageRef = ref(
+                storage,
+                `event-images/${docRef.id}/${Date.now()}.jpg`
+              );
+              const snap = await uploadBytes(storageRef, blob, { contentType });
+              return await getDownloadURL(snap.ref);
+            };
+
+            let downloadUrl = null;
+            let lastErr = null;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                downloadUrl = await tryUpload();
+                break;
+              } catch (e) {
+                lastErr = e;
+                console.warn(`Upload attempt ${attempt} failed:`, e?.code || e);
+                await new Promise((r) => setTimeout(r, 500 * attempt));
+              }
+            }
+
+            // Fallback: if Storage rule still denies under event-images, upload under user's profileImages (still public-read per rules)
+            if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
+              try {
+                const altRef = ref(
+                  storage,
+                  `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
+                );
+                const altSnap = await uploadBytes(altRef, blob, {
+                  contentType,
+                });
+                downloadUrl = await getDownloadURL(altSnap.ref);
+              } catch (altErr) {
+                console.warn('Fallback upload also failed:', altErr);
+              }
+            }
+
+            if (downloadUrl) {
+              // Update event document with the uploaded image URL
+              await updateDoc(doc(db, 'events', docRef.id), {
+                imageUrl: downloadUrl,
+              });
+              setImageUrl(downloadUrl);
+            } else if (lastErr) {
+              console.warn('Image upload failed:', lastErr);
+              Alert.alert(
+                'Image upload failed',
+                'Your event was created without a photo due to permissions.'
+              );
+            }
           }
         } catch (uploadErr) {
           console.warn('Image upload unexpected error:', uploadErr);
@@ -470,7 +486,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         accessibilityLabel='Close create event form'
         activeOpacity={0.7}
       >
-        <Ionicons name='close' size={22} color='#333' />
+        <Ionicons name='close' size={22} color={theme.colors.text} />
       </TouchableOpacity>
       <KeyboardAwareScrollView
         style={styles.scroll}
@@ -510,7 +526,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             value={title}
             onChangeText={setTitle}
             placeholder='Event title'
-            placeholderTextColor='grey' // Updated to a darker color
+            placeholderTextColor={theme.colors.textSecondary}
           />
 
           {/* Description */}
@@ -552,7 +568,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
           <View style={{ zIndex: 10 }}>
             <GooglePlacesAutocomplete
               placeholder='Enter address'
-              placeholderTextColor='grey' // Updated to a darker color
+              placeholderTextColor={theme.colors.textSecondary}
               minLength={2}
               fetchDetails={true}
               debounce={300}
@@ -674,7 +690,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             value={capacity}
             onChangeText={setCapacity}
             placeholder='Leave empty for unlimited'
-            placeholderTextColor='grey' // Updated to a darker color
+            placeholderTextColor={theme.colors.textSecondary}
             keyboardType='numeric'
           />
 
@@ -697,140 +713,161 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
-    position: 'relative',
-  },
-  scroll: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    backgroundColor: '#fff',
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 12,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  preview: { width: '100%', height: 200, borderRadius: 8, marginBottom: 10 },
-  previewPlaceholder: {
-    width: '100%',
-    height: 200,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  photoBtn: {
-    padding: 10,
-    backgroundColor: '#007AFF',
-    borderRadius: 6,
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  photoBtnText: { color: '#fff', fontWeight: 'bold' },
-  label: { fontWeight: 'bold', marginTop: 15 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    padding: 10,
-    marginTop: 5,
-    color: '#333',
-  },
-  textArea: { height: 80, textAlignVertical: 'top' },
-  row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
-  flex: { flex: 1 },
-  pinLocationText: { color: '#333', marginTop: 5 },
-  dropdownBox: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    height: 44,
-  },
-  dropdownInput: { color: '#444' },
-  dropdownList: {
-    marginTop: 4,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    maxHeight: 150,
-  },
-  dropdownItem: { paddingVertical: 12, paddingHorizontal: 10 },
-  dropdownText: { fontSize: 14 },
-  sliderWrapper: {
-    height: 60,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  segment: { marginTop: 10, marginBottom: 20 },
-  androidPrivacyWrapper: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginVertical: 10,
-  },
-  androidPrivacyBtn: {
-    flex: 1,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 6,
-    marginHorizontal: 3,
-    alignItems: 'center',
-    backgroundColor: '#fff', // Ensure white background
-  },
-  androidPrivacyBtnActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
-  },
-  androidPrivacyTxt: {
-    color: '#333', // Dark text for better visibility
-  },
-  androidPrivacyTxtActive: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  btn: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 6,
-    alignItems: 'center',
-    marginTop: 15,
-  },
-  btnDis: { backgroundColor: '#99cfff' },
-  btnTxt: { color: '#fff', fontWeight: 'bold' },
-  cancelButton: {
-    marginTop: 15,
-    padding: 12,
-    borderRadius: 6,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#007AFF',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-});
+// Description: Create theme-aware styles for CreateEventScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      position: 'relative',
+    },
+    scroll: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    scrollContent: {
+      flexGrow: 1,
+      paddingHorizontal: 20,
+      backgroundColor: theme.colors.background,
+    },
+    closeButton: {
+      position: 'absolute',
+      top: 12,
+      left: 16,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: theme.isDark
+        ? 'rgba(51,65,85,0.95)'
+        : 'rgba(255,255,255,0.95)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 20,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.3 : 0.1,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 3,
+    },
+    preview: {
+      width: '100%',
+      height: 200,
+      borderRadius: 8,
+      marginBottom: 10,
+    },
+    previewPlaceholder: {
+      width: '100%',
+      height: 200,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 8,
+      marginBottom: 10,
+    },
+    photoBtn: {
+      padding: 10,
+      backgroundColor: theme.colors.primary,
+      borderRadius: 6,
+      alignItems: 'center',
+      marginBottom: 15,
+    },
+    photoBtnText: { color: '#fff', fontWeight: 'bold' },
+    label: {
+      fontWeight: 'bold',
+      marginTop: 15,
+      color: theme.colors.text,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 6,
+      padding: 10,
+      marginTop: 5,
+      color: theme.colors.text,
+      backgroundColor: theme.colors.card,
+    },
+    textArea: { height: 80, textAlignVertical: 'top' },
+    row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+    flex: { flex: 1 },
+    pinLocationText: {
+      color: theme.colors.text,
+      marginTop: 5,
+    },
+    dropdownBox: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      height: 44,
+    },
+    dropdownInput: { color: theme.colors.text },
+    dropdownList: {
+      marginTop: 4,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 6,
+      maxHeight: 150,
+      backgroundColor: theme.colors.card,
+    },
+    dropdownItem: { paddingVertical: 12, paddingHorizontal: 10 },
+    dropdownText: { fontSize: 14, color: theme.colors.text },
+    sliderWrapper: {
+      height: 60,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: 10,
+    },
+    segment: { marginTop: 10, marginBottom: 20 },
+    androidPrivacyWrapper: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginVertical: 10,
+    },
+    androidPrivacyBtn: {
+      flex: 1,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 6,
+      marginHorizontal: 3,
+      alignItems: 'center',
+      backgroundColor: theme.colors.card,
+    },
+    androidPrivacyBtnActive: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    androidPrivacyTxt: {
+      color: theme.colors.text,
+    },
+    androidPrivacyTxtActive: {
+      color: '#fff',
+      fontWeight: 'bold',
+    },
+    btn: {
+      backgroundColor: theme.colors.primary,
+      padding: 15,
+      borderRadius: 6,
+      alignItems: 'center',
+      marginTop: 15,
+    },
+    btnDis: {
+      backgroundColor: theme.isDark ? '#475569' : '#99cfff',
+      opacity: 0.7,
+    },
+    btnTxt: { color: '#fff', fontWeight: 'bold' },
+    cancelButton: {
+      marginTop: 15,
+      padding: 12,
+      borderRadius: 6,
+      backgroundColor: theme.isDark ? '#334155' : '#f0f0f0',
+      alignItems: 'center',
+    },
+    cancelButtonText: {
+      color: theme.colors.primary,
+      fontWeight: 'bold',
+      fontSize: 16,
+    },
+  });

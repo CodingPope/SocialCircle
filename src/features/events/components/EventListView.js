@@ -15,8 +15,12 @@ import {
   trackCardClick,
   trackCardImpression,
 } from '../../../lib/analytics';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 const EventListView = ({ events, onCloseListView }) => {
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [enhancedEvents, setEnhancedEvents] = useState([]);
   const bottomSheetRef = useRef(null);
@@ -191,53 +195,55 @@ const EventListView = ({ events, onCloseListView }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  bottomSheetBg: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 6,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    justifyContent: 'center',
-  },
-  dragBarContainer: {
-    position: 'absolute',
-    top: 4,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 20,
-  },
-  dragBar: {
-    width: 40,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#e0e0e0',
-    marginBottom: 4,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginLeft: 12,
-    color: '#222',
-    marginTop: 8,
-  },
-  listContainer: {
-    padding: 10,
-  },
-});
+// Description: Create theme-aware styles for EventListView
+const createStyles = (theme) =>
+  StyleSheet.create({
+    bottomSheetBg: {
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      backgroundColor: theme.colors.card,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: theme.isDark ? 0.3 : 0.12,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    sheetHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 6,
+      backgroundColor: theme.colors.card,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      justifyContent: 'center',
+    },
+    dragBarContainer: {
+      position: 'absolute',
+      top: 4,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      zIndex: 20,
+    },
+    dragBar: {
+      width: 40,
+      height: 5,
+      borderRadius: 2.5,
+      backgroundColor: theme.isDark ? '#64748B' : '#e0e0e0',
+      marginBottom: 4,
+    },
+    sheetTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      marginLeft: 12,
+      color: theme.colors.text,
+      marginTop: 8,
+    },
+    listContainer: {
+      padding: 10,
+    },
+  });
 
 export default EventListView;

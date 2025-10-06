@@ -66,11 +66,16 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { shareEventDetails } from '../../events/utils/shareUtils';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 const EventChatScreen = () => {
   const route = useRoute();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   // Make route params defensive & provide default
   const {
     eventId,
@@ -1303,7 +1308,7 @@ const EventChatScreen = () => {
 
   return (
     <SafeAreaView
-      style={{ flex: 1, backgroundColor: '#fff' }}
+      style={styles.chatBackground}
       edges={['top', 'left', 'right']}
     >
       {/* Header placed below SafeAreaView padding */}
@@ -1490,11 +1495,21 @@ const EventChatScreen = () => {
                     style={[
                       styles.messageBubble,
                       {
-                        backgroundColor: isCurrentUser ? '#3B82F6' : '#F97316',
+                        backgroundColor: isCurrentUser
+                          ? theme.colors.primary
+                          : theme.isDark
+                          ? '#475569'
+                          : '#F3F4F6',
                       },
                     ]}
                   >
-                    <Text style={{ color: '#fff' }}>{item.text}</Text>
+                    <Text
+                      style={{
+                        color: isCurrentUser ? '#fff' : theme.colors.text,
+                      }}
+                    >
+                      {item.text}
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -1517,6 +1532,7 @@ const EventChatScreen = () => {
                   ? 'Event ended — chat open for 3 days'
                   : 'Type a message...'
               }
+              placeholderTextColor={theme.colors.textSecondary}
               value={input}
               onChangeText={setInput}
               onSubmitEditing={() => {
@@ -2101,511 +2117,533 @@ const EventChatScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  messageAvatar: {
-    width: 45,
-    height: 45,
-    borderRadius: 10,
-    marginHorizontal: 6,
-    backgroundColor: '#eee',
-  },
-  hostAvatarBorder: {
-    borderWidth: 2,
-    borderColor: '#8B5CF6', // purple border for host
-  },
-  senderName: { fontSize: 12, fontWeight: 'bold', marginBottom: 2 },
-  hostChip: {
-    marginLeft: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: '#8B5CF6',
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
-    overflow: 'hidden',
-  },
-  systemContainer: {
-    alignSelf: 'center',
-    backgroundColor: '#EFEFEF',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginVertical: 6,
-  },
-  systemText: {
-    color: '#666',
-    fontSize: 12,
-  },
-  messageBubble: {
-    borderRadius: 20, // pill/oval shape
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginTop: 2,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    padding: 8,
-    marginBottom: 25,
-    borderTopWidth: 1,
-    borderColor: '#eee',
-    backgroundColor: '#fafafa',
-  },
-  input: {
-    flex: 1,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 16,
-    height: 40,
-  },
-  sendButton: { marginLeft: 8, justifyContent: 'center' },
-  sendText: { color: '#007AFF', fontWeight: 'bold', fontSize: 16 },
+// Description: Create theme-aware styles for EventChatScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    messageAvatar: {
+      width: 45,
+      height: 45,
+      borderRadius: 10,
+      marginHorizontal: 6,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    chatBackground: {
+      backgroundColor: theme.colors.background,
+      flex: 1,
+    },
+    hostAvatarBorder: {
+      borderWidth: 2,
+      borderColor: '#8B5CF6', // purple border for host
+    },
+    senderName: {
+      fontSize: 12,
+      fontWeight: 'bold',
+      marginBottom: 2,
+      color: theme.colors.text,
+    },
+    hostChip: {
+      marginLeft: 6,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 6,
+      backgroundColor: '#8B5CF6',
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: 'bold',
+      overflow: 'hidden',
+    },
+    systemContainer: {
+      alignSelf: 'center',
+      backgroundColor: theme.isDark ? 'rgba(148,163,184,0.2)' : '#EFEFEF',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+      marginVertical: 6,
+    },
+    systemText: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+    },
+    messageBubble: {
+      borderRadius: 20, // pill/oval shape
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      marginTop: 2,
+    },
+    inputRow: {
+      flexDirection: 'row',
+      padding: 8,
+      paddingBottom: 25,
+      marginbottom: 5,
+      borderTopWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    input: {
+      flex: 1,
+      borderRadius: 20,
+      backgroundColor: theme.colors.inputBackground,
+      paddingHorizontal: 16,
+      height: 40,
+      color: theme.colors.text,
+    },
+    sendButton: { marginLeft: 8, justifyContent: 'center' },
+    sendText: { color: theme.colors.primary, fontWeight: 'bold', fontSize: 16 },
 
-  // Modal
-  modal: { justifyContent: 'flex-end', margin: 0, flex: 1 },
-  modalContent: {
-    backgroundColor: '#f9f9f9',
-    padding: 16,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    maxHeight: '100%', // Slightly taller & allow internal padding to show last button
-    overflow: 'visible',
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-    position: 'relative',
-  },
-  cardEditing: {
-    marginBottom: 20,
-    zIndex: 20,
-    overflow: 'visible',
-    position: 'relative',
-  },
-  cardTitle: { fontSize: 20, fontWeight: 'bold' },
-  sectionTitle: { fontWeight: 'bold', fontSize: 16, marginBottom: 4 },
-  linkText: { color: '#007AFF', fontSize: 15 },
-  normalText: { fontSize: 15, color: '#333' },
-  rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  dateText: { flex: 1, marginRight: 12 },
-  calendarButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#2563EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginTop: 8,
-    backgroundColor: '#fff',
-    color: '#111827',
-  },
-  modalTextarea: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  editInfoNotice: {
-    marginTop: 8,
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  editActionsContainer: {
-    marginBottom: 16,
-  },
-  editPrimaryButton: {
-    backgroundColor: '#2563EB',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  editPrimaryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  editSecondaryButton: {
-    borderWidth: 1,
-    borderColor: '#2563EB',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  editSecondaryButtonText: {
-    color: '#2563EB',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  editDateButton: {
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2563EB',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editDateButtonText: {
-    color: '#2563EB',
-    fontWeight: '600',
-    fontSize: 15,
-    marginLeft: 8,
-  },
-  autocompleteWrapper: {
-    marginTop: 12,
-    marginBottom: 4,
-    position: 'relative',
-    zIndex: 20,
-  },
-  autocompleteContainer: {
-    flex: 0,
-    width: '100%',
-    zIndex: 20,
-  },
-  autocompleteList: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginTop: 4,
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 4 },
-    maxHeight: 220,
-    position: 'absolute',
-    top: 52,
-    width: '100%',
-    zIndex: 30,
-  },
-  autocompleteRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  autocompleteSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#E5E7EB',
-  },
-  autocompleteDescription: {
-    color: '#111827',
-  },
-  attendeeImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 15,
-    backgroundColor: '#eee',
-    marginBottom: 4,
-  },
-  attendeePill: {
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  attendeeScrollContent: {
-    paddingVertical: 4,
-  },
-  attendeeName: { fontSize: 12, color: '#333' },
-  leaveButton: {
-    backgroundColor: '#FF3B30',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  leaveButtonDisabled: {
-    opacity: 0.7,
-  },
-  leaveButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  reportButton: {
-    backgroundColor: '#F2F2F2',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  reportButtonText: {
-    color: '#333',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  dragHandle: {
-    width: 40,
-    height: 5,
-    backgroundColor: '#ccc',
-    borderRadius: 3,
-    alignSelf: 'center',
-    marginBottom: 12,
-  },
-  hostRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  hostAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 10,
-    backgroundColor: '#eee',
-  },
-  hostName: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  hostRating: {
-    fontSize: 13,
-    color: '#888',
-    marginTop: 2,
-  },
-  headerContainer: {
-    // Description: Ensures header is below SafeAreaView top padding
-    backgroundColor: '#fff',
-    paddingTop: 6,
-    paddingBottom: 2,
-    elevation: 2,
-    zIndex: 10,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderColor: '#eee',
-    backgroundColor: '#fff',
-  },
-  headerTitleWrapper: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: 12,
-  },
-  backText: { fontSize: 16, color: '#007AFF' },
-  headerTitle: { fontWeight: 'bold', fontSize: 16 },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerIconButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  ellipsis: { fontSize: 24, color: '#888' },
-  pendingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(17,24,39,0.45)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 200,
-  },
-  pendingOverlayCard: {
-    backgroundColor: '#111827',
-    borderRadius: 18,
-    paddingVertical: 24,
-    paddingHorizontal: 28,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
-  },
-  pendingOverlayText: {
-    color: '#fff',
-    marginTop: 12,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+    // Modal
+    modal: { justifyContent: 'flex-end', margin: 0, flex: 1 },
+    modalContent: {
+      backgroundColor: theme.colors.background,
+      padding: 16,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      maxHeight: '100%', // Slightly taller & allow internal padding to show last button
+      overflow: 'visible',
+    },
+    card: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 12,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.05,
+      shadowRadius: 4,
+      elevation: 2,
+      position: 'relative',
+    },
+    cardEditing: {
+      marginBottom: 20,
+      zIndex: 20,
+      overflow: 'visible',
+      position: 'relative',
+    },
+    cardTitle: { fontSize: 20, fontWeight: 'bold', color: theme.colors.text },
+    sectionTitle: {
+      fontWeight: 'bold',
+      fontSize: 16,
+      marginBottom: 4,
+      color: theme.colors.text,
+    },
+    linkText: { color: theme.colors.primary, fontSize: 15 },
+    normalText: { fontSize: 15, color: theme.colors.text },
+    rowBetween: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    dateText: { flex: 1, marginRight: 12, color: theme.colors.text },
+    calendarButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalInput: {
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginTop: 8,
+      backgroundColor: theme.colors.card,
+      color: theme.colors.text,
+    },
+    modalTextarea: {
+      minHeight: 100,
+      textAlignVertical: 'top',
+    },
+    editInfoNotice: {
+      marginTop: 8,
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    editActionsContainer: {
+      marginBottom: 16,
+    },
+    editPrimaryButton: {
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    editPrimaryButtonText: {
+      color: '#fff',
+      fontWeight: '600',
+      fontSize: 16,
+    },
+    editSecondaryButton: {
+      borderWidth: 1,
+      borderColor: theme.colors.primary,
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    editSecondaryButtonText: {
+      color: theme.colors.primary,
+      fontWeight: '600',
+      fontSize: 16,
+    },
+    editDateButton: {
+      marginTop: 12,
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    editDateButtonText: {
+      color: theme.colors.primary,
+      fontWeight: '600',
+      fontSize: 15,
+      marginLeft: 8,
+    },
+    autocompleteWrapper: {
+      marginTop: 12,
+      marginBottom: 4,
+      position: 'relative',
+      zIndex: 20,
+    },
+    autocompleteContainer: {
+      flex: 0,
+      width: '100%',
+      zIndex: 20,
+    },
+    autocompleteList: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      marginTop: 4,
+      elevation: 6,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.1,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 4 },
+      maxHeight: 220,
+      position: 'absolute',
+      top: 52,
+      width: '100%',
+      zIndex: 30,
+    },
+    autocompleteRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    autocompleteSeparator: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.colors.border,
+    },
+    autocompleteDescription: {
+      color: theme.colors.text,
+    },
+    attendeeImage: {
+      width: 50,
+      height: 50,
+      borderRadius: 15,
+      backgroundColor: theme.colors.backgroundSecondary,
+      marginBottom: 4,
+    },
+    attendeePill: {
+      alignItems: 'center',
+      marginRight: 12,
+    },
+    attendeeScrollContent: {
+      paddingVertical: 4,
+    },
+    attendeeName: { fontSize: 12, color: theme.colors.text },
+    leaveButton: {
+      backgroundColor: theme.colors.danger,
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    leaveButtonDisabled: {
+      opacity: 0.7,
+    },
+    leaveButtonText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 16,
+    },
+    reportButton: {
+      backgroundColor: theme.isDark ? '#334155' : '#F2F2F2',
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    reportButtonText: {
+      color: theme.colors.text,
+      fontWeight: 'bold',
+      fontSize: 16,
+    },
+    dragHandle: {
+      width: 40,
+      height: 5,
+      backgroundColor: theme.isDark ? '#64748B' : '#ccc',
+      borderRadius: 3,
+      alignSelf: 'center',
+      marginBottom: 12,
+    },
+    hostRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 10,
+    },
+    hostAvatar: {
+      width: 60,
+      height: 60,
+      borderRadius: 10,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    hostName: {
+      fontSize: 15,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    hostRating: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    headerContainer: {
+      // Description: Ensures header is below SafeAreaView top padding
+      backgroundColor: theme.colors.card,
+      paddingTop: 6,
+      paddingBottom: 2,
+      elevation: 2,
+      zIndex: 10,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+    },
+    headerTitleWrapper: {
+      flex: 1,
+      alignItems: 'center',
+      paddingHorizontal: 12,
+    },
+    backText: { fontSize: 16, color: theme.colors.primary },
+    headerTitle: { fontWeight: 'bold', fontSize: 16, color: theme.colors.text },
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    headerIconButton: {
+      padding: 4,
+      marginLeft: 8,
+    },
+    ellipsis: { fontSize: 24, color: theme.colors.textSecondary },
+    pendingOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: theme.isDark
+        ? 'rgba(15,23,42,0.7)'
+        : 'rgba(17,24,39,0.45)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 200,
+    },
+    pendingOverlayCard: {
+      backgroundColor: theme.isDark ? '#1E293B' : '#111827',
+      borderRadius: 18,
+      paddingVertical: 24,
+      paddingHorizontal: 28,
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.22,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 12,
+    },
+    pendingOverlayText: {
+      color: '#fff',
+      marginTop: 12,
+      fontSize: 16,
+      fontWeight: '600',
+    },
 
-  // Requests Section Styles
-  requestItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    marginVertical: 8,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  requestAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 10,
-    marginRight: 3,
-    backgroundColor: '#eee',
-  },
-  requestDetails: {
-    flex: 1,
-    marginLeft: 10,
-  },
-  requestName: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  requestRating: {
-    fontSize: 13,
-    color: '#888',
-    marginTop: 2,
-  },
-  requestActions: {
-    flexDirection: 'column', // Change to column for stacking
-    alignItems: 'center',
-    gap: 8,
-  },
-  acceptButton: {
-    backgroundColor: '#4CAF50',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-  },
-  acceptButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  declineButton: {
-    backgroundColor: '#F44336',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-  },
-  declineButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#888',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  banner: {
-    backgroundColor: '#FFEB3B',
-    padding: 10,
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderColor: '#FFD54F',
-  },
-  bannerText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  pinnedContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 12,
-    padding: 12,
-  },
-  pinnedIcon: {
-    marginRight: 10,
-  },
-  pinnedTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#1D4ED8',
-    marginBottom: 4,
-  },
-  pinnedMessage: {
-    color: '#1F2937',
-    fontSize: 14,
-  },
-  pinnedTimestamp: {
-    color: '#6B7280',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  pinnedEditButton: {
-    marginLeft: 12,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    backgroundColor: '#E0E7FF',
-  },
-  pinnedEditText: {
-    color: '#1D4ED8',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  pinnedModal: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-  },
-  pinnedModalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-    color: '#111827',
-  },
-  pinnedInput: {
-    minHeight: 100,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    padding: 12,
-    textAlignVertical: 'top',
-    marginBottom: 16,
-    fontSize: 15,
-    color: '#111827',
-  },
-  pinnedModalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  pinnedModalButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 8,
-    marginLeft: 10,
-  },
-  pinnedModalCancel: {
-    backgroundColor: '#E5E7EB',
-  },
-  pinnedModalSave: {
-    backgroundColor: '#2563EB',
-  },
-  pinnedModalSaveDisabled: {
-    opacity: 0.6,
-  },
-  pinnedModalButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  pinnedModalCancelText: {
-    color: '#111827',
-    fontWeight: '500',
-  },
-});
+    // Requests Section Styles
+    requestItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 12,
+      marginVertical: 8,
+      backgroundColor: theme.colors.card,
+      borderRadius: 8,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.1,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    requestAvatar: {
+      width: 60,
+      height: 60,
+      borderRadius: 10,
+      marginRight: 3,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    requestDetails: {
+      flex: 1,
+      marginLeft: 10,
+    },
+    requestName: {
+      fontSize: 15,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    requestRating: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    requestActions: {
+      flexDirection: 'column', // Change to column for stacking
+      alignItems: 'center',
+      gap: 8,
+    },
+    acceptButton: {
+      backgroundColor: theme.colors.success,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 6,
+    },
+    acceptButtonText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 14,
+    },
+    declineButton: {
+      backgroundColor: theme.colors.danger,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 6,
+    },
+    declineButtonText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 14,
+    },
+    emptyText: {
+      textAlign: 'center',
+      color: theme.colors.textSecondary,
+      fontSize: 14,
+      marginTop: 8,
+    },
+    banner: {
+      backgroundColor: theme.colors.warning,
+      padding: 10,
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderColor: theme.isDark ? '#D97706' : '#FFD54F',
+    },
+    bannerText: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      color: theme.isDark ? '#111827' : '#333',
+    },
+    pinnedContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.isDark ? 'rgba(59,130,246,0.15)' : '#EEF2FF',
+      marginHorizontal: 16,
+      marginTop: 12,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 8,
+    },
+    pinnedIcon: {
+      marginRight: 10,
+    },
+    pinnedTitle: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.primary,
+      marginBottom: 4,
+    },
+    pinnedMessage: {
+      color: theme.colors.text,
+      fontSize: 14,
+    },
+    pinnedTimestamp: {
+      color: theme.colors.textSecondary,
+      fontSize: 12,
+      marginTop: 4,
+    },
+    pinnedEditButton: {
+      marginLeft: 12,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 999,
+      backgroundColor: theme.isDark ? 'rgba(59,130,246,0.25)' : '#E0E7FF',
+    },
+    pinnedEditText: {
+      color: theme.colors.primary,
+      fontWeight: '600',
+      fontSize: 12,
+    },
+    pinnedModal: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 16,
+      padding: 20,
+    },
+    pinnedModalTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      marginBottom: 12,
+      color: theme.colors.text,
+    },
+    pinnedInput: {
+      minHeight: 100,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 10,
+      padding: 12,
+      textAlignVertical: 'top',
+      marginBottom: 16,
+      fontSize: 15,
+      color: theme.colors.text,
+      backgroundColor: theme.colors.inputBackground,
+    },
+    pinnedModalActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+    },
+    pinnedModalButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 18,
+      borderRadius: 8,
+      marginLeft: 10,
+    },
+    pinnedModalCancel: {
+      backgroundColor: theme.isDark ? '#475569' : '#E5E7EB',
+    },
+    pinnedModalSave: {
+      backgroundColor: theme.colors.primary,
+    },
+    pinnedModalSaveDisabled: {
+      opacity: 0.6,
+    },
+    pinnedModalButtonText: {
+      color: '#fff',
+      fontWeight: '600',
+    },
+    pinnedModalCancelText: {
+      color: theme.colors.text,
+      fontWeight: '500',
+    },
+  });
 
 export default EventChatScreen;

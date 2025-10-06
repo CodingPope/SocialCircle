@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+} from 'react';
 import {
   View,
   Text,
@@ -42,6 +48,8 @@ import {
   AnalyticsSurfaces,
   AnalyticsSources,
 } from '../../../lib/analytics';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 const screenHeight = Dimensions.get('window').height;
 // Clearance in pixels reserved at the top of the scroll content for the floating handle
@@ -58,6 +66,9 @@ export default function EventPopUpCard({
   const user = useUserStore((state) => state.user);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const blockContext = useMemo(
     () => getBlockContext(user),
     [user?.uid, user?.blocked, user?.blockedBy]
@@ -97,7 +108,10 @@ export default function EventPopUpCard({
   useEffect(() => {
     if (!liveEvent || !liveEvent.ownerId) return;
     if (!isEventVisibleForUser(liveEvent, blockContext)) {
-      Alert.alert('Event unavailable', 'You no longer have access to this event.');
+      Alert.alert(
+        'Event unavailable',
+        'You no longer have access to this event.'
+      );
       onClose && onClose();
     }
   }, [blockContext, liveEvent?.id, liveEvent?.ownerId, onClose]);
@@ -579,7 +593,9 @@ export default function EventPopUpCard({
 
         {/* Title + share */}
         <View style={styles.titleRow}>
-          <Text style={styles.title}>{liveEvent.title || 'Untitled Event'}</Text>
+          <Text style={styles.title}>
+            {liveEvent.title || 'Untitled Event'}
+          </Text>
           <View style={styles.titleActions}>
             <TouchableOpacity
               style={styles.iconButton}
@@ -801,217 +817,228 @@ export default function EventPopUpCard({
   );
 }
 
-const styles = StyleSheet.create({
-  // Sheet container (shadow only)
-  bottomSheet: {
-    zIndex: 100,
-    elevation: 100,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: -2 },
-    backgroundColor: '#fff',
-  },
-  // Rounded card + clipping
-  sheetBackground: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: 'hidden',
-  },
+// Description: Create theme-aware styles for EventPopUpCard
+const createStyles = (theme) =>
+  StyleSheet.create({
+    // Sheet container (shadow only)
+    bottomSheet: {
+      zIndex: 100,
+      elevation: 100,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.15,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: -2 },
+      backgroundColor: theme.colors.card,
+    },
+    // Rounded card + clipping
+    sheetBackground: {
+      backgroundColor: theme.colors.card,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      overflow: 'hidden',
+    },
 
-  // Floating handle
-  handleWrap: {
-    position: 'absolute',
-    top: 8,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 10,
-    pointerEvents: 'none',
-  },
-  handlePill: {
-    width: 60,
-    height: 6,
-    borderRadius: 4,
-    backgroundColor: '#CFCFCF',
-  },
+    // Floating handle
+    handleWrap: {
+      position: 'absolute',
+      top: 8,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      zIndex: 10,
+      pointerEvents: 'none',
+    },
+    handlePill: {
+      width: 60,
+      height: 6,
+      borderRadius: 4,
+      backgroundColor: theme.isDark ? '#64748B' : '#CFCFCF',
+    },
 
-  // Full-bleed header
-  headerFullBleed: {
-    marginTop: -HANDLE_CLEARANCE, // tuck under handle
-    marginHorizontal: -16, // cancel scroll padding to go edge-to-edge
-  },
-  headerImage: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-  },
-  headerImagePlaceholder: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    // Full-bleed header
+    headerFullBleed: {
+      marginTop: -HANDLE_CLEARANCE, // tuck under handle
+      marginHorizontal: -16, // cancel scroll padding to go edge-to-edge
+    },
+    headerImage: {
+      width: '100%',
+      aspectRatio: 16 / 9,
+    },
+    headerImagePlaceholder: {
+      width: '100%',
+      aspectRatio: 16 / 9,
+      backgroundColor: theme.colors.backgroundSecondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  // Typography + layout
-  title: {
-    fontSize: 24,
-    fontWeight: '800',
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  titleActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  iconButton: {
-    padding: 6,
-    marginLeft: 8,
-  },
+    // Typography + layout
+    title: {
+      fontSize: 24,
+      fontWeight: '800',
+      marginTop: 12,
+      marginBottom: 6,
+      color: theme.colors.text,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    titleActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    iconButton: {
+      padding: 6,
+      marginLeft: 8,
+    },
 
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#6B7280',
-    letterSpacing: 0.3,
-    marginBottom: 6,
-    marginTop: 10,
-  },
+    sectionLabel: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: theme.colors.textSecondary,
+      letterSpacing: 0.3,
+      marginBottom: 6,
+      marginTop: 10,
+    },
 
-  bodyText: {
-    fontSize: 16,
-    color: '#333',
-    lineHeight: 22,
-  },
+    bodyText: {
+      fontSize: 16,
+      color: theme.colors.text,
+      lineHeight: 22,
+    },
 
-  showMore: {
-    color: '#2563EB',
-    marginTop: 6,
-    fontWeight: '700',
-  },
+    showMore: {
+      color: theme.colors.primary,
+      marginTop: 6,
+      fontWeight: '700',
+    },
 
-  // Chips / meta
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: 8,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: '#F2F4F7',
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  chipWarn: {
-    backgroundColor: '#FFF4E5',
-  },
-  chipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#111827',
-    marginLeft: 6,
-  },
+    // Chips / meta
+    metaRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      marginBottom: 8,
+    },
+    chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 999,
+      backgroundColor: theme.colors.chipBackground,
+      marginRight: 8,
+      marginBottom: 8,
+    },
+    chipWarn: {
+      backgroundColor: theme.isDark ? 'rgba(251,191,36,0.2)' : '#FFF4E5',
+    },
+    chipText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginLeft: 6,
+    },
 
-  // Dividers
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#E5E7EB',
-    marginVertical: 10,
-  },
+    // Dividers
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.colors.border,
+      marginVertical: 10,
+    },
 
-  // Address row
-  inlineButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  linkText: {
-    fontSize: 16,
-    color: '#2563EB',
-    marginLeft: 6,
-  },
+    // Address row
+    inlineButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 4,
+    },
+    linkText: {
+      fontSize: 16,
+      color: theme.colors.primary,
+      marginLeft: 6,
+    },
 
-  // Host card
-  hostCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#F8FAFC',
-    marginTop: 12,
-  },
-  hostAvatar: { width: 44, height: 44, borderRadius: 12, marginRight: 10 },
-  hostName: { fontSize: 16, fontWeight: '700' },
-  hostSub: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  smallGhostBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  smallGhostBtnText: { fontSize: 13, fontWeight: '700', color: '#111827' },
+    // Host card
+    hostCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: theme.colors.backgroundSecondary,
+      marginTop: 12,
+    },
+    hostAvatar: { width: 44, height: 44, borderRadius: 12, marginRight: 10 },
+    hostName: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
+    hostSub: { fontSize: 13, color: theme.colors.textSecondary, marginTop: 2 },
+    smallGhostBtn: {
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    smallGhostBtnText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
 
-  // Capacity text
-  capacityText: {
-    fontSize: 14,
-    color: '#2563EB',
-    fontWeight: '700',
-    marginTop: 14,
-  },
+    // Capacity text
+    capacityText: {
+      fontSize: 14,
+      color: theme.colors.primary,
+      fontWeight: '700',
+      marginTop: 14,
+    },
 
-  // CTAs
-  ctaStack: { marginTop: 12 },
-  primaryBtn: {
-    backgroundColor: '#2563EB',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  primaryBtnDisabled: {
-    backgroundColor: '#9DB6F2',
-  },
-  primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-  joinFeedbackContainer: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#E8F1FF',
-    marginBottom: 12,
-  },
-  joinFeedbackSuccess: {
-    backgroundColor: '#E4F7E7',
-  },
-  joinFeedbackError: {
-    backgroundColor: '#FDE8E8',
-  },
-  joinFeedbackText: {
-    textAlign: 'center',
-    color: '#1F2937',
-    fontSize: 13,
-    fontWeight: '500',
-  },
+    // CTAs
+    ctaStack: { marginTop: 12 },
+    primaryBtn: {
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    primaryBtnDisabled: {
+      backgroundColor: theme.isDark ? '#475569' : '#9DB6F2',
+    },
+    primaryBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+    joinFeedbackContainer: {
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.isDark ? 'rgba(59,130,246,0.15)' : '#E8F1FF',
+      marginBottom: 12,
+    },
+    joinFeedbackSuccess: {
+      backgroundColor: theme.isDark ? 'rgba(34,197,94,0.15)' : '#E4F7E7',
+    },
+    joinFeedbackError: {
+      backgroundColor: theme.isDark ? 'rgba(239,68,68,0.15)' : '#FDE8E8',
+    },
+    joinFeedbackText: {
+      textAlign: 'center',
+      color: theme.colors.text,
+      fontSize: 13,
+      fontWeight: '500',
+    },
 
-  ghostBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  ghostBtnText: { fontWeight: '700', color: '#111827', marginLeft: 8 },
-});
+    ghostBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    ghostBtnText: {
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginLeft: 8,
+    },
+  });

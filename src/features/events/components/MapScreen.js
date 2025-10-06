@@ -50,6 +50,8 @@ import joinEvent from '../services/joinEvent';
 import { trackCardClick, trackOpenEvent } from '../../../lib/analytics';
 import { filterBlockedEvents } from '../utils/blockUtils';
 import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
+import { darkMapStyle, lightMapStyle } from '../../../config/mapStyles';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const PREVIEW_WIDTH = Math.min(300, SCREEN_W - 16); // slightly narrower preview for smaller overall footprint
@@ -70,14 +72,6 @@ const QUICK_DATE_FILTERS = [
   { key: 'week', label: 'This Week', startOffset: 0, endOffset: 6 },
 ];
 
-const CustomDotMarker = ({ color, label, scale }) => (
-  <View
-    style={[styles.dot, { backgroundColor: color, transform: [{ scale }] }]}
-  >
-    {label ? <Text style={styles.dotLabel}>{label}</Text> : null}
-  </View>
-);
-
 export default function MapScreen() {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
@@ -85,6 +79,26 @@ export default function MapScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const mapAppearance = useMemo(
+    () => ({
+      customStyle: themeMode === 'dark' ? darkMapStyle : lightMapStyle,
+      userInterfaceStyle: themeMode === 'dark' ? 'dark' : 'light',
+    }),
+    [themeMode]
+  );
+
+  const renderCustomDotMarker = useCallback(
+    (color, label = null, scale = 1) => (
+      <View
+        style={[styles.dot, { backgroundColor: color, transform: [{ scale }] }]}
+      >
+        {label ? <Text style={styles.dotLabel}>{label}</Text> : null}
+      </View>
+    ),
+    [styles]
+  );
 
   const tutorialKeys = useMemo(() => {
     if (!user?.uid) return null;
@@ -223,31 +237,29 @@ export default function MapScreen() {
     };
   }, [tutorialKeys]);
 
-  const measureTutorialTarget = useCallback(
-    (type) => {
-      const ref = type === 'create' ? createFabRef.current : filterButtonRef.current;
-      if (!ref || typeof ref.measureInWindow !== 'function') return;
-      ref.measureInWindow((x, y, width, height) => {
-        if (!width && !height) return;
-        const layout = { x, y, width, height };
-        latestLayoutsRef.current[type] = layout;
-        setTutorialLayouts((prev) => {
-          const prevLayout = prev[type];
-          if (
-            prevLayout &&
-            Math.abs(prevLayout.x - layout.x) < 1 &&
-            Math.abs(prevLayout.y - layout.y) < 1 &&
-            Math.abs(prevLayout.width - layout.width) < 1 &&
-            Math.abs(prevLayout.height - layout.height) < 1
-          ) {
-            return prev;
-          }
-          return { ...prev, [type]: layout };
-        });
+  const measureTutorialTarget = useCallback((type) => {
+    const ref =
+      type === 'create' ? createFabRef.current : filterButtonRef.current;
+    if (!ref || typeof ref.measureInWindow !== 'function') return;
+    ref.measureInWindow((x, y, width, height) => {
+      if (!width && !height) return;
+      const layout = { x, y, width, height };
+      latestLayoutsRef.current[type] = layout;
+      setTutorialLayouts((prev) => {
+        const prevLayout = prev[type];
+        if (
+          prevLayout &&
+          Math.abs(prevLayout.x - layout.x) < 1 &&
+          Math.abs(prevLayout.y - layout.y) < 1 &&
+          Math.abs(prevLayout.width - layout.width) < 1 &&
+          Math.abs(prevLayout.height - layout.height) < 1
+        ) {
+          return prev;
+        }
+        return { ...prev, [type]: layout };
       });
-    },
-    []
-  );
+    });
+  }, []);
 
   const handleCreateFabLayout = useCallback(() => {
     measureTutorialTarget('create');
@@ -327,7 +339,8 @@ export default function MapScreen() {
     if (!activeTutorial) return;
     const current = activeTutorial;
     const storageKey = tutorialKeys?.[current];
-    const queueFilter = current === 'create' && tutorialProgress.filter !== true;
+    const queueFilter =
+      current === 'create' && tutorialProgress.filter !== true;
 
     markInteraction();
 
@@ -353,7 +366,13 @@ export default function MapScreen() {
     }).start(() => {
       finalize();
     });
-  }, [activeTutorial, tutorialKeys, tutorialProgress.filter, tutorialOpacity, markInteraction]);
+  }, [
+    activeTutorial,
+    tutorialKeys,
+    tutorialProgress.filter,
+    tutorialOpacity,
+    markInteraction,
+  ]);
 
   const tutorialHighlightStyle = useMemo(() => {
     if (!activeTutorial) return null;
@@ -413,15 +432,24 @@ export default function MapScreen() {
     if (activeTutorial === 'create') {
       const top = Math.max(layout.y - 170, 16);
       const left = Math.max(
-        Math.min(layout.x + layout.width - tooltipWidth, windowSize.width - tooltipWidth - 16),
+        Math.min(
+          layout.x + layout.width - tooltipWidth,
+          windowSize.width - tooltipWidth - 16
+        ),
         16
       );
       return { top, left, width: tooltipWidth };
     }
 
-    const top = Math.min(layout.y + layout.height + 18, windowSize.height - 200);
+    const top = Math.min(
+      layout.y + layout.height + 18,
+      windowSize.height - 200
+    );
     const left = Math.max(
-      Math.min(layout.x + layout.width - tooltipWidth, windowSize.width - tooltipWidth - 16),
+      Math.min(
+        layout.x + layout.width - tooltipWidth,
+        windowSize.width - tooltipWidth - 16
+      ),
       16
     );
     return { top, left, width: tooltipWidth };
@@ -1100,13 +1128,36 @@ export default function MapScreen() {
     [ensureSnippets]
   );
 
-  const getMarkerColor = (event) => {
-    if (event.isSponsored) return '#9B59B6';
-    if (event.isPopular) return '#F1C40F';
-    if (event.isFriendHosting) return '#3498DB';
-    if (event.isVisited) return '#FF7F50';
-    return '#E74C3C';
-  };
+  const markerColors = useMemo(
+    () =>
+      theme.isDark
+        ? {
+            sponsored: '#C084FC',
+            popular: '#FACC15',
+            friend: '#38BDF8',
+            visited: '#F97316',
+            default: '#F87171',
+          }
+        : {
+            sponsored: '#9B59B6',
+            popular: '#F1C40F',
+            friend: '#3498DB',
+            visited: '#FF7F50',
+            default: '#E74C3C',
+          },
+    [theme.isDark]
+  );
+
+  const getMarkerColor = useCallback(
+    (event) => {
+      if (event.isSponsored) return markerColors.sponsored;
+      if (event.isPopular) return markerColors.popular;
+      if (event.isFriendHosting) return markerColors.friend;
+      if (event.isVisited) return markerColors.visited;
+      return markerColors.default;
+    },
+    [markerColors]
+  );
 
   const handlePlaceSelect = (data, details) => {
     markInteraction();
@@ -1253,7 +1304,12 @@ export default function MapScreen() {
 
   if (initialLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View
+        style={[
+          { flex: 1, justifyContent: 'center', alignItems: 'center' },
+          { backgroundColor: theme.colors.background },
+        ]}
+      >
         <ActivityIndicator size='large' color={theme.colors.primary} />
       </View>
     );
@@ -1262,9 +1318,19 @@ export default function MapScreen() {
   // Check if user has interests selected
   if (userInterests.length === 0) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View
+        style={[
+          { flex: 1, justifyContent: 'center', alignItems: 'center' },
+          { backgroundColor: theme.colors.background },
+        ]}
+      >
         <Text
-          style={{ fontSize: 16, textAlign: 'center', marginHorizontal: 20 }}
+          style={{
+            fontSize: 16,
+            textAlign: 'center',
+            marginHorizontal: 20,
+            color: theme.colors.text,
+          }}
         >
           You must select some interests to view events.{'\n'}
           Please update your profile to get started.
@@ -1302,18 +1368,29 @@ export default function MapScreen() {
                 accessibilityRole='button'
                 accessibilityLabel='Dismiss map tutorial'
               >
-                <Text style={styles.tutorialButtonText}>{tutorialCopy.cta}</Text>
+                <Text style={styles.tutorialButtonText}>
+                  {tutorialCopy.cta}
+                </Text>
               </TouchableOpacity>
             </View>
           )}
         </Animated.View>
       )}
       {/* Search + Filter Bar */}
-      <View style={styles.searchBarUnified} pointerEvents='box-none'>
+      <View
+        style={[
+          styles.searchBarUnified,
+          {
+            backgroundColor: theme.colors.card,
+            borderColor: theme.colors.border,
+          },
+        ]}
+        pointerEvents='box-none'
+      >
         <Ionicons
           name='search'
           size={18}
-          color='#A0A0A0'
+          color={theme.colors.textSecondary}
           style={{ marginLeft: 10, marginRight: 6 }}
         />
         <GooglePlacesAutocomplete
@@ -1330,6 +1407,12 @@ export default function MapScreen() {
             onBlur: () => {
               markInteraction();
               if (Platform.OS === 'android') setIsSearchFocused(false);
+            },
+            placeholderTextColor: theme.colors.textSecondary,
+            style: {
+              color: theme.colors.text,
+              paddingLeft: 44,
+              paddingRight: 8,
             },
           }}
           onPress={(data, details = null) => handlePlaceSelect(data, details)}
@@ -1351,16 +1434,24 @@ export default function MapScreen() {
               height: 44,
               fontSize: 16,
               backgroundColor: 'transparent',
-              paddingHorizontal: 0,
+              paddingLeft: 44,
+              paddingRight: 8,
+              color: theme.colors.text,
             },
             listView: {
               position: 'absolute',
               top: 44,
               left: 0,
               right: 0,
-              backgroundColor: '#fff',
+              backgroundColor: theme.colors.card,
               zIndex: 9999,
               elevation: 9999,
+            },
+            row: {
+              backgroundColor: theme.colors.card,
+            },
+            description: {
+              color: theme.colors.text,
             },
           }}
         />
@@ -1391,10 +1482,6 @@ export default function MapScreen() {
               style={[
                 styles.quickDateChip,
                 isActive && styles.quickDateChipActive,
-                isActive && {
-                  backgroundColor: theme.colors.primary,
-                  borderColor: theme.colors.primaryDark,
-                },
               ]}
               onPress={() => handleQuickDateChipPress(chip)}
               activeOpacity={0.85}
@@ -1438,6 +1525,10 @@ export default function MapScreen() {
           onLongPress={handleMapLongPress}
           onMapReady={() => setMapReady(true)}
           onLayout={() => setMapReady(true)}
+          customMapStyle={mapAppearance.customStyle}
+          userInterfaceStyle={
+            Platform.OS === 'ios' ? mapAppearance.userInterfaceStyle : undefined
+          }
         >
           {filteredEvents
             // Defensive: ensure marker has a valid location and isn't soft-deleted
@@ -1454,7 +1545,7 @@ export default function MapScreen() {
             })}
           {newEventLocation && (
             <Marker coordinate={newEventLocation}>
-              <CustomDotMarker color={theme.colors.primary} scale={1} />
+              {renderCustomDotMarker(theme.colors.fabBackground)}
             </Marker>
           )}
         </MapView>
@@ -1485,18 +1576,14 @@ export default function MapScreen() {
       {/* Left FABs */}
       <View style={styles.leftFabContainer}>
         <TouchableOpacity
-          style={[styles.listFab, { backgroundColor: theme.colors.primary }]}
+          style={styles.listFab}
           onPress={handleToggleListView}
           activeOpacity={0.8}
         >
-          <Ionicons
-            name='list'
-            size={28}
-            color={theme.colors.neutral100}
-          />
+          <Ionicons name='list' size={28} color={theme.colors.neutral100} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.compassFab, { backgroundColor: theme.colors.primary }]}
+          style={styles.compassFab}
           onPress={handleCenterOnUser}
           activeOpacity={0.8}
         >
@@ -1516,7 +1603,7 @@ export default function MapScreen() {
       <TouchableOpacity
         ref={createFabRef}
         onLayout={handleCreateFabLayout}
-        style={[styles.fab, { backgroundColor: theme.colors.primary }]}
+        style={styles.fab}
         onPress={() => {
           markInteraction();
           setShowCreateModal(true);
@@ -1603,232 +1690,253 @@ export default function MapScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1 },
-  tutorialOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
-  },
-  tutorialBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(10,14,21,0.45)',
-  },
-  tutorialHighlight: {
-    position: 'absolute',
-    borderColor: '#ffffff',
-    borderWidth: 2,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 16,
-  },
-  tutorialTooltip: {
-    position: 'absolute',
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#101824',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 12,
-  },
-  tutorialTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  tutorialDescription: {
-    color: '#e5edff',
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 14,
-  },
-  tutorialButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#3A7BFF',
-    paddingVertical: 8,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-  },
-  tutorialButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  map: { flex: 1 },
-  dot: {
-    height: 18,
-    width: 18,
-    borderRadius: 13,
-    borderWidth: 2,
-    borderColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dotLabel: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  fab: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 22,
-  },
-  fabIcon: { textAlign: 'center', textAlignVertical: 'center' },
-  leftFabContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 20,
-    flexDirection: 'row',
-    zIndex: 60,
-  },
-  listFab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  compassFab: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  searchBarUnified: {
-    position: 'absolute',
-    top: 70,
-    left: 10,
-    right: 10,
-    elevation: 9999,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    height: 44,
-    overflow: 'visible',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    zIndex: 10,
-  },
-  searchInputUnified: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    fontSize: 16,
-    height: 44,
-    paddingVertical: 0,
-  },
-  filterButtonUnified: {
-    backgroundColor: '#007AFF',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 15,
-    borderTopRightRadius: 15,
-    borderBottomRightRadius: 15,
-  },
-  filterButtonTextUnified: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  quickDateChipScroll: {
-    position: 'absolute',
-    top: 122,
-    left: 10,
-    right: 10,
-    zIndex: 9,
-  },
-  quickDateChipContainer: {
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  quickDateChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    marginRight: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  quickDateChipActive: {
-    backgroundColor: '#0A84FF',
-    borderColor: '#007AFF',
-  },
-  quickDateChipLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1F1F1F',
-  },
-  quickDateChipLabelActive: {
-    color: '#fff',
-  },
-  eventPopUpContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 100,
-  },
-  debugOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 9999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.25)',
-  },
-  debugCard: {
-    width: 300,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 8,
-  },
-  listViewOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 50,
-    backgroundColor: 'transparent',
-  },
-});
+const createStyles = (theme) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    tutorialOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 1000,
+    },
+    tutorialBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: theme.colors.overlay,
+    },
+    tutorialHighlight: {
+      position: 'absolute',
+      borderColor: theme.isDark
+        ? 'rgba(255,255,255,0.65)'
+        : 'rgba(37,99,235,0.35)',
+      borderWidth: 2,
+      backgroundColor: theme.isDark
+        ? 'rgba(148,163,184,0.25)'
+        : 'rgba(37,99,235,0.08)',
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.5 : 0.25,
+      shadowOffset: { width: 0, height: 6 },
+      shadowRadius: 16,
+    },
+    tutorialTooltip: {
+      position: 'absolute',
+      padding: 16,
+      borderRadius: 12,
+      backgroundColor: theme.colors.tooltipBackground,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: theme.isDark ? 0.55 : 0.25,
+      shadowRadius: 12,
+      elevation: 12,
+    },
+    tutorialTitle: {
+      color: theme.colors.tooltipText,
+      fontSize: 16,
+      fontWeight: '600',
+      marginBottom: 6,
+    },
+    tutorialDescription: {
+      color: theme.colors.tooltipText,
+      opacity: 0.9,
+      fontSize: 14,
+      lineHeight: 20,
+      marginBottom: 14,
+    },
+    tutorialButton: {
+      alignSelf: 'flex-start',
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 8,
+      paddingHorizontal: 18,
+      borderRadius: 20,
+    },
+    tutorialButtonText: {
+      color: theme.colors.chipTextActive,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    map: { flex: 1 },
+    dot: {
+      height: 18,
+      width: 18,
+      borderRadius: 13,
+      borderWidth: 2,
+      borderColor: theme.colors.card,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    dotLabel: {
+      color: theme.colors.chipTextActive,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    fab: {
+      position: 'absolute',
+      bottom: 20,
+      right: 20,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: theme.colors.fabBackground,
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 22,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: theme.isDark ? 0.45 : 0.15,
+      shadowRadius: theme.isDark ? 8 : 4,
+      elevation: 3,
+    },
+    fabIcon: { textAlign: 'center', textAlignVertical: 'center' },
+    leftFabContainer: {
+      position: 'absolute',
+      bottom: 20,
+      left: 20,
+      flexDirection: 'row',
+      zIndex: 60,
+    },
+    listFab: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: theme.colors.fabBackground,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 10,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: theme.isDark ? 0.45 : 0.15,
+      shadowRadius: theme.isDark ? 8 : 4,
+      elevation: 3,
+    },
+    compassFab: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: theme.colors.fabBackground,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: theme.isDark ? 0.45 : 0.15,
+      shadowRadius: theme.isDark ? 8 : 4,
+      elevation: 3,
+    },
+    searchBarUnified: {
+      position: 'absolute',
+      top: 70,
+      left: 10,
+      right: 10,
+      elevation: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.card,
+      borderRadius: 15,
+      height: 44,
+      overflow: 'visible',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: theme.isDark ? 0.5 : 0.12,
+      shadowRadius: theme.isDark ? 10 : 4,
+      zIndex: 10,
+    },
+    searchInputUnified: {
+      flex: 1,
+      backgroundColor: 'transparent',
+      fontSize: 16,
+      height: 44,
+      paddingVertical: 0,
+      color: theme.colors.text,
+    },
+    filterButtonUnified: {
+      backgroundColor: theme.colors.primary,
+      height: '100%',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 15,
+      borderTopRightRadius: 15,
+      borderBottomRightRadius: 15,
+    },
+    filterButtonTextUnified: {
+      color: theme.colors.chipTextActive,
+      fontWeight: '600',
+      fontSize: 15,
+    },
+    quickDateChipScroll: {
+      position: 'absolute',
+      top: 122,
+      left: 10,
+      right: 10,
+      zIndex: 9,
+    },
+    quickDateChipContainer: {
+      paddingVertical: 8,
+      alignItems: 'center',
+    },
+    quickDateChip: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 16,
+      backgroundColor: theme.colors.chipBackground,
+      marginRight: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: theme.isDark ? 0.35 : 0.15,
+      shadowRadius: 3,
+      elevation: 2,
+    },
+    quickDateChipActive: {
+      backgroundColor: theme.colors.chipBackgroundActive,
+      borderColor: theme.colors.primaryDark,
+    },
+    quickDateChipLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: theme.colors.chipText,
+    },
+    quickDateChipLabelActive: {
+      color: theme.colors.chipTextActive,
+    },
+    eventPopUpContainer: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 100,
+    },
+    debugOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 9999,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.overlay,
+    },
+    debugCard: {
+      width: 300,
+      padding: 16,
+      borderRadius: 12,
+      backgroundColor: theme.colors.surfaceElevated,
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.5 : 0.2,
+      shadowRadius: 6,
+      elevation: 8,
+    },
+    listViewOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 50,
+      backgroundColor: 'transparent',
+    },
+  });

@@ -21,6 +21,7 @@ import {
   RefreshControl,
   Platform,
   StatusBar,
+  Switch,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -64,6 +65,9 @@ import {
 } from '../utils/dateUtils';
 import { getBadgeConfig, DEFAULT_BADGE } from '../../profile/utils/badgeConfig';
 import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
+
+const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export default function ProfileScreen({ navigation }) {
   // Description: Get current user from Zustand userStore
@@ -71,6 +75,12 @@ export default function ProfileScreen({ navigation }) {
   const myEvents = useMyEvents(user?.uid || '');
   const now = new Date();
   const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
+  // Description: Get theme mode and toggle function from theme store
+  const themeMode = useThemeStore((state) => state.mode);
+  const toggleTheme = useThemeStore((state) => state.toggleMode);
+
   const tutorialStorageKey = useMemo(() => {
     return user?.uid ? `profile_tutorial_seen_${user.uid}` : null;
   }, [user?.uid]);
@@ -874,39 +884,70 @@ export default function ProfileScreen({ navigation }) {
     return { top, left, width: tooltipWidth };
   }, [menuHighlightLayout]);
 
-  const handleImageUpload = async () => {
+  const handleImageUpload = useCallback(async () => {
+    if (!user?.uid) {
+      Alert.alert(
+        'Sign in required',
+        'Please sign in again before updating your profile photo.'
+      );
+      return;
+    }
+
     try {
       const permissionResult =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
-        alert('Permission to access the photo library is required!');
+        Alert.alert(
+          'Permission needed',
+          'Photo library access is required to change your profile picture.'
+        );
         return;
       }
+
       const pickerResult = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 1,
       });
+
       if (pickerResult.canceled) {
-        alert('No image selected.');
         return;
       }
-      const imageUri = pickerResult.assets[0].uri;
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-      const newImage = await uploadProfileImage(user.uid, blob);
-      if (newImage) {
-        await updateUserData(user.uid, { profileImage: newImage });
-        setProfileImage(newImage);
-        alert('Profile image updated successfully!');
-      } else {
-        alert('Failed to upload image.');
+
+      const imageAsset = pickerResult.assets?.[0];
+      if (!imageAsset?.uri) {
+        Alert.alert('Selection failed', 'Could not read the selected image.');
+        return;
       }
-    } catch {
-      alert('Failed to update profile image. Please try again.');
+
+      const response = await fetch(imageAsset.uri);
+      const blob = await response.blob();
+
+      if (blob?.size && blob.size > MAX_PROFILE_IMAGE_BYTES) {
+        Alert.alert(
+          'Image too large',
+          'Profile photos must be smaller than 5MB.'
+        );
+        return;
+      }
+
+      const newImage = await uploadProfileImage(user.uid, blob);
+      await updateUserData(user.uid, { profileImage: newImage });
+      setProfileImage(newImage);
+      setUser({ ...user, profileImage: newImage });
+      Alert.alert('Profile updated', 'Your profile photo was changed.');
+    } catch (err) {
+      console.warn(
+        'Profile image upload failed:',
+        err?.code || err?.message || err
+      );
+      Alert.alert(
+        'Upload failed',
+        'Failed to update profile image. Please try again.'
+      );
     }
-  };
+  }, [user, setUser]);
 
   const handleSaveChanges = async () => {
     await updateUserData(user.uid, { bio });
@@ -1036,6 +1077,10 @@ export default function ProfileScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <StatusBar
+        barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.colors.background}
+      />
       {showProfileTutorial && (
         <View style={styles.tutorialOverlay} pointerEvents='auto'>
           <View style={styles.tutorialBackdrop} />
@@ -1079,21 +1124,40 @@ export default function ProfileScreen({ navigation }) {
           <Animated.View
             style={[
               styles.sidebarAnimated,
-              { transform: [{ translateX: sidebarAnim }] },
+              {
+                transform: [{ translateX: sidebarAnim }],
+                backgroundColor: theme.colors.card,
+              },
             ]}
             {...sidebarPan.current.panHandlers}
           >
             <SafeAreaView style={styles.sidebarSafeArea}>
               {/* HEADER */}
-              <View style={styles.sidebarHeader}>
+              <View
+                style={[
+                  styles.sidebarHeader,
+                  { borderBottomColor: theme.colors.border },
+                ]}
+              >
                 <TouchableOpacity
                   style={styles.sidebarHeaderBack}
                   onPress={closeSidebar}
                   accessibilityLabel='Close sidebar'
                 >
-                  <Ionicons name='arrow-back' size={26} color='#333' />
+                  <Ionicons
+                    name='arrow-back'
+                    size={26}
+                    color={theme.colors.text}
+                  />
                 </TouchableOpacity>
-                <Text style={styles.sidebarHeaderTitle}>Settings</Text>
+                <Text
+                  style={[
+                    styles.sidebarHeaderTitle,
+                    { color: theme.colors.text },
+                  ]}
+                >
+                  Settings
+                </Text>
               </View>
 
               {/* BODY */}
@@ -1108,15 +1172,55 @@ export default function ProfileScreen({ navigation }) {
                   ].map((option) => (
                     <TouchableOpacity
                       key={option}
-                      style={styles.sidebarOption}
+                      style={[
+                        styles.sidebarOption,
+                        {
+                          backgroundColor: theme.colors.backgroundSecondary,
+                          borderBottomColor: theme.colors.border,
+                        },
+                      ]}
                       onPress={() => {
                         closeSidebar();
                         setTimeout(() => handleMenuOptionClick(option), 200);
                       }}
                     >
-                      <Text style={styles.sidebarOptionText}>{option}</Text>
+                      <Text
+                        style={[
+                          styles.sidebarOptionText,
+                          { color: theme.colors.text },
+                        ]}
+                      >
+                        {option}
+                      </Text>
                     </TouchableOpacity>
                   ))}
+
+                  {/* Dark Mode Toggle */}
+                  <View
+                    style={[
+                      styles.sidebarOptionWithSwitch,
+                      {
+                        backgroundColor: theme.colors.backgroundSecondary,
+                        borderBottomColor: theme.colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.sidebarOptionText,
+                        { color: theme.colors.text },
+                      ]}
+                    >
+                      Dark Mode
+                    </Text>
+                    <Switch
+                      value={themeMode === 'dark'}
+                      onValueChange={toggleTheme}
+                      trackColor={{ false: '#CBD5E1', true: '#3B82F6' }}
+                      thumbColor={themeMode === 'dark' ? '#FFFFFF' : '#F1F5F9'}
+                      ios_backgroundColor='#CBD5E1'
+                    />
+                  </View>
 
                   {/* Moved analytics opt-in to Privacy and Info screen */}
                 </View>
@@ -1124,7 +1228,14 @@ export default function ProfileScreen({ navigation }) {
                 {/* Bottom Delete - moved to bottom */}
                 <View style={styles.sidebarBottomSection}>
                   <TouchableOpacity
-                    style={[styles.sidebarOption, styles.sidebarDeleteOption]}
+                    style={[
+                      styles.sidebarOption,
+                      styles.sidebarDeleteOption,
+                      {
+                        backgroundColor: theme.colors.backgroundSecondary,
+                        borderBottomColor: theme.colors.border,
+                      },
+                    ]}
                     onPress={() => {
                       closeSidebar();
                       setTimeout(
@@ -1463,360 +1574,410 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  sidebarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    position: 'relative',
-  },
+// Description: Create theme-aware styles for ProfileScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    sidebarHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+      paddingBottom: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+      position: 'relative',
+    },
 
-  sidebarHeaderBack: {
-    position: 'absolute',
-    left: 0, // Move arrow closer to the left edge
-    top: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
-    zIndex: 1,
-  },
+    sidebarHeaderBack: {
+      position: 'absolute',
+      left: 0,
+      top: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+      zIndex: 1,
+    },
 
-  sidebarHeaderTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111',
-  },
-  sidebarContentWrapper: {
-    flex: 1,
-    justifyContent: 'space-between',
-    paddingTop: 10, // ensures buttons don't overlap the back icon
-  },
+    sidebarHeaderTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    sidebarContentWrapper: {
+      flex: 1,
+      justifyContent: 'space-between',
+      paddingTop: 10,
+    },
 
-  sidebarTopSection: {
-    gap: 8,
-  },
+    sidebarTopSection: {
+      gap: 8,
+    },
 
-  sidebarDeleteOption: {
-    backgroundColor: '#fff0f0',
-    borderColor: '#ffd6d6',
-    borderWidth: 1,
-    borderRadius: 10,
-  },
+    sidebarDeleteOption: {
+      backgroundColor: theme.isDark ? 'rgba(239,68,68,0.15)' : '#fff0f0',
+      borderColor: theme.isDark ? 'rgba(239,68,68,0.3)' : '#ffd6d6',
+      borderWidth: 1,
+      borderRadius: 10,
+    },
 
-  sidebarDeleteText: {
-    color: '#d11a2a',
-    fontWeight: '600',
-  },
-  sidebarAbsoluteOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 999,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    justifyContent: 'flex-end',
-    alignItems: 'flex-end',
-  },
-  sidebarBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  sidebarAnimated: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    width: '90%',
-    maxWidth: 300,
-    height: '100%',
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderBottomLeftRadius: 24,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 30 : 60,
-    paddingHorizontal: 16,
-    paddingBottom: 40,
-    shadowColor: '#000',
-    shadowOffset: { width: -4, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    elevation: 12,
-    zIndex: 1000,
-  },
-  safe: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, // Add padding for Android
-  },
-  tutorialOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
-  },
-  tutorialBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  tutorialHighlight: {
-    position: 'absolute',
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: '#ffffff',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  tutorialTooltip: {
-    position: 'absolute',
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#101824',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  tutorialTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  tutorialDescription: {
-    color: '#e5edff',
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 14,
-  },
-  tutorialButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#3A7BFF',
-    paddingVertical: 8,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-  },
-  tutorialButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  scrollContent: { paddingBottom: 20 },
-  profileHeader: {
-    paddingBottom: 60,
-    borderBottomRightRadius: 20,
-    borderBottomLeftRadius: 20,
-  },
-  navBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 10,
-  },
-  navTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  avatarWrapper: {
-    alignSelf: 'center',
-    marginTop: 10,
-    borderWidth: 3,
-    borderColor: '#fff',
-    borderRadius: 15,
-    padding: 3,
-    backgroundColor: '#fff',
-  },
-  profileImage: { width: 120, height: 120, borderRadius: 15 },
-  verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
-  verifiedBadgeAdjusted: {
-    position: 'absolute',
-    bottom: 0,
-    right: -10,
-  },
-  name: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 6,
-  },
-  stat: { color: '#fff', fontSize: 15, textAlign: 'center', marginTop: 4 },
-  since: { color: '#fff', fontSize: 13, textAlign: 'center', marginTop: 2 },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: -50,
-    paddingHorizontal: 10,
-  },
-  statCard: {
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    alignItems: 'center',
-    elevation: 3,
-  },
-  statValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  statLabel: { fontSize: 13, color: '#777', marginTop: 2 },
-  badgeImage: {
-    width: 50,
-    height: 50,
-  },
-  bioContainer: {
-    backgroundColor: '#fff',
-    marginTop: 16,
-    marginHorizontal: 16,
-    padding: 12,
-    borderRadius: 10,
-    elevation: 1,
-  },
-  bioText: { fontSize: 15, color: '#333' },
-  bioEditing: { borderColor: '#ddd', borderWidth: 1, borderRadius: 8 },
-  showMoreText: { color: '#007AFF', fontSize: 14, marginTop: 4 },
-  buttonRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 16 },
-  editButton: {
-    flexDirection: 'row',
-    backgroundColor: '#007AFF',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    alignItems: 'center',
-    gap: 6,
-  },
-  editButtonText: { color: '#fff', fontWeight: 'bold' },
-  saveButton: {
-    flexDirection: 'row',
-    backgroundColor: '#28a745',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    alignItems: 'center',
-    gap: 6,
-  },
-  saveButtonText: { color: '#fff', fontWeight: 'bold' },
-  timelineHeader: { marginTop: 20, marginHorizontal: 16 },
-  tabsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 16,
-    alignItems: 'center',
-  },
-  tabButtonActive: {
-    backgroundColor: '#007AFF',
-  },
-  tabButtonText: {
-    color: '#333',
-    fontWeight: '600',
-  },
-  tabButtonTextActive: {
-    color: '#fff',
-  },
-  timelineTitle: { fontSize: 18, fontWeight: 'bold', color: '#222' },
-  eventCard: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 12,
-    padding: 12,
-    elevation: 2,
-    position: 'relative',
-  },
-  eventImage: { width: 70, height: 70, borderRadius: 10, marginRight: 10 },
-  eventInfo: { flex: 1 },
-  eventTitle: { fontSize: 16, fontWeight: '600', marginBottom: 6 },
-  pillRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
-  pill: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-  },
-  pillText: { fontSize: 12, color: '#555' },
-  eventLocation: { fontSize: 13, color: '#007AFF', marginTop: 2 },
-  ellipsisButtonAbsolute: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 10,
-    padding: 5,
-  },
-  ellipsisText: {
-    fontSize: 20,
-    color: '#888',
-    fontWeight: 'bold',
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-  },
-  modalOption: {
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  modalOptionText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  sidebarOverlay: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  sidebarSafeArea: {
-    flex: 1,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 40 : 80,
-  },
-  sidebarContentRight: {
-    flex: 1,
-  },
-  sidebarCloseButton: {
-    position: 'absolute',
-    top: Platform.OS === 'android' ? StatusBar.currentHeight + 12 : 20,
-    left: 0,
-    padding: 0,
-    zIndex: 10,
-  },
-  sidebarOption: {
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    borderRadius: 8,
-    marginBottom: 8,
-    backgroundColor: '#f9f9f9',
-  },
+    sidebarDeleteText: {
+      color: theme.isDark ? '#F87171' : '#d11a2a',
+      fontWeight: '600',
+    },
+    sidebarAbsoluteOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 999,
+      backgroundColor: theme.colors.overlay,
+      justifyContent: 'flex-end',
+      alignItems: 'flex-end',
+    },
+    sidebarBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: theme.colors.overlay,
+    },
+    sidebarAnimated: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      width: '90%',
+      maxWidth: 300,
+      height: '100%',
+      backgroundColor: theme.colors.card,
+      borderTopLeftRadius: 24,
+      borderBottomLeftRadius: 24,
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 30 : 60,
+      paddingHorizontal: 16,
+      paddingBottom: 40,
+      shadowColor: '#000',
+      shadowOffset: { width: -4, height: 0 },
+      shadowOpacity: theme.isDark ? 0.5 : 0.15,
+      shadowRadius: 20,
+      elevation: 12,
+      zIndex: 1000,
+    },
+    safe: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    },
+    tutorialOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 1000,
+    },
+    tutorialBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+    },
+    tutorialHighlight: {
+      position: 'absolute',
+      borderRadius: 24,
+      borderWidth: 2,
+      borderColor: '#ffffff',
+      backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    tutorialTooltip: {
+      position: 'absolute',
+      padding: 16,
+      borderRadius: 12,
+      backgroundColor: '#101824',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.25,
+      shadowRadius: 12,
+      elevation: 10,
+    },
+    tutorialTitle: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+      marginBottom: 6,
+    },
+    tutorialDescription: {
+      color: '#e5edff',
+      fontSize: 14,
+      lineHeight: 20,
+      marginBottom: 14,
+    },
+    tutorialButton: {
+      alignSelf: 'flex-start',
+      backgroundColor: '#3A7BFF',
+      paddingVertical: 8,
+      paddingHorizontal: 18,
+      borderRadius: 20,
+    },
+    tutorialButtonText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    scrollContent: { paddingBottom: 20 },
+    profileHeader: {
+      paddingBottom: 60,
+      borderBottomRightRadius: 20,
+      borderBottomLeftRadius: 20,
+    },
+    navBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginHorizontal: 16,
+      marginTop: 10,
+    },
+    navTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+    avatarWrapper: {
+      alignSelf: 'center',
+      marginTop: 10,
+      borderWidth: 3,
+      borderColor: '#fff',
+      borderRadius: 15,
+      padding: 3,
+      backgroundColor: '#fff',
+    },
+    profileImage: { width: 120, height: 120, borderRadius: 15 },
+    verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
+    verifiedBadgeAdjusted: {
+      position: 'absolute',
+      bottom: 0,
+      right: -10,
+    },
+    name: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: '#fff',
+      textAlign: 'center',
+      marginTop: 6,
+    },
+    stat: { color: '#fff', fontSize: 15, textAlign: 'center', marginTop: 4 },
+    since: { color: '#fff', fontSize: 13, textAlign: 'center', marginTop: 2 },
+    statsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      marginTop: -50,
+      paddingHorizontal: 10,
+    },
+    statCard: {
+      backgroundColor: theme.colors.card,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      borderRadius: 12,
+      alignItems: 'center',
+      elevation: 3,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.1,
+      shadowRadius: 4,
+    },
+    statValue: { fontSize: 18, fontWeight: 'bold', color: theme.colors.text },
+    statLabel: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    badgeImage: {
+      width: 50,
+      height: 50,
+    },
+    bioContainer: {
+      backgroundColor: theme.colors.card,
+      marginTop: 16,
+      marginHorizontal: 16,
+      padding: 12,
+      borderRadius: 10,
+      elevation: 1,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.05,
+      shadowRadius: 4,
+    },
+    bioText: { fontSize: 15, color: theme.colors.text },
+    bioEditing: {
+      borderColor: theme.colors.border,
+      borderWidth: 1,
+      borderRadius: 8,
+    },
+    showMoreText: { color: theme.colors.primary, fontSize: 14, marginTop: 4 },
+    buttonRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      marginTop: 16,
+    },
+    editButton: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      borderRadius: 25,
+      alignItems: 'center',
+      gap: 6,
+    },
+    editButtonText: { color: '#fff', fontWeight: 'bold' },
+    saveButton: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.success,
+      paddingVertical: 10,
+      paddingHorizontal: 20,
+      borderRadius: 25,
+      alignItems: 'center',
+      gap: 6,
+    },
+    saveButtonText: { color: '#fff', fontWeight: 'bold' },
+    timelineHeader: { marginTop: 20, marginHorizontal: 16 },
+    tabsRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 8,
+    },
+    tabButton: {
+      flex: 1,
+      paddingVertical: 8,
+      backgroundColor: theme.colors.backgroundSecondary,
+      borderRadius: 16,
+      alignItems: 'center',
+    },
+    tabButtonActive: {
+      backgroundColor: theme.colors.primary,
+    },
+    tabButtonText: {
+      color: theme.colors.text,
+      fontWeight: '600',
+    },
+    tabButtonTextActive: {
+      color: '#fff',
+    },
+    timelineTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    eventCard: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.card,
+      marginHorizontal: 16,
+      marginTop: 12,
+      borderRadius: 12,
+      padding: 12,
+      elevation: 2,
+      position: 'relative',
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.05,
+      shadowRadius: 4,
+    },
+    eventImage: {
+      width: 70,
+      height: 70,
+      borderRadius: 10,
+      marginRight: 10,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    eventInfo: { flex: 1 },
+    eventTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      marginBottom: 6,
+      color: theme.colors.text,
+    },
+    pillRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+    pill: {
+      backgroundColor: theme.colors.backgroundSecondary,
+      paddingVertical: 3,
+      paddingHorizontal: 8,
+      borderRadius: 12,
+    },
+    pillText: { fontSize: 12, color: theme.colors.textSecondary },
+    eventLocation: { fontSize: 13, color: theme.colors.primary, marginTop: 2 },
+    ellipsisButtonAbsolute: {
+      position: 'absolute',
+      top: 8,
+      right: 8,
+      zIndex: 10,
+      padding: 5,
+    },
+    ellipsisText: {
+      fontSize: 20,
+      color: theme.colors.textSecondary,
+      fontWeight: 'bold',
+    },
+    modalOverlay: {
+      flex: 1,
+      justifyContent: 'flex-end',
+      backgroundColor: theme.colors.overlay,
+    },
+    modalContent: {
+      backgroundColor: theme.colors.card,
+      padding: 20,
+      borderTopLeftRadius: 10,
+      borderTopRightRadius: 10,
+    },
+    modalOption: {
+      paddingVertical: 15,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    modalOptionText: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    sidebarOverlay: {
+      flex: 1,
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      backgroundColor: theme.colors.overlay,
+    },
+    sidebarSafeArea: {
+      flex: 1,
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 40 : 80,
+    },
+    sidebarContentRight: {
+      flex: 1,
+    },
+    sidebarCloseButton: {
+      position: 'absolute',
+      top: Platform.OS === 'android' ? StatusBar.currentHeight + 12 : 20,
+      left: 0,
+      padding: 0,
+      zIndex: 10,
+    },
+    sidebarOption: {
+      paddingVertical: 16,
+      paddingHorizontal: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+      borderRadius: 8,
+      marginBottom: 8,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    sidebarOptionWithSwitch: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 16,
+      paddingHorizontal: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+      borderRadius: 8,
+      marginBottom: 8,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
 
-  sidebarOptionText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#333',
-  },
-  imageOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 15,
-  },
-  overlayText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-});
+    sidebarOptionText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: theme.colors.text,
+    },
+    imageOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      borderRadius: 15,
+    },
+    overlayText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: 'bold',
+    },
+  });

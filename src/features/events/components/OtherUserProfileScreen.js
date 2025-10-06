@@ -48,6 +48,8 @@ import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import PopupMenu from './PopupMenu';
 import PostCard from './PostCard';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 import InterestPostCard from '../../interestPosts/components/InterestPostCard';
 import { fetchInterestPostsByCreator } from '../../interestPosts/services/interestPostService';
 import { trackReportContent } from '../../../lib/analytics';
@@ -79,6 +81,9 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const setUserStore = useUserStore((state) => state.setUser);
   const fetchCurrentUser = useUserStore((state) => state.fetchUser);
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followerCountView, setFollowerCountView] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -966,222 +971,252 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, // Add padding for Android
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scrollContent: { paddingBottom: 20 },
-  profileHeader: {
-    paddingBottom: 40,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-  },
-  navBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 10,
-  },
-  avatarWrapper: {
-    alignSelf: 'center',
-    marginTop: 10,
-    borderWidth: 3,
-    borderColor: '#fff',
-    borderRadius: 15,
-    padding: 3,
-    backgroundColor: '#fff',
-  },
-  profileImage: { width: 120, height: 120, borderRadius: 15 },
-  verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
-  name: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginTop: 6,
-  },
-  stat: { color: '#fff', fontSize: 15, textAlign: 'center', marginTop: 4 },
-  since: { color: '#fff', fontSize: 13, textAlign: 'center', marginTop: 2 },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: -30,
-    paddingHorizontal: 10,
-  },
-  statCard: {
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    alignItems: 'center',
-    elevation: 3,
-  },
-  statValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  statLabel: { fontSize: 13, color: '#777', marginTop: 4 },
-  buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 12,
-  },
-  followButton: {
-    flex: 1,
-    marginHorizontal: 5,
-    paddingVertical: 10,
-    borderRadius: 25,
-    alignItems: 'center',
-  },
-  followButtonText: { fontWeight: 'bold', fontSize: 16 },
-  bioContainer: {
-    backgroundColor: '#fff',
-    marginTop: 16,
-    marginHorizontal: 16,
-    padding: 12,
-    borderRadius: 10,
-    elevation: 1,
-  },
-  bioText: { fontSize: 15, color: '#333' },
-  timelineHeader: { marginTop: 20, marginHorizontal: 16 },
-  timelineTitle: { fontSize: 18, fontWeight: 'bold', color: '#222' },
-  eventCard: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderRadius: 12,
-    padding: 12,
-    elevation: 2,
-    position: 'relative',
-  },
-  eventImage: { width: 70, height: 70, borderRadius: 10, marginRight: 10 },
-  eventInfo: { flex: 1 },
-  eventTitle: { fontSize: 16, fontWeight: '600', marginBottom: 6 },
-  pillRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
-  pill: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-  },
-  pillText: { fontSize: 12, color: '#555' },
-  eventLocation: { fontSize: 13, color: '#007AFF', marginTop: 2 },
-  shareButton: {
-    marginTop: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-  },
-  shareButtonText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
-  blockedContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  blockedTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  blockedText: {
-    fontSize: 15,
-    color: '#4B5563',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  blockActionButton: {
-    backgroundColor: '#EF4444',
-    paddingVertical: 12,
-    paddingHorizontal: 28,
-    borderRadius: 24,
-  },
-  blockActionDisabled: {
-    opacity: 0.6,
-  },
-  blockActionText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  blockAltButton: {
-    backgroundColor: '#E5E7EB',
-  },
-  blockAltButtonText: {
-    color: '#111827',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ratingModal: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '80%',
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 16,
-    color: '#333',
-  },
-  starRow: {
-    flexDirection: 'row',
-    marginBottom: 10,
-  },
-  star: {
-    fontSize: 36,
-    marginHorizontal: 4,
-  },
-  selectedRatingText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginTop: 12,
-  },
-  cancelButton: {
-    flex: 1,
-    padding: 12,
-    marginRight: 8,
-    borderRadius: 8,
-    backgroundColor: '#eee',
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#333',
-    fontWeight: '500',
-  },
-  submitButton: {
-    flex: 1,
-    padding: 12,
-    marginLeft: 8,
-    borderRadius: 8,
-    backgroundColor: '#007AFF',
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-});
+// Description: Create theme-aware styles for OtherUserProfileScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    scrollContent: { paddingBottom: 20 },
+    profileHeader: {
+      paddingBottom: 40,
+      borderBottomLeftRadius: 20,
+      borderBottomRightRadius: 20,
+    },
+    navBar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginHorizontal: 16,
+      marginTop: 10,
+    },
+    avatarWrapper: {
+      alignSelf: 'center',
+      marginTop: 10,
+      borderWidth: 3,
+      borderColor: '#fff',
+      borderRadius: 15,
+      padding: 3,
+      backgroundColor: '#fff',
+    },
+    profileImage: { width: 120, height: 120, borderRadius: 15 },
+    verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
+    name: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: '#fff',
+      textAlign: 'center',
+      marginTop: 6,
+    },
+    stat: { color: '#fff', fontSize: 15, textAlign: 'center', marginTop: 4 },
+    since: { color: '#fff', fontSize: 13, textAlign: 'center', marginTop: 2 },
+    statsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      marginTop: -30,
+      paddingHorizontal: 10,
+    },
+    statCard: {
+      backgroundColor: theme.colors.card,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      borderRadius: 12,
+      alignItems: 'center',
+      elevation: 3,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.1,
+      shadowRadius: 4,
+    },
+    statValue: { fontSize: 18, fontWeight: 'bold', color: theme.colors.text },
+    statLabel: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      marginTop: 12,
+    },
+    followButton: {
+      flex: 1,
+      marginHorizontal: 5,
+      paddingVertical: 10,
+      borderRadius: 25,
+      alignItems: 'center',
+    },
+    followButtonText: { fontWeight: 'bold', fontSize: 16 },
+    bioContainer: {
+      backgroundColor: theme.colors.card,
+      marginTop: 16,
+      marginHorizontal: 16,
+      padding: 12,
+      borderRadius: 10,
+      elevation: 1,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.05,
+      shadowRadius: 4,
+    },
+    bioText: { fontSize: 15, color: theme.colors.text },
+    timelineHeader: { marginTop: 20, marginHorizontal: 16 },
+    timelineTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    eventCard: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.card,
+      marginHorizontal: 16,
+      marginTop: 12,
+      borderRadius: 12,
+      padding: 12,
+      elevation: 2,
+      position: 'relative',
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.05,
+      shadowRadius: 4,
+    },
+    eventImage: {
+      width: 70,
+      height: 70,
+      borderRadius: 10,
+      marginRight: 10,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    eventInfo: { flex: 1 },
+    eventTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      marginBottom: 6,
+      color: theme.colors.text,
+    },
+    pillRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+    pill: {
+      backgroundColor: theme.colors.backgroundSecondary,
+      paddingVertical: 3,
+      paddingHorizontal: 8,
+      borderRadius: 12,
+    },
+    pillText: { fontSize: 12, color: theme.colors.textSecondary },
+    eventLocation: { fontSize: 13, color: theme.colors.primary, marginTop: 2 },
+    shareButton: {
+      marginTop: 6,
+      alignSelf: 'flex-start',
+      backgroundColor: theme.colors.primary,
+      borderRadius: 8,
+      paddingVertical: 5,
+      paddingHorizontal: 12,
+    },
+    shareButtonText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+    blockedContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 32,
+    },
+    blockedTitle: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.text,
+      textAlign: 'center',
+      marginBottom: 12,
+    },
+    blockedText: {
+      fontSize: 15,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginBottom: 20,
+    },
+    blockActionButton: {
+      backgroundColor: theme.colors.danger,
+      paddingVertical: 12,
+      paddingHorizontal: 28,
+      borderRadius: 24,
+    },
+    blockActionDisabled: {
+      opacity: 0.6,
+    },
+    blockActionText: {
+      color: '#fff',
+      fontWeight: '600',
+      fontSize: 16,
+    },
+    blockAltButton: {
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    blockAltButtonText: {
+      color: theme.colors.text,
+      fontWeight: '600',
+      fontSize: 16,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: theme.colors.overlay,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    ratingModal: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 16,
+      padding: 24,
+      width: '80%',
+      alignItems: 'center',
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      marginBottom: 16,
+      color: theme.colors.text,
+    },
+    starRow: {
+      flexDirection: 'row',
+      marginBottom: 10,
+    },
+    star: {
+      fontSize: 36,
+      marginHorizontal: 4,
+    },
+    selectedRatingText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 16,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      width: '100%',
+      marginTop: 12,
+    },
+    cancelButton: {
+      flex: 1,
+      padding: 12,
+      marginRight: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.backgroundSecondary,
+      alignItems: 'center',
+    },
+    cancelButtonText: {
+      color: theme.colors.text,
+      fontWeight: '500',
+    },
+    submitButton: {
+      flex: 1,
+      padding: 12,
+      marginLeft: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.primary,
+      alignItems: 'center',
+    },
+    submitButtonText: {
+      color: '#fff',
+      fontWeight: '600',
+    },
+  });

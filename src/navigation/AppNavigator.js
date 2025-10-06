@@ -6,6 +6,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { Radar } from 'lucide-react-native';
+import { useTheme } from '../theme';
+import { useThemeStore } from '../store/themeStore';
 
 // Import screens
 import {
@@ -25,7 +27,10 @@ import {
 } from '../features/events';
 import { EventChatScreen } from '../features/chat';
 import { InterestPostScreen } from '../features/interestPosts';
-import { NotificationScreen, useNotificationStore } from '../features/notifications';
+import {
+  NotificationScreen,
+  useNotificationStore,
+} from '../features/notifications';
 import {
   ManageInterestsScreen,
   PrivacyInfoScreen,
@@ -99,10 +104,21 @@ function ProfileStackScreen() {
 const Tab = createBottomTabNavigator();
 function MainTabs() {
   const hasUnreadNotifications = useNotificationStore((s) => s.hasUnread);
+  const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
+
   return (
     <Tab.Navigator
       initialRouteName='Map'
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: theme.colors.card,
+          borderTopColor: theme.colors.border,
+        },
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.textSecondary,
+      }}
     >
       <Tab.Screen
         name='Map'
@@ -149,7 +165,9 @@ function MainTabs() {
                 color={color}
                 size={size}
               />
-              {hasUnreadNotifications && <View style={styles.notificationDot} />}
+              {hasUnreadNotifications && (
+                <View style={styles.notificationDot} />
+              )}
             </View>
           ),
         }}
@@ -167,10 +185,20 @@ function MainTabs() {
 // Business Tabs (separate root)
 const BizTab = createBottomTabNavigator();
 function BusinessTabs() {
+  const theme = useTheme();
+
   return (
     <BizTab.Navigator
       initialRouteName='BizMap'
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: theme.colors.card,
+          borderTopColor: theme.colors.border,
+        },
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.textSecondary,
+      }}
     >
       <BizTab.Screen
         name='BizMap'
