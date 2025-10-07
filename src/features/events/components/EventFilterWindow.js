@@ -429,7 +429,11 @@ const EventFilterWindow = ({
                 fontWeight: 'bold',
               }}
             >
-              {currentUserGender === 'male' ? 'Male Only' : 'Women Only'}
+              {currentUserGender === 'male'
+                ? 'Male Only'
+                : currentUserGender === 'female'
+                ? 'Women Only'
+                : 'Non-Binary Only'}
             </Text>
           </TouchableOpacity>
 

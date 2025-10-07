@@ -746,21 +746,21 @@ export default function OtherUserProfileScreen({ route, navigation }) {
             </Text>
             <Text style={styles.statLabel}>Events</Text>
           </View>
-          <View style={styles.statCard}>
-            <View
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-            >
-              <MaterialIcons name='star' size={20} color='#FFD700' />
-              <Text style={styles.statValue}>
-                {rating > 0 ? rating.toFixed(1) : '—'}
+          {rating > 0 && (
+            <View style={styles.statCard}>
+              <View
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+              >
+                <MaterialIcons name='star' size={20} color='#FFD700' />
+                <Text style={styles.statValue}>
+                  {rating.toFixed(1)}
+                </Text>
+              </View>
+              <Text style={styles.statLabel}>
+                {`${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
               </Text>
             </View>
-            <Text style={styles.statLabel}>
-              {ratingCount === 0
-                ? 'Not Rated'
-                : `${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
-            </Text>
-          </View>
+          )}
         </View>
 
         {/* Follow/Unfollow and Rate User Buttons */}

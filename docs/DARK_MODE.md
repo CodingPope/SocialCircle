@@ -10,6 +10,7 @@ Users can toggle dark mode from:
 **Profile → Menu (☰) → Dark Mode Switch**
 
 The preference:
+
 - ✅ Saves locally (AsyncStorage)
 - ✅ Persists across app restarts
 - ✅ Applies instantly app-wide
@@ -20,6 +21,7 @@ The preference:
 ## 🎨 Color System
 
 ### Light Mode
+
 - **Background:** `#FFFFFF`
 - **Card:** `#FFFFFF`
 - **Text:** `#111827`
@@ -27,6 +29,7 @@ The preference:
 - **Border:** `#E2E8F0`
 
 ### Dark Mode
+
 - **Background:** `#0F172A` (dark slate)
 - **Card:** `#1E293B` (darker slate)
 - **Text:** `#F1F5F9` (light)
@@ -34,6 +37,7 @@ The preference:
 - **Border:** `#334155` (muted)
 
 ### Semantic Colors (Consistent in both modes)
+
 - **Primary:** `#3B82F6` (blue)
 - **Success:** `#10B981` (green)
 - **Warning:** `#F59E0B` (amber)
@@ -57,12 +61,12 @@ export default function MyScreen() {
   return (
     <ThemedScreen scrollable>
       <ThemedView style={{ padding: 16 }}>
-        <ThemedText variant="h1">Hello World</ThemedText>
-        <ThemedText variant="body">This text automatically adapts!</ThemedText>
+        <ThemedText variant='h1'>Hello World</ThemedText>
+        <ThemedText variant='body'>This text automatically adapts!</ThemedText>
 
         <ThemedCard>
-          <ThemedText variant="h3">Card Title</ThemedText>
-          <ThemedText variant="caption">Card description</ThemedText>
+          <ThemedText variant='h3'>Card Title</ThemedText>
+          <ThemedText variant='caption'>Card description</ThemedText>
         </ThemedCard>
       </ThemedView>
     </ThemedScreen>
@@ -77,9 +81,11 @@ That's it! No manual theme handling needed. ✨
 ## 📦 Available Themed Components
 
 ### `<ThemedScreen>`
+
 Complete screen wrapper with SafeAreaView, StatusBar, and optional ScrollView.
 
 **Props:**
+
 - `scrollable` (boolean) - Wraps content in ScrollView
 - `contentContainerStyle` (object) - Style for scroll content
 - `style` (object) - Additional styles
@@ -91,15 +97,15 @@ Complete screen wrapper with SafeAreaView, StatusBar, and optional ScrollView.
 ```
 
 ### `<ThemedView>`
+
 Basic View with theme background.
 
 ```javascript
-<ThemedView style={{ padding: 20 }}>
-  {/* Content */}
-</ThemedView>
+<ThemedView style={{ padding: 20 }}>{/* Content */}</ThemedView>
 ```
 
 ### `<ThemedCard>`
+
 Card component with proper background, borders, and padding.
 
 ```javascript
@@ -109,9 +115,11 @@ Card component with proper background, borders, and padding.
 ```
 
 ### `<ThemedText>`
+
 Text with automatic color and typography variants.
 
 **Variants:**
+
 - `h1` - Large heading
 - `h2` - Medium heading
 - `h3` - Small heading
@@ -126,6 +134,7 @@ Text with automatic color and typography variants.
 ```
 
 ### `<ThemedScrollView>` & `<ThemedSafeAreaView>`
+
 Drop-in replacements with theme colors applied.
 
 ---
@@ -150,7 +159,7 @@ export default function MyComponent() {
 
   return (
     <View style={{ backgroundColor: theme.colors.background }}>
-      <StatusBar 
+      <StatusBar
         barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={theme.colors.background}
       />
@@ -163,6 +172,7 @@ export default function MyComponent() {
 ### 3. Available Theme Properties
 
 #### `theme.colors.*`
+
 - **UI Colors:** `background`, `backgroundSecondary`, `card`, `border`, `overlay`
 - **Text:** `text`, `textSecondary`
 - **Brand:** `primary`, `primaryDark`, `primaryLight`, `secondary`, `secondaryLight`
@@ -170,6 +180,7 @@ export default function MyComponent() {
 - **Neutrals:** `neutral100` through `neutral900` (auto-invert in dark mode)
 
 #### Other Properties
+
 - `theme.isDark` - Boolean (true if dark mode active)
 - `theme.spacing` - `{ xs, sm, md, lg, xl }` spacing values
 - `theme.radii` - `{ sm, md, lg, xl, pill }` border radius values
@@ -186,29 +197,30 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../../../theme';
 
-const createStyles = (theme) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-    padding: theme.spacing.md,
-  },
-  card: {
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radii.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    padding: theme.spacing.md,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: theme.colors.text,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-  },
-});
+const createStyles = (theme) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      padding: theme.spacing.md,
+    },
+    card: {
+      backgroundColor: theme.colors.card,
+      borderRadius: theme.radii.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.md,
+    },
+    title: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: theme.colors.text,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+  });
 
 export default function MyComponent() {
   const theme = useTheme();
@@ -235,6 +247,7 @@ Prevents recreating the styles object on every render, improving performance.
 The map automatically switches to night mode when dark theme is active.
 
 **Custom dark map style includes:**
+
 - Dark background: `#1e293b`
 - Dark roads: `#334155`
 - Dark water: `#0f172a`
@@ -242,13 +255,14 @@ The map automatically switches to night mode when dark theme is active.
 - Muted labels: `#94a3b8`
 
 **Implementation:**
+
 ```javascript
 import { darkMapStyle } from '../config/mapStyles';
 
 <MapView
   customMapStyle={themeMode === 'dark' ? darkMapStyle : null}
   // ...other props
-/>
+/>;
 ```
 
 Defined in: `src/config/mapStyles.js`
@@ -260,6 +274,7 @@ Defined in: `src/config/mapStyles.js`
 These components have complete dark mode support:
 
 ### Core Screens
+
 - ✅ **MapScreen** - Map + night mode styling
 - ✅ **DiscoveryScreen** - Feed and filters
 - ✅ **ProfileScreen** - Profile + dark mode toggle
@@ -268,6 +283,7 @@ These components have complete dark mode support:
 - ✅ **MyCircle** - Activity feed
 
 ### UI Components
+
 - ✅ **PostCard** - Event cards
 - ✅ **EventPopUpCard** - Event bottom sheet
 - ✅ **UpcomingEventCard** - Event carousel
@@ -275,6 +291,7 @@ These components have complete dark mode support:
 - ✅ **AppNavigator** - Tab bars
 
 ### Navigation
+
 - ✅ Tab bars (Main + Business)
 - ✅ Headers
 - ✅ StatusBar handling
@@ -286,12 +303,14 @@ These components have complete dark mode support:
 Use this when adding dark mode to a new screen:
 
 ### Step 1: Import Theme
+
 ```javascript
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 ```
 
 ### Step 2: Add Hooks
+
 ```javascript
 const theme = useTheme();
 const themeMode = useThemeStore((state) => state.mode);
@@ -299,6 +318,7 @@ const styles = useMemo(() => createStyles(theme), [theme]);
 ```
 
 ### Step 3: Add StatusBar
+
 ```javascript
 <StatusBar
   barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'}
@@ -307,18 +327,20 @@ const styles = useMemo(() => createStyles(theme), [theme]);
 ```
 
 ### Step 4: Convert Styles
+
 Create a `createStyles(theme)` function and replace:
 
-| Old (Hardcoded) | New (Theme-Aware) |
-|-----------------|-------------------|
-| `#FFFFFF` | `theme.colors.background` or `theme.colors.card` |
-| `#000000` | `theme.colors.text` |
-| `#F8F9FA` | `theme.colors.backgroundSecondary` |
-| `#333`, `#111` | `theme.colors.text` |
-| `#666`, `#777` | `theme.colors.textSecondary` |
-| `#E0E0E0`, `#CCC` | `theme.colors.border` |
+| Old (Hardcoded)   | New (Theme-Aware)                                |
+| ----------------- | ------------------------------------------------ |
+| `#FFFFFF`         | `theme.colors.background` or `theme.colors.card` |
+| `#000000`         | `theme.colors.text`                              |
+| `#F8F9FA`         | `theme.colors.backgroundSecondary`               |
+| `#333`, `#111`    | `theme.colors.text`                              |
+| `#666`, `#777`    | `theme.colors.textSecondary`                     |
+| `#E0E0E0`, `#CCC` | `theme.colors.border`                            |
 
 ### Step 5: Test Both Modes
+
 - [ ] Open screen in light mode - looks good?
 - [ ] Toggle to dark mode - looks good?
 - [ ] No harsh white flashes?
@@ -331,6 +353,7 @@ Create a `createStyles(theme)` function and replace:
 ## 🧪 Testing Dark Mode
 
 ### Manual Testing
+
 1. Open app in light mode
 2. Go to **Profile → Menu → Dark Mode**
 3. Toggle the switch
@@ -342,6 +365,7 @@ Create a `createStyles(theme)` function and replace:
    - Profile
 
 ### Edge Cases to Check
+
 - [ ] Loading states
 - [ ] Empty states
 - [ ] Error messages
@@ -382,6 +406,7 @@ src/
 ## 🎯 Current Status
 
 ### ✅ Complete (100%)
+
 - Core user flows
 - Main screens (Map, Discovery, Profile, Chat)
 - Navigation & tab bars
@@ -389,6 +414,7 @@ src/
 - Map night mode
 
 ### ⚠️ Remaining (Optional)
+
 - NotificationScreen
 - BlipPreview (map marker preview)
 - MapFilterBar
@@ -415,19 +441,23 @@ src/
 ## 🔧 Troubleshooting
 
 ### Theme not updating?
+
 - Check that component uses `useTheme()` hook
 - Verify styles are recreated when theme changes (use `useMemo`)
 - Ensure `ThemeProvider` wraps your app in `App.js`
 
 ### StatusBar wrong color?
+
 - Add StatusBar component to screen
 - Use `themeMode === 'dark' ? 'light-content' : 'dark-content'`
 
 ### White flash on screen transition?
+
 - Set `backgroundColor: theme.colors.background` on container
 - Add StatusBar to the new screen
 
 ### Map not switching to dark mode?
+
 - Check `customMapStyle` prop on MapView
 - Verify `themeMode === 'dark'` condition
 - Import `darkMapStyle` from `src/config/mapStyles.js`

@@ -24,36 +24,42 @@ A mobile app for adults (21–40+) to create and join **short-term, in-person so
 ## 🌟 Features
 
 ### 🗺️ **Map-First Discovery**
+
 - **Press & hold** anywhere on the map to create an event at that location
 - **Tap event pins** to view details and RSVP instantly
 - **Category filters** to find events matching your interests
 - **Custom dark mode** map styling for night-time browsing
 
 ### 📅 **Time-Limited Events**
+
 - Events last 3–7 days, keeping the experience fresh and spontaneous
 - **Automatic archiving** after events end
 - **Capacity limits** with waitlist support
 - **RSVP confirmations** with real-time updates
 
 ### 💬 **Built-In Group Chat**
+
 - Auto-generated chat for every event
 - Chat activates when first person RSVPs
 - Host controls (kick users, close RSVPs, manage participants)
 - Share photos, details, and coordinate meetup logistics
 
 ### 👥 **Social & Discovery Feed**
+
 - Interest-based event recommendations
 - See what friends are attending
 - Trending events in your area
 - Filter by category: Sports, Food & Drink, Arts, Outdoors, Networking, and more
 
 ### 🛡️ **Trust & Safety**
+
 - User ratings (1-5 stars) for hosts and attendees
 - Report system for inappropriate content
 - Profile verification (email/phone)
 - Host moderation tools
 
 ### 🌙 **Full Dark Mode**
+
 - System-wide dark theme support
 - Custom dark map styling
 - Persistent user preference
@@ -65,8 +71,8 @@ A mobile app for adults (21–40+) to create and join **short-term, in-person so
 
 <div align="center">
 
-| Map View | Event Discovery | Event Details | Group Chat |
-|----------|----------------|---------------|------------|
+| Map View                | Event Discovery   | Event Details     | Group Chat        |
+| ----------------------- | ----------------- | ----------------- | ----------------- |
 | 🗺️ Pin-based navigation | �📱 Interest feed | 🎫 RSVP & details | 💬 Real-time chat |
 
 </div>
@@ -82,6 +88,7 @@ A mobile app for adults (21–40+) to create and join **short-term, in-person so
 <td>
 
 **Frontend**
+
 - ⚛️ React Native (Expo 50)
 - 🎨 Custom theming system
 - 📱 iOS & Android support
@@ -91,6 +98,7 @@ A mobile app for adults (21–40+) to create and join **short-term, in-person so
 <td>
 
 **Backend**
+
 - 🔥 Firebase Firestore (database)
 - 🔐 Firebase Auth (email/phone)
 - 📦 Firebase Storage (images)
@@ -102,6 +110,7 @@ A mobile app for adults (21–40+) to create and join **short-term, in-person so
 <td>
 
 **State & Data**
+
 - 🐻 Zustand (state management)
 - 💾 AsyncStorage (persistence)
 - 🔄 Real-time listeners
@@ -111,6 +120,7 @@ A mobile app for adults (21–40+) to create and join **short-term, in-person so
 <td>
 
 **Mapping & Location**
+
 - 🗺️ Google Maps API
 - 📍 Geolocation services
 - 🎨 Custom map styling
@@ -184,6 +194,7 @@ npm start
 ```
 
 Then press:
+
 - `i` for iOS simulator
 - `a` for Android emulator
 - Scan QR code with Expo Go app for physical device
@@ -248,20 +259,21 @@ graph LR
 
 ## 📱 Main Screens
 
-| Screen | Description | Key Features |
-|--------|-------------|--------------|
-| **🗺️ Map** | Home screen with interactive map | Create events (press & hold), browse pins, filter by category |
-| **🔍 Discover** | Interest-based event feed | Trending events, friend activity, personalized recommendations |
-| **👥 My Circle** | Your events & social activity | Hosted events, attending events, friends list |
-| **👤 Profile** | User profile & settings | Edit bio, manage interests, ratings, dark mode toggle |
-| **💬 Event Chat** | Group chat for event attendees | Real-time messaging, host controls, participant list |
-| **📝 Interest Posts** | Share interests & find like-minded people | Create posts, comment, discover communities |
+| Screen                | Description                               | Key Features                                                   |
+| --------------------- | ----------------------------------------- | -------------------------------------------------------------- |
+| **🗺️ Map**            | Home screen with interactive map          | Create events (press & hold), browse pins, filter by category  |
+| **🔍 Discover**       | Interest-based event feed                 | Trending events, friend activity, personalized recommendations |
+| **👥 My Circle**      | Your events & social activity             | Hosted events, attending events, friends list                  |
+| **👤 Profile**        | User profile & settings                   | Edit bio, manage interests, ratings, dark mode toggle          |
+| **💬 Event Chat**     | Group chat for event attendees            | Real-time messaging, host controls, participant list           |
+| **📝 Interest Posts** | Share interests & find like-minded people | Create posts, comment, discover communities                    |
 
 ---
 
 ## 🔐 Authentication & Onboarding
 
 **Sign Up Flow:**
+
 1. Email/password or phone authentication
 2. Name, date of birth, gender
 3. Profile photo upload
@@ -269,6 +281,7 @@ graph LR
 5. Location permissions
 
 **Security:**
+
 - Firebase Auth with email verification
 - Optional phone number verification
 - Secure password requirements
@@ -322,6 +335,7 @@ graph LR
 Social Circle includes **full dark mode support** across the entire app.
 
 **Features:**
+
 - ✅ System-wide theming (light & dark)
 - ✅ Custom dark map style
 - ✅ Persistent user preference
@@ -336,7 +350,7 @@ import { ThemedScreen, ThemedText } from './components/themed/ThemedComponents';
 export default function MyScreen() {
   return (
     <ThemedScreen>
-      <ThemedText variant="h1">Automatically themed!</ThemedText>
+      <ThemedText variant='h1'>Automatically themed!</ThemedText>
     </ThemedScreen>
   );
 }
@@ -363,6 +377,7 @@ npm test -- --coverage
 ```
 
 **Test Coverage:**
+
 - ✅ Error reporting utilities
 - ✅ Event joining logic
 - ✅ Cache management (TTL)
@@ -401,11 +416,11 @@ eas submit --platform android
 
 ## 📚 Documentation
 
-| Document | Description |
-|----------|-------------|
-| [`docs/DARK_MODE.md`](./docs/DARK_MODE.md) | Complete dark mode implementation guide |
-| [`TESTFLIGHT_CHECKLIST.md`](./TESTFLIGHT_CHECKLIST.md) | iOS deployment checklist |
-| [`.github/instructions/`](./.github/instructions/) | AI coding assistant guidelines |
+| Document                                               | Description                             |
+| ------------------------------------------------------ | --------------------------------------- |
+| [`docs/DARK_MODE.md`](./docs/DARK_MODE.md)             | Complete dark mode implementation guide |
+| [`TESTFLIGHT_CHECKLIST.md`](./TESTFLIGHT_CHECKLIST.md) | iOS deployment checklist                |
+| [`.github/instructions/`](./.github/instructions/)     | AI coding assistant guidelines          |
 
 ---
 
@@ -443,6 +458,7 @@ We welcome contributions! Here's how to get started:
 ```bash
 npm start -- --reset-cache
 ```
+
 </details>
 
 <details>
@@ -458,6 +474,7 @@ npx pod-install ios
 # Try building again
 npm run ios
 ```
+
 </details>
 
 <details>
@@ -473,6 +490,7 @@ npm run ios
 <summary><b>Dark mode not working</b></summary>
 
 See the troubleshooting section in [`docs/DARK_MODE.md`](./docs/DARK_MODE.md#-troubleshooting)
+
 </details>
 
 <details>

@@ -5,7 +5,7 @@ const path = require('path');
 /** @type {import('@expo/config').ExpoConfig} */
 module.exports = ({ config }) => {
   const projectId = 'c51101fd-e7e7-47ff-925e-44799b9dbe12'; // already in your repo
-  const buildNumber = process.env.IOS_BUILD_NUMBER || '1'; // must increment each upload
+  const buildNumber = process.env.IOS_BUILD_NUMBER || '3'; // must increment each upload
   const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN || '';
   const sentryEnv = process.env.EXPO_PUBLIC_SENTRY_ENV || 'beta';
   const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY || '';
