@@ -731,14 +731,6 @@ export default function OtherUserProfileScreen({ route, navigation }) {
             )}
           </View>
           <Text style={styles.name}>{fullName}</Text>
-          <Text style={styles.stat}>
-            {ratingCount === 0
-              ? '☆☆☆☆☆ (Not yet rated)'
-              : `${
-                  '★'.repeat(Math.floor(rating)) +
-                  '☆'.repeat(5 - Math.floor(rating))
-                } (${ratingCount})`}
-          </Text>
           <Text style={styles.since}>User since {userSince}</Text>
         </LinearGradient>
 
@@ -755,8 +747,19 @@ export default function OtherUserProfileScreen({ route, navigation }) {
             <Text style={styles.statLabel}>Events</Text>
           </View>
           <View style={styles.statCard}>
-            <MaterialIcons name='star' size={28} color='#FFD700' />
-            <Text style={styles.statLabel}>Badges</Text>
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            >
+              <MaterialIcons name='star' size={20} color='#FFD700' />
+              <Text style={styles.statValue}>
+                {rating > 0 ? rating.toFixed(1) : '—'}
+              </Text>
+            </View>
+            <Text style={styles.statLabel}>
+              {ratingCount === 0
+                ? 'Not Rated'
+                : `${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
+            </Text>
           </View>
         </View>
 

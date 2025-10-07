@@ -63,7 +63,6 @@ import {
   getTimelineTimestamp,
   mergeUniqueEvents,
 } from '../utils/dateUtils';
-import { getBadgeConfig, DEFAULT_BADGE } from '../../profile/utils/badgeConfig';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 
@@ -1401,14 +1400,6 @@ export default function ProfileScreen({ navigation }) {
               )}
             </Text>
           </View>
-          <Text style={styles.stat}>
-            {ratingCount === 0
-              ? '☆☆☆☆☆ (Not yet rated)'
-              : `${
-                  '★'.repeat(Math.floor(rating)) +
-                  '☆'.repeat(5 - Math.floor(rating))
-                } (${ratingCount})`}
-          </Text>
           <Text style={styles.since}>User since {userSince}</Text>
         </LinearGradient>
         {/* Stats Row */}
@@ -1422,11 +1413,19 @@ export default function ProfileScreen({ navigation }) {
             <Text style={styles.statLabel}>Events</Text>
           </TouchableOpacity>
           <View style={styles.statCard}>
-            <Image
-              source={getBadgeConfig(user?.currentBadge || DEFAULT_BADGE).image}
-              style={styles.badgeImage}
-              resizeMode='contain'
-            />
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            >
+              <MaterialIcons name='star' size={20} color='#FFD700' />
+              <Text style={styles.statValue}>
+                {rating > 0 ? rating.toFixed(1) : '—'}
+              </Text>
+            </View>
+            <Text style={styles.statLabel}>
+              {ratingCount === 0
+                ? 'Not Rated'
+                : `${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
+            </Text>
           </View>
         </View>
         {/* Bio */}
@@ -1772,10 +1771,6 @@ const createStyles = (theme) =>
       fontSize: 13,
       color: theme.colors.textSecondary,
       marginTop: 2,
-    },
-    badgeImage: {
-      width: 50,
-      height: 50,
     },
     bioContainer: {
       backgroundColor: theme.colors.card,

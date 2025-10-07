@@ -10,6 +10,7 @@ import {
   Animated,
   TextInput,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../../../firebase/config';
@@ -124,7 +125,7 @@ const createStyles = (theme) => {
     selectedActivityText: {
       color: colors.secondary,
       fontWeight: '800',
-      textShadowColor: 'rgba(0,0,0,0.05)',
+      textShadowColor: 'rgba(118, 118, 118, 0.05)',
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 1,
     },
@@ -168,24 +169,44 @@ const createStyles = (theme) => {
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 1,
     },
-    stickyFooter: {
+    stickyFooterContainer: {
       position: 'absolute',
-      bottom: 0,
+      bottom: 1,
       left: 0,
       right: 0,
-      backgroundColor: 'rgba(168, 166, 166, 0.35)',
-      paddingVertical: spacing.lg,
-      paddingHorizontal: spacing.lg,
-      borderTopWidth: 1,
-      borderTopColor: 'rgba(255,255,255,0.4)',
+      zIndex: 20,
       alignItems: 'center',
     },
+    stickyFooterBlur: {
+      width: '100%',
+      paddingVertical: spacing.lg,
+      paddingHorizontal: spacing.lg,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.isDark
+        ? 'rgba(255,255,255,0.06)'
+        : 'rgba(0,0,0,0.06)',
+      backgroundColor: theme.isDark
+        ? 'rgba(10,14,20,0.32)'
+        : 'rgba(255,255,255,0.72)',
+      borderTopLeftRadius: 12,
+      borderTopRightRadius: 12,
+      overflow: 'hidden',
+      alignItems: 'center',
+    },
+    stickyFooterContent: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
     selectedCountBadge: {
-      backgroundColor: 'rgba(255,255,255,0.25)',
+      backgroundColor: theme.isDark
+        ? 'rgba(198, 198, 198, 0.41)'
+        : 'rgba(0, 0, 0, 0.4)',
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
       borderRadius: radii.pill,
-      marginBottom: spacing.md,
+      marginBottom: 0,
     },
     selectedCountBadgeText: {
       fontSize: 14,
@@ -538,10 +559,10 @@ function InterestsScreen({ navigation }) {
 
           <Text style={styles.sectionLabel}>
             {activeCategory === 'all'
-              ? 'Filter All Activities'
+              ? 'Filter All Activities | People in Interest'
               : `Choose Activities in ${
                   categories.find((c) => c.id === activeCategory)?.name || ''
-                }`}
+                } | People in Interest`}
           </Text>
 
           {activeCategory === 'all' && (
@@ -590,14 +611,7 @@ function InterestsScreen({ navigation }) {
                         </Text>
                       </>
                     )}
-                    {selected.includes(activity.name) && (
-                      <Ionicons
-                        name='checkmark'
-                        size={14}
-                        color={theme.colors.secondary}
-                        style={styles.checkIcon}
-                      />
-                    )}
+                    {selected.includes(activity.name)}
                   </TouchableOpacity>
                 ))
               ) : (
@@ -609,31 +623,44 @@ function InterestsScreen({ navigation }) {
           </Animated.View>
         </ScrollView>
 
-        {/* Sticky Footer */}
-        <View style={styles.stickyFooter}>
-          <View style={styles.selectedCountBadge}>
-            <Text style={styles.selectedCountBadgeText}>
-              {selected.length} Selected
-            </Text>
-          </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          {loading ? (
-            <ActivityIndicator
-              style={{ marginVertical: theme.spacing.sm }}
-              color={theme.colors.neutral100}
-            />
-          ) : (
-            <Button
-              title='Next'
-              onPress={onNext}
-              style={styles.footerButton}
-            />
-          )}
+        {/* Sticky Footer (frosted) */}
+        <View style={styles.stickyFooterContainer} pointerEvents='box-none'>
+          <BlurView
+            intensity={30}
+            tint={theme.isDark ? 'dark' : 'light'}
+            style={styles.stickyFooterBlur}
+          >
+            <View style={styles.stickyFooterContent}>
+              <View style={styles.selectedCountBadge}>
+                <Text style={styles.selectedCountBadgeText}>
+                  {selected.length} Selected
+                </Text>
+              </View>
+
+              <View style={{ flex: 1, marginLeft: theme.spacing.md }}>
+                {error ? <Text style={styles.error}>{error}</Text> : null}
+              </View>
+
+              <View style={{ width: 140 }}>
+                {loading ? (
+                  <ActivityIndicator
+                    style={{ marginVertical: theme.spacing.sm }}
+                    color={theme.colors.neutral100}
+                  />
+                ) : (
+                  <Button
+                    title='Next'
+                    onPress={onNext}
+                    style={styles.footerButton}
+                  />
+                )}
+              </View>
+            </View>
+          </BlurView>
         </View>
       </SafeAreaView>
     </AnimatedGradientBackground>
   );
 }
-
 
 export default InterestsScreen;

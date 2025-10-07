@@ -4,17 +4,11 @@ import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../theme';
 
-const gradientPresets = {
-  onboarding: ['#ff6b6b', '#4dabf7'],
-  profile: ['#ff6b6b', '#4dabf7'],
-};
-
 const AnimatedGradientBackground = ({ children, style, variant = 'hero' }) => {
   const theme = useTheme();
-  const gradient =
-    gradientPresets[variant] ||
-    theme?.gradients?.[variant] ||
-    theme.gradients.hero;
+
+  // Description: Use theme gradients for all variants, fallback to hero gradient
+  const gradient = theme?.gradients?.[variant] || theme.gradients.hero;
 
   return (
     <View style={[styles.container, style]}>

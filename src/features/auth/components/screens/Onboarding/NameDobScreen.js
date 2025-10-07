@@ -33,17 +33,23 @@ const createStyles = (theme) =>
     header: {
       fontSize: 28,
       fontWeight: '700',
-      color: theme.colors.neutral100,
+      color: theme.isDark ? theme.colors.neutral900 : theme.colors.neutral100,
       textAlign: 'center',
       marginBottom: theme.spacing.lg,
     },
     input: {
-      backgroundColor: 'rgba(255,255,255,0.85)',
+      backgroundColor: theme.isDark
+        ? 'rgba(30, 41, 59, 0.95)'
+        : 'rgba(255, 255, 255, 0.85)',
+      borderWidth: 1,
+      borderColor: theme.isDark
+        ? 'rgba(148, 163, 184, 0.3)'
+        : 'rgba(226, 232, 240, 0.5)',
       borderRadius: theme.radii.lg,
       padding: theme.spacing.lg,
       fontSize: 16,
       marginBottom: theme.spacing.lg,
-      color: theme.colors.neutral900,
+      color: theme.isDark ? theme.colors.neutral900 : theme.colors.neutral900,
     },
     dateRow: {
       flexDirection: 'row',
@@ -51,7 +57,7 @@ const createStyles = (theme) =>
     },
     dateText: {
       fontSize: 16,
-      color: theme.colors.neutral800,
+      color: theme.isDark ? theme.colors.neutral900 : theme.colors.neutral800,
     },
     error: {
       color: theme.colors.danger,
@@ -185,7 +191,9 @@ export default function NameDobScreen({ navigation }) {
           <TextInput
             style={styles.input}
             placeholder='First name'
-            placeholderTextColor={theme.colors.neutral700}
+            placeholderTextColor={
+              theme.isDark ? theme.colors.neutral600 : theme.colors.neutral600
+            }
             value={firstName}
             onChangeText={(text) => {
               setFirstName(text);
@@ -199,7 +207,9 @@ export default function NameDobScreen({ navigation }) {
           <TextInput
             style={styles.input}
             placeholder='Last name'
-            placeholderTextColor={theme.colors.neutral700}
+            placeholderTextColor={
+              theme.isDark ? theme.colors.neutral600 : theme.colors.neutral600
+            }
             value={lastName}
             onChangeText={(text) => {
               setLastName(text);
@@ -215,7 +225,11 @@ export default function NameDobScreen({ navigation }) {
               <Ionicons
                 name='calendar-outline'
                 size={20}
-                color={theme.colors.neutral700}
+                color={
+                  theme.isDark
+                    ? theme.colors.neutral600
+                    : theme.colors.neutral600
+                }
                 style={{ marginRight: 8 }}
               />
               <Text style={styles.dateText}>{dob.toDateString()}</Text>
@@ -244,7 +258,11 @@ export default function NameDobScreen({ navigation }) {
             style={{ transform: [{ scale: scaleAnim }], width: '100%' }}
           >
             <View style={styles.buttonWrapper}>
-              <Button title={loading ? 'Loading…' : 'Next'} onPress={onNext} disabled={loading} />
+              <Button
+                title={loading ? 'Loading…' : 'Next'}
+                onPress={onNext}
+                disabled={loading}
+              />
             </View>
           </Animated.View>
         </ScrollView>

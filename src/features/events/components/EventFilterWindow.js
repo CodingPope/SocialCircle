@@ -15,6 +15,8 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import InterestSelector from '../../profile/components/InterestSelector';
 import { trackFilterApplySafe } from '../../../services/analytics';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 const MAX_RANGE_OFFSET_DAYS = 6; // inclusive; today + 6 = 7-day window
 
@@ -77,6 +79,9 @@ const EventFilterWindow = ({
   userInterests,
   updateSelectedFilters,
 }) => {
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const initialRange = normalizeDateRange(
     selectedFilters?.dateRange ||
       (selectedFilters?.date
@@ -420,7 +425,7 @@ const EventFilterWindow = ({
           >
             <Text
               style={{
-                color: genderOnly ? '#fff' : '#000',
+                color: genderOnly ? '#fff' : theme.colors.text,
                 fontWeight: 'bold',
               }}
             >
@@ -461,207 +466,225 @@ const EventFilterWindow = ({
   );
 };
 
-const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-    zIndex: 90,
-  },
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  container: {
-    padding: 20,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    width: '100%',
-    elevation: 5,
-    zIndex: 11,
-    maxHeight: '85%', // prevent off-screen content and allow scroll
-  },
-  contentContainer: {
-    paddingBottom: 24,
-  },
-  title: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', marginVertical: 10 },
-  dateRangeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  dateRangeButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    backgroundColor: '#f0f0f0',
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-  },
-  dateRangeButtonStart: {
-    marginRight: 8,
-  },
-  dateRangeButtonEnd: {
-    marginLeft: 8,
-  },
-  dateRangeButtonActive: {
-    borderColor: '#007BFF',
-    backgroundColor: '#E8F0FF',
-  },
-  dateRangeLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  dateRangeValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
-  dateRangeMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  dateRangeHelperText: {
-    fontSize: 12,
-    color: '#666',
-  },
-  clearDateRangeButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    backgroundColor: '#f2f2f2',
-  },
-  clearDateRangeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#007BFF',
-    textTransform: 'uppercase',
-  },
-  datePickerContainer: {
-    marginBottom: 16,
-    borderRadius: 12,
-    overflow: 'hidden',
-    backgroundColor: '#f8f8f8',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  datePickerDoneButton: {
-    paddingVertical: 10,
-    alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  datePickerDoneText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#007BFF',
-  },
-  searchBoxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    marginBottom: 10,
-  },
-  searchBox: {
-    flex: 1,
-    paddingVertical: 8,
-    color: '#444',
-  },
-  clearButton: {
-    padding: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  clearButtonText: {
-    color: '#000',
-    fontWeight: 'bold',
-  },
-  filterButtonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  clearFilterButton: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  resetButton: {
-    flex: 1,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-  },
-  resetButtonText: {
-    color: '#000',
-    fontWeight: 'bold',
-  },
-  interestSelector: { maxHeight: 200, marginBottom: 20 },
-  interestItem: {
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 10,
-    backgroundColor: '#f0f0f0',
-  },
-  selectedInterest: { backgroundColor: '#007BFF' },
-  genderFilterButton: {
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 20,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-  },
-  genderFilterButtonActive: {
-    backgroundColor: '#007BFF',
-  },
-  applyButton: {
-    marginTop: 20,
-    padding: 15,
-    backgroundColor: '#007BFF',
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  applyButtonText: { color: '#fff', fontWeight: 'bold' },
-  dragBarContainer: {
-    alignItems: 'center',
-    marginBottom: 10,
-    paddingTop: 6,
-    paddingBottom: 6,
-  },
-  dragBar: {
-    width: 40,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#e0e0e0',
-  },
-});
+// Description: Create theme-aware styles for EventFilterWindow
+const createStyles = (theme) =>
+  StyleSheet.create({
+    overlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: theme.isDark
+        ? 'rgba(0, 0, 0, 0.7)'
+        : 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'flex-end',
+      zIndex: 90,
+    },
+    backdrop: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+    },
+    container: {
+      padding: 20,
+      backgroundColor: theme.colors.card,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: theme.isDark ? 0.4 : 0.1,
+      shadowRadius: 4,
+      width: '100%',
+      elevation: 5,
+      zIndex: 11,
+      maxHeight: '85%',
+    },
+    contentContainer: {
+      paddingBottom: 24,
+    },
+    title: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      marginBottom: 10,
+      color: theme.colors.text,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      marginVertical: 10,
+      color: theme.colors.text,
+    },
+    dateRangeRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+    },
+    dateRangeButton: {
+      flex: 1,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 12,
+      backgroundColor: theme.colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    dateRangeButtonStart: {
+      marginRight: 8,
+    },
+    dateRangeButtonEnd: {
+      marginLeft: 8,
+    },
+    dateRangeButtonActive: {
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.isDark ? 'rgba(59,130,246,0.15)' : '#E8F0FF',
+    },
+    dateRangeLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+      textTransform: 'uppercase',
+      marginBottom: 4,
+    },
+    dateRangeValue: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    dateRangeMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: 8,
+      marginBottom: 16,
+    },
+    dateRangeHelperText: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    clearDateRangeButton: {
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      borderRadius: 12,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    clearDateRangeText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.primary,
+      textTransform: 'uppercase',
+    },
+    datePickerContainer: {
+      marginBottom: 16,
+      borderRadius: 12,
+      overflow: 'hidden',
+      backgroundColor: theme.colors.backgroundSecondary,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    datePickerDoneButton: {
+      paddingVertical: 10,
+      alignItems: 'flex-end',
+      paddingHorizontal: 12,
+      backgroundColor: theme.colors.card,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    datePickerDoneText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.primary,
+    },
+    searchBoxContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      marginBottom: 10,
+      backgroundColor: theme.colors.card,
+    },
+    searchBox: {
+      flex: 1,
+      paddingVertical: 8,
+      color: theme.colors.text,
+    },
+    clearButton: {
+      padding: 10,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    clearButtonText: {
+      color: theme.colors.text,
+      fontWeight: 'bold',
+    },
+    filterButtonsContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 20,
+    },
+    clearFilterButton: {
+      flex: 1,
+      padding: 10,
+      borderRadius: 8,
+      backgroundColor: theme.colors.backgroundSecondary,
+      alignItems: 'center',
+      marginRight: 10,
+    },
+    resetButton: {
+      flex: 1,
+      padding: 10,
+      borderRadius: 8,
+      backgroundColor: theme.colors.backgroundSecondary,
+      alignItems: 'center',
+    },
+    resetButtonText: {
+      color: theme.colors.text,
+      fontWeight: 'bold',
+    },
+    interestSelector: { maxHeight: 200, marginBottom: 20 },
+    interestItem: {
+      padding: 10,
+      borderRadius: 8,
+      marginBottom: 10,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    selectedInterest: { backgroundColor: theme.colors.primary },
+    genderFilterButton: {
+      padding: 10,
+      borderRadius: 8,
+      marginBottom: 20,
+      backgroundColor: theme.colors.backgroundSecondary,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    genderFilterButtonActive: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    applyButton: {
+      marginTop: 20,
+      padding: 15,
+      backgroundColor: theme.colors.primary,
+      borderRadius: 8,
+      alignItems: 'center',
+    },
+    applyButtonText: { color: '#fff', fontWeight: 'bold' },
+    dragBarContainer: {
+      alignItems: 'center',
+      marginBottom: 10,
+      paddingTop: 6,
+      paddingBottom: 6,
+    },
+    dragBar: {
+      width: 40,
+      height: 5,
+      borderRadius: 2.5,
+      backgroundColor: theme.isDark ? '#64748B' : '#e0e0e0',
+    },
+  });
 
 export default EventFilterWindow;

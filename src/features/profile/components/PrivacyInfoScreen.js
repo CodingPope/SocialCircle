@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   SafeAreaView,
   View,
@@ -19,11 +19,16 @@ import {
   analyticsInit,
   event as analyticsEvent,
 } from '../../../services/analytics';
+import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 
 // Description: Centralized screen to manage privacy and legal information
 export default function PrivacyInfoScreen({ navigation }) {
   const user = useUserStore((s) => s.user);
   const setUser = useUserStore((s) => s.setUser);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const [analyticsOptIn, setAnalyticsOptIn] = useState(!!user?.analyticsOptIn);
   useEffect(
     () => setAnalyticsOptIn(!!user?.analyticsOptIn),
@@ -43,7 +48,10 @@ export default function PrivacyInfoScreen({ navigation }) {
         });
         persisted = true;
       } catch (error) {
-        console.warn('Failed to update analytics preference in Firestore', error);
+        console.warn(
+          'Failed to update analytics preference in Firestore',
+          error
+        );
       }
     }
 
@@ -60,7 +68,10 @@ export default function PrivacyInfoScreen({ navigation }) {
           analyticsUpdatedAt: now,
         });
       } catch (error) {
-        console.warn('Failed to update local user store with analytics toggle', error);
+        console.warn(
+          'Failed to update local user store with analytics toggle',
+          error
+        );
       }
     }
 
@@ -111,7 +122,7 @@ export default function PrivacyInfoScreen({ navigation }) {
           onPress={() => navigation.goBack()}
           accessibilityLabel='Go back'
         >
-          <Ionicons name='arrow-back' size={26} color='#111' />
+          <Ionicons name='arrow-back' size={26} color={theme.colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Privacy and Info</Text>
         <View style={{ width: 26 }} />
@@ -132,12 +143,22 @@ export default function PrivacyInfoScreen({ navigation }) {
               accessibilityState={{ checked: analyticsOptIn }}
               style={[
                 styles.switchBtn,
-                { backgroundColor: analyticsOptIn ? '#E6F5EA' : '#f2f2f2' },
+                {
+                  backgroundColor: analyticsOptIn
+                    ? theme.isDark
+                      ? '#1E4D2B'
+                      : '#E6F5EA'
+                    : theme.colors.backgroundSecondary,
+                },
               ]}
             >
               <Text
                 style={{
-                  color: analyticsOptIn ? '#2e7d32' : '#555',
+                  color: analyticsOptIn
+                    ? theme.isDark
+                      ? '#4ADE80'
+                      : '#2e7d32'
+                    : theme.colors.textSecondary,
                   fontWeight: '600',
                 }}
               >
@@ -166,7 +187,11 @@ export default function PrivacyInfoScreen({ navigation }) {
               onPress={() => openArticle(item.label, item.key)}
             >
               <Text style={styles.linkText}>{item.label}</Text>
-              <Ionicons name='chevron-forward' size={20} color='#777' />
+              <Ionicons
+                name='chevron-forward'
+                size={20}
+                color={theme.colors.textSecondary}
+              />
             </TouchableOpacity>
           ))}
         </View>
@@ -183,44 +208,65 @@ export default function PrivacyInfoScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
-  content: { padding: 16, gap: 12 },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#eee',
-  },
-  rowBetween: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: { fontSize: 16, fontWeight: '600', color: '#222' },
-  subtitle: { fontSize: 13, color: '#666', marginTop: 6 },
-  switchBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 16 },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-  },
-  linkText: { fontSize: 15, color: '#007AFF' },
-});
+// Description: Create theme-aware styles for PrivacyInfoScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    safe: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      backgroundColor: theme.colors.card,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    headerTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    content: { padding: 16, gap: 12 },
+    card: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    rowBetween: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    title: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    subtitle: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 6,
+    },
+    switchBtn: {
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 16,
+    },
+    linkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 10,
+    },
+    linkText: {
+      fontSize: 15,
+      color: theme.colors.primary,
+    },
+  });

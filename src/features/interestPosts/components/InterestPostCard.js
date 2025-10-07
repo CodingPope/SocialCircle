@@ -22,6 +22,7 @@ import { reportContent } from '../../../firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import smileDefault from '../../../../assets/smileDefault.png';
 import { sharePost } from '../../../services/share';
+import { useTheme } from '../../../theme';
 
 function toDate(value) {
   if (!value) return null;
@@ -41,6 +42,8 @@ export default function InterestPostCard({
   enableInlineComposer = true,
 }) {
   const user = useUserStore((state) => state.user);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [menuVisible, setMenuVisible] = useState(false);
   const [commentVisible, setCommentVisible] = useState(false);
   const [commentText, setCommentText] = useState('');
@@ -81,7 +84,10 @@ export default function InterestPostCard({
       );
       Alert.alert('Report received', 'Thanks for letting us know.');
     } catch (error) {
-      Alert.alert('Unable to report', error?.message || 'Please try again later.');
+      Alert.alert(
+        'Unable to report',
+        error?.message || 'Please try again later.'
+      );
     }
   }, [post?.id, user?.uid]);
 
@@ -191,7 +197,11 @@ export default function InterestPostCard({
             style={styles.commentButton}
             activeOpacity={0.8}
           >
-            <Ionicons name='chatbubble-ellipses-outline' size={16} color='#007AFF' />
+            <Ionicons
+              name='chatbubble-ellipses-outline'
+              size={16}
+              color='#007AFF'
+            />
             <Text style={styles.commentText}>Comment</Text>
             <Text style={styles.commentCount}>({commentCount})</Text>
           </TouchableOpacity>
@@ -212,7 +222,7 @@ export default function InterestPostCard({
           </TouchableOpacity>
           <View style={styles.likePlaceholder}>
             <Ionicons name='heart-outline' size={16} color='#c7c7cc' />
-            <Text style={styles.likePlaceholderText}>Likes coming soon</Text>
+            <Text style={styles.likePlaceholderText}>Coming soon</Text>
           </View>
         </View>
 
@@ -224,11 +234,16 @@ export default function InterestPostCard({
               value={commentText}
               onChangeText={setCommentText}
               placeholder='Write a comment…'
+              placeholderTextColor={theme.colors.textSecondary}
               multiline
               maxLength={500}
             />
             <TouchableOpacity
-              style={[styles.commentSubmit, (!commentText.trim() || commentSubmitting) && styles.commentSubmitDisabled]}
+              style={[
+                styles.commentSubmit,
+                (!commentText.trim() || commentSubmitting) &&
+                  styles.commentSubmitDisabled,
+              ]}
               onPress={submitComment}
               disabled={!commentText.trim() || commentSubmitting}
             >
@@ -253,163 +268,168 @@ export default function InterestPostCard({
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    marginBottom: 16,
-    shadowColor: 'rgba(0,0,0,0.08)',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  media: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  inner: {
-    padding: 16,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 12,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: '#f2f2f7',
-  },
-  meta: {
-    marginLeft: 10,
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111',
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-  ratingText: {
-    marginLeft: 4,
-    marginRight: 6,
-    fontSize: 13,
-    color: '#8e8e93',
-  },
-  timestamp: {
-    fontSize: 13,
-    color: '#8e8e93',
-  },
-  contentText: {
-    fontSize: 15,
-    color: '#1c1c1e',
-    marginTop: 12,
-    lineHeight: 22,
-  },
-  interestChip: {
-    alignSelf: 'flex-start',
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: '#f2f2f7',
-  },
-  interestText: {
-    fontSize: 13,
-    color: '#636366',
-    fontWeight: '600',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: 12,
-    marginTop: 16,
-  },
-  commentButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,122,255,0.12)',
-  },
-  commentText: {
-    marginLeft: 6,
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  commentCount: {
-    marginLeft: 4,
-    fontSize: 13,
-    color: '#007AFF',
-  },
-  shareButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(37,99,235,0.12)',
-  },
-  shareText: {
-    marginLeft: 6,
-    fontSize: 14,
-    color: '#2563EB',
-    fontWeight: '600',
-  },
-  likePlaceholder: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  likePlaceholderText: {
-    marginLeft: 6,
-    fontSize: 13,
-    color: '#c7c7cc',
-  },
-  composer: {
-    marginTop: 14,
-    borderWidth: 1,
-    borderColor: '#d1d1d6',
-    borderRadius: 12,
-    padding: 12,
-  },
-  commentInput: {
-    minHeight: 60,
-    fontSize: 15,
-    textAlignVertical: 'top',
-  },
-  commentSubmit: {
-    marginTop: 12,
-    alignSelf: 'flex-end',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  commentSubmitDisabled: {
-    backgroundColor: '#9cc7ff',
-  },
-  commentSubmitText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
+// Description: Create theme-aware styles for InterestPostCard
+const createStyles = (theme) =>
+  StyleSheet.create({
+    card: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 20,
+      marginBottom: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: theme.isDark ? 0.4 : 0.08,
+      shadowRadius: 10,
+      elevation: 3,
+    },
+    media: {
+      width: '100%',
+      aspectRatio: 4 / 3,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+    },
+    inner: {
+      padding: 16,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    headerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      marginRight: 12,
+    },
+    avatar: {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    meta: {
+      marginLeft: 10,
+      flex: 1,
+    },
+    name: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    ratingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 2,
+    },
+    ratingText: {
+      marginLeft: 4,
+      marginRight: 6,
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    timestamp: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    contentText: {
+      fontSize: 15,
+      color: theme.colors.text,
+      marginTop: 12,
+      lineHeight: 22,
+    },
+    interestChip: {
+      alignSelf: 'flex-start',
+      marginTop: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 12,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    interestText: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      fontWeight: '600',
+    },
+    actionsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      columnGap: 12,
+      marginTop: 16,
+    },
+    commentButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 16,
+      backgroundColor: 'rgba(0,122,255,0.12)',
+    },
+    commentText: {
+      marginLeft: 6,
+      fontSize: 14,
+      color: '#007AFF',
+      fontWeight: '600',
+    },
+    commentCount: {
+      marginLeft: 4,
+      fontSize: 13,
+      color: '#007AFF',
+    },
+    shareButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 16,
+      backgroundColor: 'rgba(37,99,235,0.12)',
+    },
+    shareText: {
+      marginLeft: 6,
+      fontSize: 14,
+      color: '#2563EB',
+      fontWeight: '600',
+    },
+    likePlaceholder: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    likePlaceholderText: {
+      marginLeft: 6,
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      opacity: 0.6,
+    },
+    composer: {
+      marginTop: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 12,
+      padding: 12,
+      backgroundColor: theme.colors.backgroundSecondary,
+    },
+    commentInput: {
+      minHeight: 60,
+      fontSize: 15,
+      textAlignVertical: 'top',
+      color: theme.colors.text,
+    },
+    commentSubmit: {
+      marginTop: 12,
+      alignSelf: 'flex-end',
+      backgroundColor: '#007AFF',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    commentSubmitDisabled: {
+      backgroundColor: '#9cc7ff',
+    },
+    commentSubmitText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '600',
+    },
+  });

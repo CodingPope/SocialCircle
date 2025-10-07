@@ -1387,12 +1387,13 @@ export default function MapScreen() {
         ]}
         pointerEvents='box-none'
       >
-        <Ionicons
-          name='search'
-          size={18}
-          color={theme.colors.textSecondary}
-          style={{ marginLeft: 10, marginRight: 6 }}
-        />
+        <View style={styles.searchIconContainer}>
+          <Ionicons
+            name='search'
+            size={20}
+            color={theme.colors.textSecondary}
+          />
+        </View>
         <GooglePlacesAutocomplete
           placeholder='Search places'
           predefinedPlaces={[]}
@@ -1409,11 +1410,7 @@ export default function MapScreen() {
               if (Platform.OS === 'android') setIsSearchFocused(false);
             },
             placeholderTextColor: theme.colors.textSecondary,
-            style: {
-              color: theme.colors.text,
-              paddingLeft: 44,
-              paddingRight: 8,
-            },
+            style: styles.searchInputStyle,
           }}
           onPress={(data, details = null) => handlePlaceSelect(data, details)}
           query={{
@@ -1427,32 +1424,15 @@ export default function MapScreen() {
           nearbyPlacesAPI='GooglePlacesSearch'
           debounce={200}
           styles={{
-            container: {
-              flex: 1,
-            },
-            textInput: {
-              height: 44,
-              fontSize: 16,
-              backgroundColor: 'transparent',
-              paddingLeft: 44,
-              paddingRight: 8,
-              color: theme.colors.text,
-            },
-            listView: {
-              position: 'absolute',
-              top: 44,
-              left: 0,
-              right: 0,
-              backgroundColor: theme.colors.card,
-              zIndex: 9999,
-              elevation: 9999,
-            },
-            row: {
-              backgroundColor: theme.colors.card,
-            },
-            description: {
-              color: theme.colors.text,
-            },
+            container: styles.autocompleteContainer,
+            textInputContainer: styles.autocompleteInputContainer,
+            textInput: styles.autocompleteTextInput,
+            listView: styles.autocompleteListView,
+            row: styles.autocompleteRow,
+            separator: styles.autocompleteSeparator,
+            description: styles.autocompleteDescription,
+            predefinedPlacesDescription:
+              styles.autocompletePredefinedDescription,
           }}
         />
         <TouchableOpacity
@@ -1841,6 +1821,82 @@ const createStyles = (theme) =>
       shadowRadius: theme.isDark ? 10 : 4,
       zIndex: 10,
     },
+    searchIconContainer: {
+      position: 'absolute',
+      left: 12,
+      zIndex: 1,
+      width: 20,
+      height: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    searchInputStyle: {
+      flex: 1,
+      color: theme.colors.text,
+      fontSize: 16,
+      height: 44,
+      paddingVertical: 0,
+      paddingLeft: 0,
+      paddingRight: 0,
+      margin: 0,
+    },
+    autocompleteContainer: {
+      flex: 1,
+      marginLeft: 40,
+      marginRight: 8,
+    },
+    autocompleteInputContainer: {
+      backgroundColor: 'transparent',
+      borderTopWidth: 0,
+      borderBottomWidth: 0,
+      paddingHorizontal: 0,
+    },
+    autocompleteTextInput: {
+      height: 44,
+      fontSize: 16,
+      backgroundColor: 'transparent',
+      paddingHorizontal: 0,
+      paddingVertical: 0,
+      margin: 0,
+      color: theme.colors.text,
+    },
+    autocompleteListView: {
+      position: 'absolute',
+      top: 48,
+      left: -40,
+      right: -8,
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: theme.isDark ? 0.4 : 0.15,
+      shadowRadius: 8,
+      elevation: 8,
+      maxHeight: 300,
+      zIndex: 9999,
+    },
+    autocompleteRow: {
+      backgroundColor: theme.colors.card,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      minHeight: 48,
+      justifyContent: 'center',
+    },
+    autocompleteSeparator: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.colors.border,
+    },
+    autocompleteDescription: {
+      color: theme.colors.text,
+      fontSize: 15,
+      lineHeight: 20,
+    },
+    autocompletePredefinedDescription: {
+      color: theme.colors.textSecondary,
+      fontSize: 14,
+    },
     searchInputUnified: {
       flex: 1,
       backgroundColor: 'transparent',
@@ -1854,7 +1910,8 @@ const createStyles = (theme) =>
       height: '100%',
       justifyContent: 'center',
       alignItems: 'center',
-      paddingHorizontal: 15,
+      paddingHorizontal: 16,
+      minWidth: 70,
       borderTopRightRadius: 15,
       borderBottomRightRadius: 15,
     },

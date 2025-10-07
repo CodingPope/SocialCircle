@@ -41,17 +41,23 @@ const createStyles = (theme) =>
       fontWeight: '700',
       textAlign: 'center',
       marginBottom: theme.spacing.lg,
-      color: theme.colors.neutral100,
+      color: theme.isDark ? theme.colors.neutral900 : theme.colors.neutral100,
       marginTop: theme.spacing.xl,
     },
     goBackButton: {
       position: 'absolute',
       top: 60,
       left: 24,
-      backgroundColor: 'rgba(255,255,255,0.85)',
+      backgroundColor: theme.isDark
+        ? 'rgba(30, 41, 59, 0.95)'
+        : 'rgba(255, 255, 255, 0.85)',
       borderRadius: theme.radii.md,
       paddingVertical: 6,
       paddingHorizontal: 16,
+      borderWidth: 1,
+      borderColor: theme.isDark
+        ? 'rgba(148, 163, 184, 0.3)'
+        : 'rgba(226, 232, 240, 0.5)',
     },
     goBackText: {
       color: theme.colors.primary,
@@ -62,7 +68,13 @@ const createStyles = (theme) =>
       marginBottom: theme.spacing.xl,
     },
     genderOption: {
-      backgroundColor: 'rgba(255,255,255,0.75)',
+      backgroundColor: theme.isDark
+        ? 'rgba(30, 41, 59, 0.95)'
+        : 'rgba(255, 255, 255, 0.75)',
+      borderWidth: 1,
+      borderColor: theme.isDark
+        ? 'rgba(148, 163, 184, 0.3)'
+        : 'rgba(226, 232, 240, 0.5)',
       paddingVertical: 14,
       borderRadius: theme.radii.lg,
       marginVertical: theme.spacing.sm,
@@ -70,10 +82,11 @@ const createStyles = (theme) =>
     },
     selectedOption: {
       backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
     },
     genderText: {
       fontSize: 18,
-      color: theme.colors.neutral800,
+      color: theme.isDark ? theme.colors.neutral900 : theme.colors.neutral800,
     },
     selectedText: {
       color: theme.colors.neutral100,
@@ -255,7 +268,11 @@ export default function SexScreen({ navigation }) {
       </View>
       <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
         <View style={styles.nextButtonContainer}>
-          <Button title={loading ? 'Saving…' : 'Next'} onPress={onNext} disabled={loading} />
+          <Button
+            title={loading ? 'Saving…' : 'Next'}
+            onPress={onNext}
+            disabled={loading}
+          />
         </View>
       </Animated.View>
 

@@ -9,6 +9,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -17,7 +18,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { formatDistanceToNow } from 'date-fns';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -36,8 +40,10 @@ import { reportContent } from '../../../firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import smileDefault from '../../../../assets/smileDefault.png';
 import { event as trackEvent } from '../../../services/analytics';
+import { useTheme } from '../../../theme';
 
 const PAGE_SIZE = 20;
+const TOP_BAR_HEIGHT = 52;
 
 function toDate(value) {
   if (!value) return null;
@@ -47,7 +53,7 @@ function toDate(value) {
   return null;
 }
 
-function CommentItem({ comment, onReport, onDelete, isOwner }) {
+function CommentItem({ comment, onReport, onDelete, isOwner, theme }) {
   const [menuVisible, setMenuVisible] = useState(false);
   const created = toDate(comment?.createdAt);
   let timestamp = 'moments ago';
@@ -58,6 +64,8 @@ function CommentItem({ comment, onReport, onDelete, isOwner }) {
       timestamp = created.toLocaleDateString();
     }
   }
+
+  const styles = useMemo(() => createCommentStyles(theme), [theme]);
 
   return (
     <View style={styles.commentRow}>
@@ -106,6 +114,9 @@ export default function InterestPostScreen() {
   const route = useRoute();
   const navigation = useNavigation();
   const user = useUserStore((state) => state.user);
+  const theme = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const insets = useSafeAreaInsets();
   const { postId, initialPost } = route.params || {};
 
   const [post, setPost] = useState(initialPost || null);
@@ -276,9 +287,10 @@ export default function InterestPostScreen() {
         onReport={handleReportComment}
         onDelete={handleDeleteComment}
         isOwner={item?.authorId === user?.uid}
+        theme={theme}
       />
     ),
-    [handleDeleteComment, handleReportComment, user?.uid]
+    [handleDeleteComment, handleReportComment, user?.uid, theme]
   );
 
   const keyExtractor = useCallback((item) => item.id, []);
@@ -321,7 +333,6 @@ export default function InterestPostScreen() {
     loadingMore,
   ]);
 
-  // ...existing code...
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       {/* Top bar with back icon */}
@@ -331,175 +342,242 @@ export default function InterestPostScreen() {
           onPress={() => navigation.goBack()}
           accessibilityLabel='Go back'
         >
-          <Ionicons name='chevron-back' size={28} color='#1c1c1e' />
+          <Ionicons name='chevron-back' size={28} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={0}
         style={styles.flex}
       >
-        <FlatList
-          data={comments}
-          renderItem={renderComment}
-          keyExtractor={keyExtractor}
-          contentContainerStyle={styles.listContent}
-          ListHeaderComponent={header}
-          ListEmptyComponent={
-            <Text style={styles.emptyState}>
-              No comments yet. Be the first!
-            </Text>
-          }
-        />
-        <View style={styles.composerBar}>
-          <TextInput
-            ref={composerRef}
-            style={styles.composerInput}
-            value={composerText}
-            onChangeText={setComposerText}
-            placeholder='Write a comment'
-            multiline
-            maxLength={300}
+        <View style={styles.pageContent}>
+          <FlatList
+            style={styles.list}
+            data={comments}
+            renderItem={renderComment}
+            keyExtractor={keyExtractor}
+            contentContainerStyle={styles.listContent}
+            keyboardDismissMode={
+              Platform.OS === 'ios' ? 'interactive' : 'on-drag'
+            }
+            keyboardShouldPersistTaps='handled'
+            ListHeaderComponent={header}
+            ListEmptyComponent={
+              <Text style={styles.emptyState}>
+                No comments yet. Be the first!
+              </Text>
+            }
           />
-          <TouchableOpacity
-            style={[
-              styles.composerSend,
-              (!composerText.trim() || sending) && styles.composerSendDisabled,
-            ]}
-            onPress={sendComment}
-            disabled={!composerText.trim() || sending}
-          >
-            <Text style={styles.composerSendText}>
-              {sending ? 'Sending…' : 'Send'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.composerBar}>
+            <View style={styles.composerInputWrapper}>
+              <TextInput
+                ref={composerRef}
+                style={styles.composerInput}
+                value={composerText}
+                onChangeText={setComposerText}
+                placeholder='Write a comment'
+                placeholderTextColor={theme.colors.textSecondary}
+                multiline
+                maxLength={300}
+              />
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.composerSend,
+                (!composerText.trim() || sending) &&
+                  styles.composerSendDisabled,
+              ]}
+              onPress={sendComment}
+              disabled={!composerText.trim() || sending}
+            >
+              <Text style={styles.composerSendText}>
+                {sending ? 'Sending…' : 'Send'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-// ...existing code...
-const styles = StyleSheet.create({
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 52,
-    paddingHorizontal: 8,
-    backgroundColor: '#f2f2f7',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e5ea',
-    zIndex: 10,
-  },
-  backButton: {
-    padding: 8,
-    marginLeft: 2,
-    marginTop: 2,
-  },
-  safe: { flex: 1, backgroundColor: '#f2f2f7' },
-  flex: { flex: 1 },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 120,
-  },
-  headerCard: {
-    marginTop: 12,
-  },
-  commentHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  commentHeaderText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1c1c1e',
-  },
-  loadMoreText: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  emptyState: {
-    textAlign: 'center',
-    color: '#8e8e93',
-    fontSize: 15,
-    marginTop: 40,
-  },
-  commentRow: {
-    flexDirection: 'row',
-    marginBottom: 18,
-  },
-  commentAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: '#e5e5ea',
-    marginRight: 12,
-  },
-  commentBody: {
-    flex: 1,
-    padding: 12,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-  },
-  commentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  commentAuthor: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1c1c1e',
-  },
-  commentTimestamp: {
-    fontSize: 12,
-    color: '#8e8e93',
-    marginTop: 2,
-  },
-  commentText: {
-    fontSize: 15,
-    color: '#1c1c1e',
-    lineHeight: 22,
-  },
-  composerBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#fff',
-    padding: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#d1d1d6',
-  },
-  composerInput: {
-    minHeight: 48,
-    maxHeight: 120,
-    borderWidth: 1,
-    borderColor: '#d1d1d6',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    textAlignVertical: 'top',
-    backgroundColor: '#f2f2f7',
-  },
-  composerSend: {
-    alignSelf: 'flex-end',
-    marginTop: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-  },
-  composerSendDisabled: {
-    backgroundColor: '#9cc7ff',
-  },
-  composerSendText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-});
+// Description: Create theme-aware styles for comment items
+const createCommentStyles = (theme) =>
+  StyleSheet.create({
+    commentRow: {
+      flexDirection: 'row',
+      marginBottom: 18,
+    },
+    commentAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 14,
+      backgroundColor: theme.colors.backgroundSecondary,
+      marginRight: 12,
+    },
+    commentBody: {
+      flex: 1,
+      padding: 12,
+      backgroundColor: theme.colors.card,
+      borderRadius: 16,
+    },
+    commentHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    commentAuthor: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    commentTimestamp: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    commentText: {
+      fontSize: 15,
+      color: theme.colors.text,
+      lineHeight: 22,
+    },
+  });
+
+// Description: Create theme-aware styles for InterestPostScreen
+const createStyles = (theme) =>
+  StyleSheet.create({
+    topBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      height: TOP_BAR_HEIGHT,
+      paddingHorizontal: 8,
+      backgroundColor: theme.colors.background,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+      zIndex: 10,
+    },
+    backButton: {
+      padding: 8,
+      marginLeft: 2,
+      marginTop: 2,
+    },
+    safe: { flex: 1, backgroundColor: theme.colors.background },
+    flex: { flex: 1 },
+    pageContent: {
+      flex: 1,
+    },
+    list: {
+      flex: 1,
+    },
+    listContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 16,
+    },
+    headerCard: {
+      marginTop: 12,
+    },
+    commentHeaderRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginTop: 24,
+      marginBottom: 12,
+    },
+    commentHeaderText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    loadMoreText: {
+      fontSize: 14,
+      color: '#007AFF',
+      fontWeight: '600',
+    },
+    emptyState: {
+      textAlign: 'center',
+      color: theme.colors.textSecondary,
+      fontSize: 15,
+      marginTop: 40,
+    },
+    commentRow: {
+      flexDirection: 'row',
+      marginBottom: 18,
+    },
+    commentAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 14,
+      backgroundColor: theme.colors.backgroundSecondary,
+      marginRight: 12,
+    },
+    commentBody: {
+      flex: 1,
+      padding: 12,
+      backgroundColor: theme.colors.card,
+      borderRadius: 16,
+    },
+    commentHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    commentAuthor: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    commentTimestamp: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    commentText: {
+      fontSize: 15,
+      color: theme.colors.text,
+      lineHeight: 22,
+    },
+    composerBar: {
+      paddingTop: 12,
+      paddingHorizontal: 16,
+      paddingBottom: 25,
+      backgroundColor: theme.colors.card,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+    },
+    composerInputWrapper: {
+      flex: 1,
+      marginRight: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: 18,
+      backgroundColor: theme.colors.inputBackground,
+      overflow: 'hidden',
+    },
+    composerInput: {
+      flex: 1,
+      minHeight: 44,
+      maxHeight: 120,
+      paddingHorizontal: 14,
+      paddingTop: 12,
+      paddingBottom: 10,
+      fontSize: 15,
+      textAlignVertical: 'top',
+      color: theme.colors.text,
+    },
+    composerSend: {
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      borderRadius: theme.radii.md,
+      backgroundColor: theme.colors.primary,
+    },
+    composerSendDisabled: {
+      opacity: 0.4,
+    },
+    composerSendText: {
+      color: theme.colors.background,
+      fontWeight: '600',
+      fontSize: 15,
+    },
+  });

@@ -86,11 +86,15 @@ const darkColors = {
 const gradients = {
   hero: ['#2563EB', '#7C3AED'],
   heroSecondary: ['#3B82F6', '#A855F7'],
+  onboarding: ['#FF6B6B', '#4DABF7'],
+  profile: ['#FF6B6B', '#4DABF7'],
 };
 
 const darkGradients = {
   hero: ['#3B82F6', '#A855F7'],
   heroSecondary: ['#60A5FA', '#C084FC'],
+  onboarding: ['#EF4444', '#3B82F6'],
+  profile: ['#EF4444', '#3B82F6'],
 };
 
 const spacing = {
