@@ -1418,9 +1418,7 @@ export default function ProfileScreen({ navigation }) {
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
               >
                 <MaterialIcons name='star' size={20} color='#FFD700' />
-                <Text style={styles.statValue}>
-                  {rating.toFixed(1)}
-                </Text>
+                <Text style={styles.statValue}>{rating.toFixed(1)}</Text>
               </View>
               <Text style={styles.statLabel}>
                 {`${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
