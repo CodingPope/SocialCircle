@@ -45,7 +45,7 @@
 	<key>GMSApiKey</key>
 	<string>${GOOGLE_MAPS_API_KEY}</string>
 	<key>FIREBASE_ANALYTICS_COLLECTION_ENABLED</key>
-	<false/>
+	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
     <key>LSMinimumSystemVersion</key>
