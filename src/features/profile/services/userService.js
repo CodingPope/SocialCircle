@@ -165,6 +165,7 @@ export async function createUser(uid, userData = {}) {
     isPopular: false,
     deviceToken: null,
     pushOptIn: false,
+    analyticsOptIn: true, // Default to enabled (user can opt-out in Privacy settings)
     isDeleted: false,
     deletedAt: null,
     // Badge system fields
