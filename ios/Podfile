@@ -16,6 +16,12 @@ prepare_react_native_project!
 # Fix for Firebase Swift pods requiring modular headers
 pod 'GoogleUtilities', :modular_headers => true
 pod 'FirebaseCore', :modular_headers => true
+pod 'FirebaseAuthInterop', :modular_headers => true
+pod 'FirebaseAppCheckInterop', :modular_headers => true
+pod 'FirebaseCoreExtension', :modular_headers => true
+pod 'RecaptchaInterop', :modular_headers => true
+pod 'FirebaseFirestoreInternal', :modular_headers => true
+pod 'FirebaseMessagingInterop', :modular_headers => true
 
 target 'SocialCircle' do
   use_expo_modules!

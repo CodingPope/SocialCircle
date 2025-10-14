@@ -43,7 +43,7 @@ export const useInterestStore = create((set) => ({
     set({ loading: true });
     try {
       const auth = getAuth();
-      const user = auth.currentUser;
+      const user = auth().currentUser;
       if (!user) throw new Error('No authenticated user found');
       const db = getFirestore();
       const userDocRef = doc(db, 'users', user.uid);
@@ -70,7 +70,7 @@ export const useInterestStore = create((set) => ({
     set({ loading: true });
     try {
       const auth = getAuth();
-      const user = auth.currentUser;
+      const user = auth().currentUser;
       if (!user) throw new Error('No authenticated user found');
       const db = getFirestore();
       const userDocRef = doc(db, 'users', user.uid);

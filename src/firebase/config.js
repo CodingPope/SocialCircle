@@ -15,18 +15,18 @@ import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import storage from '@react-native-firebase/storage';
 
-// Export auth instance directly (already configured via GoogleService-Info.plist)
+// Export auth module - consumers should call auth() to get the instance
 export { auth };
 
-// Initialize Firestore instance
+// Export Firestore instance
 export const db = firestore();
 
-// Initialize Functions in the same region as deployed callables
-const functionsInstance = functions().useRegion('us-central1');
+// Export Functions instance with region  
+export const functionsInstance = functions().useRegion('us-central1');
 export { functionsInstance as functions };
 
-// Storage reference
-const storageInstance = storage();
+// Export Storage instance
+export const storageInstance = storage();
 export { storageInstance as storage };
 
 // Description: Fetch user data from Firestore

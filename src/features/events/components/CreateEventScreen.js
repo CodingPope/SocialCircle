@@ -74,7 +74,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   // Debug: print Firebase runtime info to help diagnose permission errors
   useEffect(() => {
     try {
-      // console.log('DBG firebase auth.currentUser', auth?.currentUser || null);
+      // console.log('DBG firebase auth().currentUser', auth?.currentUser || null);
       // console.log('DBG user store.user', user || null);
       // console.log('DBG firestore projectId', db?.app?.options?.projectId);
       trackClient('create_event_screen_mount', {});

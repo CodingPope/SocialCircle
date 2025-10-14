@@ -5,7 +5,7 @@ import { getAuth } from 'firebase/auth';
 export async function fetchUserInterests() {
   try {
     const auth = getAuth();
-    const user = auth.currentUser;
+    const user = auth().currentUser;
 
     if (!user) {
       throw new Error('No authenticated user found');

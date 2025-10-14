@@ -376,7 +376,7 @@ const EventChatScreen = () => {
 
   // Fetch event info + attendees
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth().currentUser) return;
 
     const unsub = onSnapshot(
       doc(db, 'events', eventId),
@@ -482,11 +482,11 @@ const EventChatScreen = () => {
       } catch {}
       if (eventUnsubRef.current === unsub) eventUnsubRef.current = null;
     };
-  }, [eventId, auth.currentUser]);
+  }, [eventId, auth().currentUser]);
 
   // ✅ Chat messages listener (single source with error handler)
   useEffect(() => {
-    if (!auth.currentUser) return;
+    if (!auth().currentUser) return;
 
     const q = query(
       collection(db, 'chats', eventId, 'messages'),
@@ -529,7 +529,7 @@ const EventChatScreen = () => {
       } catch {}
       if (messagesUnsubRef.current === unsub) messagesUnsubRef.current = null;
     };
-  }, [eventId, auth.currentUser]);
+  }, [eventId, auth().currentUser]);
 
   useEffect(() => {
     if (!eventId) return;
@@ -584,7 +584,7 @@ const EventChatScreen = () => {
   }, [event?.ownerId]);
 
   // Check if current user is attendee
-  const currentUid = auth.currentUser?.uid || null;
+  const currentUid = auth().currentUser?.uid || null;
   const isAttendee =
     Array.isArray(event?.attendees) && currentUid
       ? event.attendees.includes(currentUid)
@@ -680,7 +680,7 @@ const EventChatScreen = () => {
     const trimmed = (input || '').trim();
     if (!trimmed) return;
 
-    const uid = auth.currentUser?.uid;
+    const uid = auth().currentUser?.uid;
     if (!uid) {
       Alert.alert('Not signed in', 'Please sign in to send messages.');
       return;
@@ -959,7 +959,7 @@ const EventChatScreen = () => {
       );
       return;
     }
-    const currentUid = auth.currentUser?.uid;
+    const currentUid = auth().currentUser?.uid;
     if (!currentUid || !eventId) return;
     if (isCreator) return; // Creator uses delete flow instead
 
@@ -1030,7 +1030,7 @@ const EventChatScreen = () => {
       setIsReportModalVisible(false);
       return;
     }
-    reportContent(auth.currentUser.uid, targetUserId, 'user', reason, {
+    reportContent(auth().currentUser.uid, targetUserId, 'user', reason, {
       details: `Report from chat of event ${eventId}`,
       context: { eventId },
     })
@@ -1134,7 +1134,7 @@ const EventChatScreen = () => {
       const chatSnap = await getDoc(chatDocRef);
       if (!chatSnap.exists()) {
         const participantIds = new Set();
-        if (auth.currentUser?.uid) participantIds.add(auth.currentUser.uid);
+        if (auth().currentUser?.uid) participantIds.add(auth().currentUser.uid);
         if (Array.isArray(event?.attendees)) {
           event.attendees.forEach((uid) => {
             if (typeof uid === 'string' && uid) participantIds.add(uid);
@@ -1150,7 +1150,7 @@ const EventChatScreen = () => {
           {
             eventId,
             createdAt: serverTimestamp(),
-            createdBy: auth.currentUser?.uid || null,
+            createdBy: auth().currentUser?.uid || null,
             participants: Array.from(participantIds),
             lastUpdated: serverTimestamp(),
             messageCount: 0,
@@ -1172,7 +1172,7 @@ const EventChatScreen = () => {
           pinned: {
             text: trimmed,
             updatedAt: lastUpdated,
-            updatedBy: auth.currentUser?.uid || null,
+            updatedBy: auth().currentUser?.uid || null,
           },
           lastUpdated,
         });
@@ -1188,7 +1188,7 @@ const EventChatScreen = () => {
       setPinnedSaving(false);
     }
   }, [
-    auth.currentUser?.uid,
+    auth().currentUser?.uid,
     event?.attendees,
     eventId,
     hostIds,
@@ -1440,7 +1440,7 @@ const EventChatScreen = () => {
                     photoURL: hostUser.photoURL,
                   }
                 : attendees.find((a) => a.id === item.senderId);
-            const isCurrentUser = item.senderId === auth.currentUser?.uid;
+            const isCurrentUser = item.senderId === auth().currentUser?.uid;
             const displayName =
               sender?.displayName || (isHost ? 'Host' : 'User');
             return (
@@ -1600,7 +1600,7 @@ const EventChatScreen = () => {
                 const ownerId = event?.ownerId;
                 if (hostUser && ownerId) {
                   setIsModalVisible(false);
-                  if (ownerId === auth.currentUser?.uid) {
+                  if (ownerId === auth().currentUser?.uid) {
                     // Navigate to the main Profile tab
                     navigation.reset({
                       index: 0,
@@ -1867,7 +1867,7 @@ const EventChatScreen = () => {
             </View>
 
             {/* Requests Section */}
-            {event.ownerId === auth.currentUser?.uid && (
+            {event.ownerId === auth().currentUser?.uid && (
               <View style={styles.card}>
                 <Text style={styles.sectionTitle}>Requests</Text>
                 {requesters.length > 0 ? (
@@ -1995,7 +1995,7 @@ const EventChatScreen = () => {
                           //   });
 
                           // Soft delete flow
-                          deleteEvent(eventId, auth.currentUser.uid)
+                          deleteEvent(eventId, auth().currentUser.uid)
                             .then(() => {
                               safeExitChat();
                               Alert.alert(

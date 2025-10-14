@@ -35,7 +35,7 @@ function getCommentsCollection(postId) {
 
 async function getCurrentUser() {
   const auth = getAuth();
-  const user = auth.currentUser;
+  const user = auth().currentUser;
   if (!user) throw new Error('User must be signed in');
   return user;
 }
