@@ -299,22 +299,37 @@ export default function DiscoveryScreen() {
       return;
     }
 
+    // Description: Only show tutorial for new users (created within last 7 days)
+    const isNewUser = () => {
+      if (!user?.createdAt) return false;
+      try {
+        const createdDate = user.createdAt?.toDate?.() || new Date(user.createdAt);
+        const daysSinceCreation = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
+        return daysSinceCreation <= 7;
+      } catch (e) {
+        console.warn('Error checking user creation date:', e);
+        return false;
+      }
+    };
+
     let isMounted = true;
     AsyncStorage.getItem(createPostTutorialKey)
       .then((value) => {
         if (!isMounted) return;
-        setShowCreatePostTutorial(value !== 'true');
+        // Only show if: not dismissed before AND user is new
+        setShowCreatePostTutorial(value !== 'true' && isNewUser());
       })
       .catch((err) => {
         console.warn('Discovery tutorial load failed:', err?.message || err);
         if (!isMounted) return;
-        setShowCreatePostTutorial(true);
+        // Default to showing only for new users
+        setShowCreatePostTutorial(isNewUser());
       });
 
     return () => {
       isMounted = false;
     };
-  }, [createPostTutorialKey]);
+  }, [createPostTutorialKey, user?.createdAt]);
 
   useEffect(() => {
     setEvents((prev) => {

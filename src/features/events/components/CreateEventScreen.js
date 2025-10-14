@@ -158,19 +158,26 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const pickImageAndUpload = async () => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) return Alert.alert('Permission required');
+      if (!perm.granted) {
+        Alert.alert(
+          'Permission Required',
+          'Photo library access is needed to upload an event image. Please enable it in Settings.'
+        );
+        return;
+      }
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         quality: 0.8,
       });
-      if (!res.canceled) {
+      if (!res.canceled && res.assets && res.assets[0]) {
         const uri = res.assets[0].uri;
         // Description: Defer uploading until after the event document exists (so storage rules that require ownerId match succeed).
         setImageUri(uri);
       }
     } catch (e) {
-      Alert.alert('Image pick error', e.message);
+      console.error('Image pick error:', e);
+      Alert.alert('Image Selection Failed', e.message || 'Could not select image. Please try again.');
     }
   };
 

@@ -2,9 +2,9 @@
 // - Respects in-app analytics opt-in via services/analytics.isEnabled
 // - Uses callable function 'trackEvent' (us-central1)
 // - Best-effort: never throws
+// - Uses React Native Firebase for native mobile analytics
 
-import { getApp } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { functions } from '../firebase/config';
 import {
   event as analyticsEvent,
   isEnabled as analyticsIsEnabled,
@@ -246,8 +246,7 @@ export async function track(name, payload = {}) {
     }
 
     if (!cf) {
-      const functions = getFunctions(getApp(), 'us-central1');
-      cf = httpsCallable(functions, 'trackEvent');
+      cf = functions.httpsCallable('trackEvent');
     }
 
     const safeName = name
@@ -257,13 +256,22 @@ export async function track(name, payload = {}) {
       .slice(0, 64);
     const safePayload = isPlainObject(payload) ? sanitize(payload) : {};
 
+    // Log to native Firebase Analytics
     try {
       await analyticsEvent(safeName, safePayload);
-    } catch {}
+    } catch (analyticsError) {
+      console.warn('Native analytics event failed:', analyticsError?.message);
+    }
 
-    await cf({ name: safeName, payload: safePayload });
-  } catch {
+    // Also track via Cloud Function for server-side processing
+    try {
+      await cf({ name: safeName, payload: safePayload });
+    } catch (callableError) {
+      console.warn('Analytics callable failed:', callableError?.message);
+    }
+  } catch (error) {
     // Never throw from analytics
+    console.warn('Analytics track failed:', error?.message);
   }
 }
 
