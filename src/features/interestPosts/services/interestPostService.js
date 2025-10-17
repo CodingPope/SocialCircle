@@ -1,4 +1,3 @@
-import { getAuth } from 'firebase/auth';
 import {
   addDoc,
   arrayUnion,
@@ -17,10 +16,13 @@ import {
   Timestamp,
   updateDoc,
   where,
-} from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+} from '../../../firebase/firestoreCompat';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { db, storage } from '../../../firebase/config';
+import { auth, db, storage } from '../../../firebase/config';
+import {
+  interpretStorageError,
+  logStorageDiagnostic,
+} from '../../../firebase/storageUtils';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_TEXT_LENGTH = 2000;
@@ -34,7 +36,6 @@ function getCommentsCollection(postId) {
 }
 
 async function getCurrentUser() {
-  const auth = getAuth();
   const user = auth().currentUser;
   if (!user) throw new Error('User must be signed in');
   return user;
@@ -42,10 +43,13 @@ async function getCurrentUser() {
 
 async function fetchUserSnapshot(uid) {
   const snap = await getDoc(doc(db, 'users', uid));
-  if (!snap.exists()) throw new Error('User document missing');
+  if (!snap.exists) throw new Error('User document missing');
   const data = snap.data();
   return {
-    displayName: [data.firstName, data.lastName].filter(Boolean).join(' ').trim(),
+    displayName: [data.firstName, data.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim(),
     avatarUrl: data.profileImage || null,
     rating: typeof data.rating === 'number' ? data.rating : null,
   };
@@ -98,10 +102,25 @@ async function uploadImage({
       throw new Error('Image exceeds maximum size of 10MB');
     }
     const path = suffix ? `${storagePath}/${suffix}` : storagePath;
-    const storageRef = ref(storage, path);
-    const snap = await uploadBytes(storageRef, blob, { contentType });
-    const url = await getDownloadURL(snap.ref);
-    return { url, path, size: blob.size };
+    const storageRef = storage.ref(path);
+    try {
+      await storageRef.putFile(uri, { contentType });
+      const url = await storageRef.getDownloadURL();
+      return { url, path, size: blob.size };
+    } catch (error) {
+      const interpreted = interpretStorageError(error, {
+        context: 'interest-post-upload',
+        path,
+      });
+      logStorageDiagnostic('interest-post-upload', interpreted.details);
+      const friendly = interpreted.needsConsoleFix
+        ? 'Upload blocked: please re-link Firebase Storage in the console.'
+        : interpreted.userMessage;
+      const err = new Error(friendly || 'Failed to upload image');
+      err.code = interpreted.code;
+      err.details = interpreted.details;
+      throw err;
+    }
   };
 
   const [main, thumb] = await Promise.all([
@@ -115,11 +134,7 @@ async function uploadImage({
   };
 }
 
-export async function createInterestPost({
-  content,
-  interestId,
-  media,
-}) {
+export async function createInterestPost({ content, interestId, media }) {
   const user = await getCurrentUser();
   const text = (content || '').trim();
   if (!text) throw new Error('Post content is required');
@@ -183,7 +198,9 @@ export async function createInterestPost({
     updatedAt: localCreatedAt,
     mediaUrl: uploaded?.main?.url || null,
     mediaThumbnailUrl: uploaded?.thumb?.url || null,
-    mediaStoragePath: uploaded ? `interest-posts/${user.uid}/${docRef.id}` : null,
+    mediaStoragePath: uploaded
+      ? `interest-posts/${user.uid}/${docRef.id}`
+      : null,
   };
 }
 
@@ -191,7 +208,7 @@ export async function deleteInterestPost(postId) {
   const user = await getCurrentUser();
   const ref = doc(db, 'interestPosts', postId);
   const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('Post not found');
+  if (!snap.exists) throw new Error('Post not found');
   if (snap.data().creatorId !== user.uid)
     throw new Error('You can only delete your own post');
 
@@ -209,7 +226,7 @@ export async function fetchInterestPostById(postId) {
   if (!postId) return null;
   const ref = doc(db, 'interestPosts', postId);
   const snap = await getDoc(ref);
-  if (!snap.exists()) return null;
+  if (!snap.exists) return null;
   return { id: snap.id, ...snap.data() };
 }
 
@@ -344,7 +361,7 @@ export async function softDeleteComment(postId, commentId) {
   const user = await getCurrentUser();
   const ref = doc(db, 'interestPosts', postId, 'comments', commentId);
   const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error('Comment not found');
+  if (!snap.exists) throw new Error('Comment not found');
   const data = snap.data();
   if (data.authorId !== user.uid)
     throw new Error('You can only delete your comment');

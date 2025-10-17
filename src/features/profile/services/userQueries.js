@@ -1,21 +1,18 @@
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { auth, db } from '../../../firebase/config';
 
 // Description: Fetches the current user's interests from Firestore
 export async function fetchUserInterests() {
   try {
-    const auth = getAuth();
     const user = auth().currentUser;
 
     if (!user) {
       throw new Error('No authenticated user found');
     }
 
-    const db = getFirestore();
-    const userDocRef = doc(db, 'users', user.uid);
-    const userDoc = await getDoc(userDocRef);
+    const userDocRef = db.collection('users').doc(user.uid);
+    const userDoc = await userDocRef.get();
 
-    if (userDoc.exists()) {
+    if (userDoc.exists) {
       const userData = userDoc.data();
       return userData.interests || []; // Ensure interests are returned as an array
     } else {
@@ -30,11 +27,10 @@ export async function fetchUserInterests() {
 // Description: Fetches user data by their ID from Firestore
 export async function fetchUserById(userId) {
   try {
-    const db = getFirestore();
-    const userDocRef = doc(db, 'users', userId);
-    const userDoc = await getDoc(userDocRef);
+    const userDocRef = db.collection('users').doc(userId);
+    const userDoc = await userDocRef.get();
 
-    if (userDoc.exists()) {
+    if (userDoc.exists) {
       const userData = userDoc.data();
       return {
         firstName: userData.firstName || '',

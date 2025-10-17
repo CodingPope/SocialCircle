@@ -21,15 +21,15 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
+import { db } from '../../../firebase/config';
 import {
-  getFirestore,
   collection,
   query,
   onSnapshot,
   where,
   doc,
   getDoc,
-} from 'firebase/firestore';
+} from '../../../firebase/firestoreCompat';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import CreateEventScreen from './CreateEventScreen';
@@ -127,8 +127,6 @@ export default function MapScreen() {
       : '';
     return `${blocked}|${blockedBy}`;
   }, [user?.blocked, user?.blockedBy]);
-
-  const db = getFirestore();
 
   const [events, setEvents] = useState([]);
   const [filteredEvents, setFilteredEvents] = useState([]);
@@ -481,7 +479,7 @@ export default function MapScreen() {
       try {
         const eventRef = doc(db, 'events', eventId);
         const snap = await getDoc(eventRef);
-        if (!snap.exists()) {
+        if (!snap.exists) {
           Alert.alert(
             'Event unavailable',
             'This event may no longer be available.'
@@ -1509,6 +1507,8 @@ export default function MapScreen() {
           userInterfaceStyle={
             Platform.OS === 'ios' ? mapAppearance.userInterfaceStyle : undefined
           }
+          showsUserLocation={true}
+          showsMyLocationButton={false}
         >
           {filteredEvents
             // Defensive: ensure marker has a valid location and isn't soft-deleted

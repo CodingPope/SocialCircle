@@ -4,7 +4,7 @@
 // - Best-effort: never throws
 // - Uses React Native Firebase for native mobile analytics
 
-import { functions } from '../firebase/config';
+import { functions, auth } from '../firebase/config';
 import {
   event as analyticsEvent,
   isEnabled as analyticsIsEnabled,
@@ -141,6 +141,7 @@ const EVENT_SCHEMAS = {
 };
 
 let cf = null; // cached callable
+const loggedCallableWarnings = new Set();
 
 function isPlainObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v);
@@ -267,7 +268,41 @@ export async function track(name, payload = {}) {
     try {
       await cf({ name: safeName, payload: safePayload });
     } catch (callableError) {
-      console.warn('Analytics callable failed:', callableError?.message);
+      const code = callableError?.code || '';
+      const message = callableError?.message || String(callableError);
+
+      if (code === 'functions/unauthenticated') {
+        try {
+          const currentUser = auth().currentUser;
+          if (currentUser) {
+            await currentUser.getIdToken(true);
+            await cf({ name: safeName, payload: safePayload });
+            return;
+          }
+        } catch (retryError) {
+          const retryMessage = retryError?.message || String(retryError);
+          if (!loggedCallableWarnings.has('unauthenticated-retry')) {
+            console.warn('Analytics callable retry failed:', retryMessage);
+            loggedCallableWarnings.add('unauthenticated-retry');
+          }
+        }
+      }
+
+      if (
+        code === 'functions/unavailable' ||
+        code === 'unavailable' ||
+        message?.toUpperCase?.() === 'UNAVAILABLE'
+      ) {
+        if (!loggedCallableWarnings.has('unavailable')) {
+          console.warn(
+            'Analytics callable temporarily unavailable; skipping until service recovers.'
+          );
+          loggedCallableWarnings.add('unavailable');
+        }
+        return;
+      }
+
+      console.warn('Analytics callable failed:', message);
     }
   } catch (error) {
     // Never throw from analytics

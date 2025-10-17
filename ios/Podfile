@@ -13,15 +13,10 @@ install! 'cocoapods',
 
 prepare_react_native_project!
 
-# Fix for Firebase Swift pods requiring modular headers
-pod 'GoogleUtilities', :modular_headers => true
-pod 'FirebaseCore', :modular_headers => true
-pod 'FirebaseAuthInterop', :modular_headers => true
-pod 'FirebaseAppCheckInterop', :modular_headers => true
-pod 'FirebaseCoreExtension', :modular_headers => true
-pod 'RecaptchaInterop', :modular_headers => true
-pod 'FirebaseFirestoreInternal', :modular_headers => true
-pod 'FirebaseMessagingInterop', :modular_headers => true
+pre_install do |installer|
+  # Description: Allow mixing static GoogleMaps frameworks with dynamic frameworks
+  Pod::Installer::Xcode::TargetValidator.send(:define_method, :verify_no_static_framework_transitive_dependencies) {}
+end
 
 target 'SocialCircle' do
   use_expo_modules!
@@ -41,6 +36,8 @@ target 'SocialCircle' do
 
 # @generated begin react-native-maps - expo prebuild (DO NOT MODIFY) sync-e9cc66c360abe50bc66d89fffb3c55b034d7d369
   pod 'react-native-google-maps', path: File.dirname(`node --print "require.resolve('react-native-maps/package.json')"`)
+  pod 'GoogleMaps', '8.4.0'
+  pod 'Google-Maps-iOS-Utils', '5.0.0'
 # @generated end react-native-maps
   config = use_native_modules!(config_command)
 
@@ -63,6 +60,118 @@ target 'SocialCircle' do
       :ccache_enabled => podfile_properties['apple.ccacheEnabled'] == 'true',
     )
 
+    # Description: Fix static binary framework compatibility with dynamic frameworks
+    def ensure_array_setting(build_settings, key)
+      current = build_settings[key]
+      return current if current.is_a?(Array)
+
+      values = current ? Array(current) : []
+      values.empty? ? ['$(inherited)'] : values
+    end
+
+    def merge_unique(base, additional)
+      merged = (base + additional).compact
+      merged.uniq
+    end
+
+    def ensure_swift_flags(build_settings, flag_pairs)
+      existing = build_settings['OTHER_SWIFT_FLAGS']
+      parts =
+        if existing.is_a?(Array)
+          existing
+        elsif existing.is_a?(String) && !existing.empty?
+          existing.split(' ')
+        else
+          ['$(inherited)']
+        end
+
+      flag_pairs.each do |pair|
+        already_present = parts.each_cons(pair.length).any? { |segment| segment == pair }
+        parts += pair unless already_present
+      end
+
+      build_settings['OTHER_SWIFT_FLAGS'] = parts
+    end
+
+    google_maps_framework_paths = [
+      '${PODS_ROOT}/GoogleMaps/Base/Frameworks',
+      '${PODS_ROOT}/GoogleMaps/Maps/Frameworks'
+    ]
+
+    google_maps_linker_flags = [
+      '-framework GoogleMapsBase',
+      '-framework GoogleMaps',
+      '-framework GoogleMapsCore',
+      '-lc++'
+    ]
+
+    simulator_module_map_pairs = [
+      ['-Xcc', '-fmodule-map-file=${PODS_ROOT}/GoogleMaps/Base/Frameworks/GoogleMapsBase.xcframework/ios-arm64_x86_64-simulator/GoogleMapsBase.framework/Modules/module.modulemap'],
+      ['-Xcc', '-fmodule-map-file=${PODS_ROOT}/GoogleMaps/Maps/Frameworks/GoogleMaps.xcframework/ios-arm64_x86_64-simulator/GoogleMaps.framework/Modules/module.modulemap'],
+      ['-Xcc', '-fmodule-map-file=${PODS_ROOT}/GoogleMaps/Maps/Frameworks/GoogleMapsCore.xcframework/ios-arm64_x86_64-simulator/GoogleMapsCore.framework/Modules/module.modulemap']
+    ]
+
+    device_module_map_pairs = [
+      ['-Xcc', '-fmodule-map-file=${PODS_ROOT}/GoogleMaps/Base/Frameworks/GoogleMapsBase.xcframework/ios-arm64/GoogleMapsBase.framework/Modules/module.modulemap'],
+      ['-Xcc', '-fmodule-map-file=${PODS_ROOT}/GoogleMaps/Maps/Frameworks/GoogleMaps.xcframework/ios-arm64/GoogleMaps.framework/Modules/module.modulemap'],
+      ['-Xcc', '-fmodule-map-file=${PODS_ROOT}/GoogleMaps/Maps/Frameworks/GoogleMapsCore.xcframework/ios-arm64/GoogleMapsCore.framework/Modules/module.modulemap']
+    ]
+
+    firebase_analytics_framework_paths = [
+      '${PODS_ROOT}/FirebaseAnalytics/Frameworks',
+      '${PODS_ROOT}/GoogleAppMeasurement/Frameworks',
+      '${PODS_CONFIGURATION_BUILD_DIR}/PromisesObjC'
+    ]
+
+    firebase_analytics_linker_flags = [
+      '-framework FirebaseAnalytics',
+      '-framework GoogleAppMeasurement',
+      '-framework FirebaseCore',
+      '-framework FirebaseCoreInternal',
+      '-framework FirebaseInstallations',
+      '-framework FirebaseSharedSwift',
+      '-framework GoogleUtilities',
+      '-framework nanopb',
+      '-framework FBLPromises'
+    ]
+
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+        
+        # Description: Add GoogleMaps framework search paths and linker flags for react-native-google-maps
+        if target.name == 'react-native-google-maps'
+          framework_search_paths = ensure_array_setting(config.build_settings, 'FRAMEWORK_SEARCH_PATHS')
+          config.build_settings['FRAMEWORK_SEARCH_PATHS'] = merge_unique(framework_search_paths, google_maps_framework_paths)
+
+          linker_flags = ensure_array_setting(config.build_settings, 'OTHER_LDFLAGS')
+          config.build_settings['OTHER_LDFLAGS'] = merge_unique(linker_flags, google_maps_linker_flags + ['$(inherited)'])
+        end
+        
+        # Description: Fix GoogleMaps module map issues for simulator and device builds
+        if target.name == 'Google-Maps-iOS-Utils'
+          config.build_settings['DEFINES_MODULE'] = 'YES'
+          
+          framework_search_paths = ensure_array_setting(config.build_settings, 'FRAMEWORK_SEARCH_PATHS')
+          config.build_settings['FRAMEWORK_SEARCH_PATHS'] = merge_unique(framework_search_paths, google_maps_framework_paths)
+
+          linker_flags = ensure_array_setting(config.build_settings, 'OTHER_LDFLAGS')
+          config.build_settings['OTHER_LDFLAGS'] = merge_unique(linker_flags, google_maps_linker_flags + ['$(inherited)'])
+
+          ensure_swift_flags(config.build_settings, simulator_module_map_pairs + device_module_map_pairs)
+        end
+
+        # Description: Ensure Firebase Analytics dynamically links Firebase frameworks
+        if target.name == 'RNFBAnalytics'
+          framework_search_paths = ensure_array_setting(config.build_settings, 'FRAMEWORK_SEARCH_PATHS')
+          config.build_settings['FRAMEWORK_SEARCH_PATHS'] = merge_unique(framework_search_paths, firebase_analytics_framework_paths)
+
+          linker_flags = ensure_array_setting(config.build_settings, 'OTHER_LDFLAGS')
+          config.build_settings['OTHER_LDFLAGS'] = merge_unique(linker_flags, firebase_analytics_linker_flags + ['$(inherited)'])
+        end
+      end
+    end
+
     # This is necessary for Xcode 14, because it signs resource bundles by default
     # when building for devices.
     installer.target_installation_results.pod_target_installation_results
@@ -70,15 +179,6 @@ target 'SocialCircle' do
       target_installation_result.resource_bundle_targets.each do |resource_bundle_target|
         resource_bundle_target.build_configurations.each do |config|
           config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-        end
-      end
-    end
-
-    # Fix for Firebase/Google pods requiring modular headers
-    installer.pods_project.targets.each do |target|
-      if target.name.start_with?('Firebase') || target.name.start_with?('Google')
-        target.build_configurations.each do |config|
-          config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
         end
       end
     end

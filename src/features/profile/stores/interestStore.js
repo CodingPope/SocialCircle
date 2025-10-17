@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { getFirestore, doc, getDoc, updateDoc } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { auth, db } from '../../../firebase/config';
+import { doc, getDoc, updateDoc } from '../../../firebase/firestoreCompat';
 
 /**
  * Zustand store for managing user interests with Firestore integration.
@@ -42,13 +42,11 @@ export const useInterestStore = create((set) => ({
   fetchInterests: async () => {
     set({ loading: true });
     try {
-      const auth = getAuth();
       const user = auth().currentUser;
       if (!user) throw new Error('No authenticated user found');
-      const db = getFirestore();
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
-      if (userDoc.exists()) {
+      if (userDoc.exists) {
         const userData = userDoc.data();
         set({ interests: userData.interests || [] });
       } else {
@@ -69,10 +67,8 @@ export const useInterestStore = create((set) => ({
   updateInterests: async (interests) => {
     set({ loading: true });
     try {
-      const auth = getAuth();
       const user = auth().currentUser;
       if (!user) throw new Error('No authenticated user found');
-      const db = getFirestore();
       const userDocRef = doc(db, 'users', user.uid);
       await updateDoc(userDocRef, { interests });
       set({ interests });

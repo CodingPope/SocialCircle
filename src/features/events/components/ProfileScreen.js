@@ -28,7 +28,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { signOut } from 'firebase/auth';
 import {
   auth,
   getUserData,
@@ -49,7 +48,10 @@ import {
   getDoc,
   updateDoc,
   arrayRemove,
-} from 'firebase/firestore';
+  onSnapshot,
+  writeBatch,
+  serverTimestamp,
+} from '../../../firebase/firestoreCompat';
 import PostCard from './PostCard';
 import InterestPostCard from '../../interestPosts/components/InterestPostCard';
 import { fetchInterestPostsByCreator } from '../../interestPosts/services/interestPostService';
@@ -98,15 +100,13 @@ export default function ProfileScreen({ navigation }) {
   useEffect(() => {
     if (!user?.uid) return;
     // Listen for recipient notifications; compute unread locally to include docs without `read` field
-    const fs = require('firebase/firestore');
-    const cfg = require('../../../firebase/config');
-    const q = fs.query(
-      fs.collection(cfg.db, 'notifications'),
-      fs.where('recipientId', '==', user.uid)
+    const notificationsQuery = query(
+      collection(db, 'notifications'),
+      where('recipientId', '==', user.uid)
     );
 
-    let unsub = fs.onSnapshot(
-      q,
+    let unsub = onSnapshot(
+      notificationsQuery,
       (snapshot) => {
         try {
           const activeUnread = snapshot.docs.filter((d) => {
@@ -178,19 +178,17 @@ export default function ProfileScreen({ navigation }) {
         navigation.navigate('Notifications');
         return;
       }
-      const fs = require('firebase/firestore');
-      const cfg = require('../../../firebase/config');
-      const q = fs.query(
-        fs.collection(cfg.db, 'notifications'),
-        fs.where('recipientId', '==', user.uid)
+      const q = query(
+        collection(db, 'notifications'),
+        where('recipientId', '==', user.uid)
       );
-      const snap = await fs.getDocs(q);
+      const snap = await getDocs(q);
       if (snap?.size) {
-        const batch = fs.writeBatch(cfg.db);
+        const batch = writeBatch(db);
         snap.docs.forEach((d) => {
           const data = d.data() || {};
           if (data.isDeleted !== true && data.read !== true) {
-            batch.update(d.ref, { read: true, readAt: fs.serverTimestamp() });
+            batch.update(d.ref, { read: true, readAt: serverTimestamp() });
           }
         });
         await batch.commit();
@@ -1032,7 +1030,7 @@ export default function ProfileScreen({ navigation }) {
     try {
       const eventRef = doc(db, 'events', eventId);
       const eventSnapshot = await getDoc(eventRef);
-      if (!eventSnapshot.exists()) {
+      if (!eventSnapshot.exists) {
         Alert.alert('Event not found', 'This event no longer exists.');
         return;
       }

@@ -13,7 +13,7 @@ import {
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../../../../../firebase/config';
 import { useUserStore } from '../../../../profile';
 import { mergeUserFields } from '../../../../profile/services/userService';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';

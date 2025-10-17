@@ -2,8 +2,7 @@
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../../../firebase/config';
+import { db, serverTimestamp } from '../../../firebase/config';
 import { useUserStore } from '../../profile';
 import { EAS_PROJECT_ID } from '@env';
 
@@ -72,13 +71,11 @@ export async function initPushForUser(uid) {
     if (!token) return;
 
     // Ensure user profile exists before writing (business accounts might not have one)
-    const fs = await import('firebase/firestore');
-    const cfg = await import('../../../firebase/config');
-    const userRef = fs.doc(cfg.db, 'users', uid);
-    const snap = await fs.getDoc(userRef);
-    if (!snap.exists()) return; // skip for business accounts
+    const userRef = db.collection('users').doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) return; // skip for business accounts
 
-    await updateDoc(doc(db, 'users', uid), {
+    await userRef.update({
       deviceToken: token,
       pushOptIn: true,
       devicePlatform: Platform.OS,

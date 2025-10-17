@@ -1,11 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, Text, Button, StyleSheet, Platform } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
-import {
-  GoogleAuthProvider,
-  signInWithCredential,
-  onAuthStateChanged,
-} from 'firebase/auth';
 import { auth } from '../../../firebase/config';
 import * as WebBrowser from 'expo-web-browser';
 import { GOOGLE_EXPO_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
@@ -24,8 +19,13 @@ export default function SocialAuthScreen({ navigation }) {
   useEffect(() => {
     if (response?.type === 'success') {
       const { id_token, access_token } = response.authentication;
-      const credential = GoogleAuthProvider.credential(id_token, access_token);
-      signInWithCredential(auth, credential).catch((error) =>
+      const credential = auth.GoogleAuthProvider.credential(
+        id_token,
+        access_token
+      );
+      auth()
+        .signInWithCredential(credential)
+        .catch((error) =>
         console.error('Google sign-in error', error)
       );
     }

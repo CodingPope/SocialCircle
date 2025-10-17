@@ -22,6 +22,7 @@ const projectId = process.env.GCLOUD_PROJECT;
 const SHARE_CONFIG = Object.freeze({
   apiKey:
     process.env.SHARE_DYNAMIC_LINK_API_KEY ||
+    process.env.FIREBASE_WEB_API_KEY ||
     process.env.FIREBASE_API_KEY ||
     '',
   domainUriPrefix:
@@ -55,6 +56,65 @@ function truncate(text, max = 160) {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max - 1)}…`;
+}
+
+const AGE_BUCKETS = Object.freeze([
+  'under_18',
+  '18_24',
+  '25_34',
+  '35_44',
+  '45_54',
+  '55_plus',
+  'unknown',
+]);
+
+const SEX_BUCKETS = Object.freeze([
+  'female',
+  'male',
+  'non_binary',
+  'prefer_not_say',
+  'other',
+  'unknown',
+]);
+
+function incrementCounter(target, key) {
+  if (!Object.prototype.hasOwnProperty.call(target, key)) {
+    target[key] = 0;
+  }
+  target[key] += 1;
+}
+
+function ageBracketForDob(dob, referenceDate = new Date()) {
+  const date = toDate(dob);
+  if (!date) return 'unknown';
+
+  let age = referenceDate.getFullYear() - date.getFullYear();
+  const monthDiff = referenceDate.getMonth() - date.getMonth();
+  if (
+    monthDiff < 0 ||
+    (monthDiff === 0 && referenceDate.getDate() < date.getDate())
+  ) {
+    age -= 1;
+  }
+  if (!Number.isFinite(age) || age < 0 || age > 120) return 'unknown';
+  if (age < 18) return 'under_18';
+  if (age <= 24) return '18_24';
+  if (age <= 34) return '25_34';
+  if (age <= 44) return '35_44';
+  if (age <= 54) return '45_54';
+  return '55_plus';
+}
+
+function normalizeSexMetric(value) {
+  const raw = (value || '').toString().trim().toLowerCase();
+  if (!raw) return 'unknown';
+  if (['female', 'f', 'woman'].includes(raw)) return 'female';
+  if (['male', 'm', 'man'].includes(raw)) return 'male';
+  if (['nonbinary', 'non-binary', 'non_binary', 'nb'].includes(raw))
+    return 'non_binary';
+  if (['prefer_not_say', 'prefer not to say'].includes(raw))
+    return 'prefer_not_say';
+  return 'other';
 }
 
 async function createShortDynamicLink({ link, title, description, imageUrl }) {
@@ -3074,6 +3134,127 @@ exports.updateCategories = onCall(
       logger.error('Error updating categories:', error);
       throw new HttpsError('internal', 'Failed to update categories');
     }
+  }
+);
+
+exports.aggregateUsageMetrics = onSchedule(
+  {
+    schedule: 'every day 03:00',
+    timeZone: 'America/Los_Angeles',
+    retryConfig: { retryCount: 3 },
+  },
+  async () => {
+    const now = new Date();
+    const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const totals = {
+      totalUsers: 0,
+      newUsers24h: 0,
+      newUsers7d: 0,
+      newUsers30d: 0,
+      dau: 0,
+      wau: 0,
+      mau: 0,
+      analyticsOptIn: 0,
+    };
+
+    const ageBuckets = {};
+    for (const key of AGE_BUCKETS) ageBuckets[key] = 0;
+    const sexBuckets = {};
+    for (const key of SEX_BUCKETS) sexBuckets[key] = 0;
+
+    const batchSize = 500;
+    let lastDocId = null;
+
+    while (true) {
+      let query = db
+        .collection('users')
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(batchSize);
+
+      if (lastDocId) {
+        query = query.startAfter(lastDocId);
+      }
+
+      const snap = await query.get();
+      if (snap.empty) break;
+
+      for (const doc of snap.docs) {
+        const data = doc.data() || {};
+        totals.totalUsers += 1;
+
+        if (data.analyticsOptIn === true) {
+          totals.analyticsOptIn += 1;
+        }
+
+        const createdAt = toDate(data.createdAt);
+        if (createdAt) {
+          if (createdAt >= dayAgo) totals.newUsers24h += 1;
+          if (createdAt >= weekAgo) totals.newUsers7d += 1;
+          if (createdAt >= monthAgo) totals.newUsers30d += 1;
+        }
+
+        const lastActive = toDate(
+          data.lastActiveAt || data.lastActive || data.updatedAt
+        );
+        if (lastActive) {
+          if (lastActive >= dayAgo) totals.dau += 1;
+          if (lastActive >= weekAgo) totals.wau += 1;
+          if (lastActive >= monthAgo) totals.mau += 1;
+        }
+
+        const ageBucket = ageBracketForDob(data.dob, now);
+        incrementCounter(ageBuckets, ageBucket);
+
+        const sexBucket = normalizeSexMetric(data.sex);
+        incrementCounter(sexBuckets, sexBucket);
+      }
+
+      lastDocId = snap.docs[snap.docs.length - 1].id;
+    }
+
+    const optInRate =
+      totals.totalUsers > 0
+        ? Number((totals.analyticsOptIn / totals.totalUsers).toFixed(4))
+        : 0;
+
+    const summary = {
+      computedAt: admin.firestore.Timestamp.now(),
+      totals: {
+        ...totals,
+        analyticsOptInRate: optInRate,
+      },
+      windows: {
+        dau: totals.dau,
+        wau: totals.wau,
+        mau: totals.mau,
+        newUsers24h: totals.newUsers24h,
+        newUsers7d: totals.newUsers7d,
+        newUsers30d: totals.newUsers30d,
+      },
+      demographics: {
+        age: ageBuckets,
+        sex: sexBuckets,
+      },
+    };
+
+    const usageDoc = db.collection('metrics').doc('usage');
+    await usageDoc.set(summary, { merge: true });
+
+    const dateKey = now.toISOString().slice(0, 10);
+    await usageDoc
+      .collection('daily')
+      .doc(dateKey)
+      .set(summary, { merge: true });
+
+    logger.info('[metrics] usage summary updated', {
+      totalUsers: totals.totalUsers,
+      dau: totals.dau,
+      wau: totals.wau,
+      mau: totals.mau,
+    });
   }
 );
 

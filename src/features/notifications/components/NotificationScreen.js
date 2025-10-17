@@ -28,8 +28,6 @@ import { useUserStore } from '../../profile/stores/userStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import { db, functions } from '../../../firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 
@@ -75,10 +73,14 @@ const NotificationCard = memo(
             const promises = [];
             if (!eventTitle && item.eventId) {
               promises.push(
-                getDoc(doc(db, 'events', item.eventId)).then((snap) => {
-                  if (mounted && snap.exists())
-                    setEventTitle(snap.data()?.title || null);
-                })
+                db
+                  .collection('events')
+                  .doc(item.eventId)
+                  .get()
+                  .then((snap) => {
+                    if (mounted && snap.exists)
+                      setEventTitle(snap.data()?.title || null);
+                  })
               );
             }
             if (requesterId) {
@@ -100,9 +102,13 @@ const NotificationCard = memo(
               if (!requester) {
                 // Fallback
                 promises.push(
-                  getDoc(doc(db, 'users', requesterId)).then((snap) => {
-                    if (mounted && snap.exists()) setRequester(snap.data());
-                  })
+                  db
+                    .collection('users')
+                    .doc(requesterId)
+                    .get()
+                    .then((snap) => {
+                      if (mounted && snap.exists) setRequester(snap.data());
+                    })
                 );
               }
             }
@@ -359,7 +365,7 @@ const NotificationScreen = () => {
         console.warn('Accept missing ids', { eventId, requesterId });
         return false;
       }
-      const acceptFn = httpsCallable(functions, 'acceptRsvpRequest');
+      const acceptFn = functions.httpsCallable('acceptRsvpRequest');
       await acceptFn({ eventId, userId: requesterId });
       await markAsRead(notificationId);
       showToast('Request accepted');
@@ -378,7 +384,7 @@ const NotificationScreen = () => {
         console.warn('Deny missing ids', { eventId, requesterId });
         return false;
       }
-      const declineFn = httpsCallable(functions, 'declineRsvpRequest');
+      const declineFn = functions.httpsCallable('declineRsvpRequest');
       await declineFn({ eventId, userId: requesterId });
       await markAsRead(notificationId);
       showToast('Request denied');

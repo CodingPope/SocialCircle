@@ -1,6 +1,5 @@
 // src/hooks/useMyEvents.js
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 
 export function useMyEvents(creatorId) {
@@ -13,14 +12,12 @@ export function useMyEvents(creatorId) {
       return;
     }
 
-    // Reference to the 'events' collection in Firestore
-    const eventsRef = collection(db, 'events');
-
     // Avoid composite index: only filter by ownerId and sort client-side
-    const q = query(eventsRef, where('ownerId', '==', creatorId));
+    const queryRef = db
+      .collection('events')
+      .where('ownerId', '==', creatorId);
 
-    let unsub = onSnapshot(
-      q,
+    let unsub = queryRef.onSnapshot(
       (snapshot) => {
         const now = Date.now();
         const list = snapshot.docs

@@ -1,16 +1,4 @@
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
-} from 'firebase/firestore';
-import { db } from '../../../firebase/config';
+import { db, serverTimestamp, Timestamp } from '../../../firebase/config';
 
 function coerceTimestamp(value) {
   if (!value) return null;
@@ -47,10 +35,12 @@ export function listenToSavedEvents(userId, onChange, onError) {
     onChange?.([]);
     return () => {};
   }
-  const savedRef = collection(db, 'users', userId, 'savedEvents');
-  const q = query(savedRef, orderBy('savedAt', 'desc'));
-  return onSnapshot(
-    q,
+  const savedRef = db
+    .collection('users')
+    .doc(userId)
+    .collection('savedEvents')
+    .orderBy('savedAt', 'desc');
+  return savedRef.onSnapshot(
     (snapshot) => {
       const items = snapshot.docs.map((snap) => ({
         id: snap.id,
@@ -82,8 +72,8 @@ export async function saveEventForUser({
 
   let eventPayload = event;
   if (!eventPayload || !eventPayload.date) {
-    const eventSnap = await getDoc(doc(db, 'events', targetEventId));
-    if (!eventSnap.exists()) {
+    const eventSnap = await db.collection('events').doc(targetEventId).get();
+    if (!eventSnap.exists) {
       throw new Error('Event not found');
     }
     eventPayload = { id: eventSnap.id, ...eventSnap.data() };
@@ -94,7 +84,11 @@ export async function saveEventForUser({
     throw new Error('Event is missing a valid start time');
   }
 
-  const savedDoc = doc(db, 'users', uid, 'savedEvents', targetEventId);
+  const savedDoc = db
+    .collection('users')
+    .doc(uid)
+    .collection('savedEvents')
+    .doc(targetEventId);
   const payload = {
     eventId: targetEventId,
     savedAt: serverTimestamp(),
@@ -111,7 +105,7 @@ export async function saveEventForUser({
   const cleanedSource = sanitizeMeta(source);
   if (cleanedSource) payload.source = cleanedSource;
 
-  await setDoc(savedDoc, payload);
+  await savedDoc.set(payload);
   return payload;
 }
 
@@ -123,6 +117,10 @@ export async function removeSavedEventForUser({ userId, eventId } = {}) {
   if (!targetEventId)
     throw new Error('Missing eventId for removeSavedEventForUser');
 
-  const savedDoc = doc(db, 'users', uid, 'savedEvents', targetEventId);
-  await deleteDoc(savedDoc);
+  const savedDoc = db
+    .collection('users')
+    .doc(uid)
+    .collection('savedEvents')
+    .doc(targetEventId);
+  await savedDoc.delete();
 }

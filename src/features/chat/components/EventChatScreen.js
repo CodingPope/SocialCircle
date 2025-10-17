@@ -37,15 +37,14 @@ import {
   updateDoc,
   setDoc,
   arrayUnion,
-  arrayRemove, // Added for attendee removal
-  writeBatch, // Added for leave event batching
-  serverTimestamp, // Added: ensure consistent timestamps for ordering
+  arrayRemove,
+  writeBatch,
+  serverTimestamp,
   getDocs,
   where,
   Timestamp,
-} from 'firebase/firestore';
-import { getApp } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+} from '../../../firebase/firestoreCompat';
+import { functions } from '../../../firebase/config';
 import { geohashForLocation } from 'geofire-common';
 import {
   db,
@@ -343,7 +342,7 @@ const EventChatScreen = () => {
           chunk.map(async (uid) => {
             try {
               const snap = await getDoc(doc(db, 'users', uid));
-              const u = snap.exists() ? snap.data() : {};
+              const u = snap.exists ? snap.data() : {};
               return {
                 id: uid,
                 displayName:
@@ -381,7 +380,7 @@ const EventChatScreen = () => {
     const unsub = onSnapshot(
       doc(db, 'events', eventId),
       async (snap) => {
-        if (!snap.exists()) {
+        if (!snap.exists) {
           setEvent(null);
           setAttendees([]);
           return;
@@ -430,7 +429,7 @@ const EventChatScreen = () => {
           if (Array.isArray(data?.attendees) && data.attendees.length) {
             const attendeePromises = data.attendees.map(async (uid) => {
               const userDoc = await getDoc(doc(db, 'users', uid));
-              const userData = userDoc.exists() ? userDoc.data() : {};
+              const userData = userDoc.exists ? userDoc.data() : {};
               return {
                 id: uid,
                 displayName:
@@ -537,7 +536,7 @@ const EventChatScreen = () => {
     const unsub = onSnapshot(
       chatDocRef,
       (snap) => {
-        if (!snap.exists()) {
+        if (!snap.exists) {
           setPinned(null);
           return;
         }
@@ -558,7 +557,7 @@ const EventChatScreen = () => {
     const ownerId = event?.ownerId;
     if (ownerId) {
       getDoc(doc(db, 'users', ownerId)).then((userDoc) => {
-        if (userDoc.exists()) {
+        if (userDoc.exists) {
           const userData = userDoc.data();
           setHostUser({
             displayName:
@@ -732,8 +731,7 @@ const EventChatScreen = () => {
       return;
     }
     try {
-      const functions = getFunctions(getApp(), 'us-central1');
-      const accept = httpsCallable(functions, 'acceptRsvpRequest');
+      const accept = functions.httpsCallable('acceptRsvpRequest');
       await accept({ eventId, userId });
 
       // Optimistic local update; snapshot will reconcile
@@ -761,8 +759,7 @@ const EventChatScreen = () => {
       return;
     }
     try {
-      const functions = getFunctions(getApp(), 'us-central1');
-      const decline = httpsCallable(functions, 'declineRsvpRequest');
+      const decline = functions.httpsCallable('declineRsvpRequest');
       await decline({ eventId, userId });
 
       setEvent((prev) =>
@@ -783,7 +780,7 @@ const EventChatScreen = () => {
   const fetchRequesterDetails = async (userId) => {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
-      if (userDoc.exists()) {
+      if (userDoc.exists) {
         const userData = userDoc.data();
         return {
           id: userDoc.id,
@@ -839,7 +836,7 @@ const EventChatScreen = () => {
         // Fallback to existing per-user detail fetch
         const requesterPromises = uids.map(async (userId) => {
           const userDoc = await getDoc(doc(db, 'users', userId));
-          const userData = userDoc.exists() ? userDoc.data() : {};
+          const userData = userDoc.exists ? userDoc.data() : {};
           return {
             id: userId,
             displayName:
@@ -984,8 +981,7 @@ const EventChatScreen = () => {
               eventUnsubRef.current = null;
               messagesUnsubRef.current = null;
 
-              const functions = getFunctions(getApp(), 'us-central1');
-              const leave = httpsCallable(functions, 'leaveEvent');
+              const leave = functions.httpsCallable('leaveEvent');
               await leave({ eventId });
 
               // Optimistic local updates
@@ -1026,11 +1022,12 @@ const EventChatScreen = () => {
     // Description: Submit report logic
     const targetUserId = reportDetails?.userId || selectedUser?.id || null;
     const reason = reportDetails?.reason || 'No reason provided';
-    if (!auth?.currentUser?.uid || !targetUserId) {
+    const currentUser = auth().currentUser;
+    if (!currentUser?.uid || !targetUserId) {
       setIsReportModalVisible(false);
       return;
     }
-    reportContent(auth().currentUser.uid, targetUserId, 'user', reason, {
+    reportContent(currentUser.uid, targetUserId, 'user', reason, {
       details: `Report from chat of event ${eventId}`,
       context: { eventId },
     })
@@ -1132,7 +1129,7 @@ const EventChatScreen = () => {
 
       // Ensure chat document exists before attempting to update pinned data
       const chatSnap = await getDoc(chatDocRef);
-      if (!chatSnap.exists()) {
+      if (!chatSnap.exists) {
         const participantIds = new Set();
         if (auth().currentUser?.uid) participantIds.add(auth().currentUser.uid);
         if (Array.isArray(event?.attendees)) {

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db } from '../../../firebase/config';
+import { db, functions } from '../../../firebase/config';
 
 // Description: Zustand store for events, RSVP, waitlist, and event creation
 export const useEventStore = create(
@@ -42,12 +42,7 @@ export const useEventStore = create(
         set({ loading: true });
         try {
           // Use regional Functions instance to ensure we call the correctly-deployed callable
-          const { getFunctions, httpsCallable } = await import(
-            'firebase/functions'
-          );
-          const { getApp } = await import('firebase/app');
-          const functions = getFunctions(getApp(), 'us-central1');
-          const rsvpCallable = httpsCallable(functions, 'rsvpEvent');
+          const rsvpCallable = functions.httpsCallable('rsvpEvent');
           const res = await rsvpCallable({ eventId, userId });
           const data = res.data || {};
 

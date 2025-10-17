@@ -1,5 +1,4 @@
 // Description: Hydrate Zustand user store from Firestore on app launch
-import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import { useUserStore } from '../../profile';
 import { getNextOnboardingStep } from '../utils/onboardingRouter';
@@ -12,8 +11,9 @@ export function isProfileComplete(userData) {
 // Description: Hydrate Zustand store and route to correct onboarding step if needed
 export async function hydrateUserStore(uid, navigation) {
   // Responsive: Do not block UI, caller should show loading indicator if needed
-  const userDoc = await getDoc(doc(db, 'users', uid));
-  if (userDoc.exists()) {
+  const userDocRef = db.collection('users').doc(uid);
+  const userDoc = await userDocRef.get();
+  if (userDoc.exists) {
     const userData = userDoc.data();
     useUserStore.getState().setUser({ uid, ...userData });
     const complete = isProfileComplete(userData);

@@ -12,6 +12,7 @@ import {
   trackJoinEventSafe,
 } from '../../../services/analytics';
 import { trackRsvpYes, trackJoinEvent } from '../../../lib/analytics';
+import { functions } from '../../../firebase/config';
 
 // Safe no-op
 const noop = () => {};
@@ -166,13 +167,7 @@ export async function joinEvent({
       if (typeof options.requestJoinFn === 'function') {
         await options.requestJoinFn(event.id);
       } else {
-        // Lazy import to keep helper tree-shakeable and test-friendly
-        const { getFunctions, httpsCallable } = await import(
-          'firebase/functions'
-        );
-        const { getApp } = await import('firebase/app');
-        const functions = getFunctions(getApp(), 'us-central1');
-        const requestFn = httpsCallable(functions, 'requestToJoinEvent');
+        const requestFn = functions.httpsCallable('requestToJoinEvent');
         await requestFn({ eventId: event.id });
       }
       onShowMessage("Request sent. You'll be notified if accepted.");

@@ -1,7 +1,5 @@
 // src/context/AuthContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../../../firebase/config';
 import {
   init as analyticsInit,
@@ -19,7 +17,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let unsubscribeDoc = null; // Track the Firestore listener
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribeAuth = auth().onAuthStateChanged((firebaseUser) => {
       // ✅ Stop any previous Firestore listener before attaching a new one
       if (unsubscribeDoc) {
         try {
@@ -39,9 +37,8 @@ export function AuthProvider({ children }) {
       }
 
       // ✅ Start a new Firestore listener for the logged-in user
-      const userDoc = doc(db, 'users', firebaseUser.uid);
-      unsubscribeDoc = onSnapshot(
-        userDoc,
+      const userDoc = db.collection('users').doc(firebaseUser.uid);
+      unsubscribeDoc = userDoc.onSnapshot(
         async (snapshot) => {
           const data = snapshot.data() || {};
           const next = {

@@ -1,5 +1,4 @@
 import { Alert, Platform, Share } from 'react-native';
-import { httpsCallable } from 'firebase/functions';
 import { functions } from '../firebase/config';
 import { trackShareEvent } from '../lib/analytics';
 import { event as trackAnalyticsEvent } from './analytics';
@@ -68,7 +67,7 @@ function pickLocation(event) {
 
 function ensureCallable() {
   if (!shareCallable) {
-    shareCallable = httpsCallable(functions, 'shareGenerateLink');
+    shareCallable = functions.httpsCallable('shareGenerateLink');
   }
   return shareCallable;
 }

@@ -29,9 +29,8 @@ import {
   arrayUnion,
   getDocs,
   getDoc,
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage, auth } from '../../../firebase/config';
+} from '../../../firebase/firestoreCompat';
+import { db, storage, auth, authInstance } from '../../../firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import { updateEventCount } from '../../../firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
@@ -42,6 +41,10 @@ import { track as trackClient } from '../../../lib/analytics';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { useMemo } from 'react';
+import {
+  interpretStorageError,
+  logStorageDiagnostic,
+} from '../../../firebase/storageUtils';
 
 // --- Date/Time constraints ---
 const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
@@ -50,6 +53,15 @@ const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
 const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
 const MINUTE_INCREMENT = 5; // tweak to 10 or 30 if you want fewer choices in the picker
 const MAX_EVENT_IMAGE_BYTES = 10 * 1024 * 1024;
+
+const getAuthUser = () => {
+  try {
+    return authInstance?.currentUser || auth().currentUser || null;
+  } catch (err) {
+    console.warn('[CreateEvent] Unable to fetch auth user:', err);
+    return null;
+  }
+};
 
 // Description: Round UP to the next configured minute boundary to avoid rounding backwards
 const roundUpToMinuteIncrement = (inputDate) => {
@@ -74,7 +86,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   // Debug: print Firebase runtime info to help diagnose permission errors
   useEffect(() => {
     try {
-      // console.log('DBG firebase auth().currentUser', auth?.currentUser || null);
+      // console.log('DBG firebase auth().currentUser', getAuthUser());
       // console.log('DBG user store.user', user || null);
       // console.log('DBG firestore projectId', db?.app?.options?.projectId);
       trackClient('create_event_screen_mount', {});
@@ -165,8 +177,13 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         );
         return;
       }
+      const mediaTypeImages =
+        ImagePicker?.MediaType?.IMAGES ??
+        ImagePicker?.MediaType?.IMAGE ??
+        ImagePicker?.MediaTypeOptions?.Images;
+
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: mediaTypeImages,
         allowsEditing: true,
         quality: 0.8,
       });
@@ -177,7 +194,10 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       }
     } catch (e) {
       console.error('Image pick error:', e);
-      Alert.alert('Image Selection Failed', e.message || 'Could not select image. Please try again.');
+      Alert.alert(
+        'Image Selection Failed',
+        e.message || 'Could not select image. Please try again.'
+      );
     }
   };
 
@@ -189,7 +209,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       return Alert.alert('Description must be at least 10 characters');
 
     // Ensure user is authenticated and matches local store
-    const currentAuthUser = auth?.currentUser;
+    const currentAuthUser = getAuthUser();
     if (!currentAuthUser || !currentAuthUser.uid) {
       return Alert.alert('Not authenticated', 'Please sign in and try again.');
     }
@@ -266,9 +286,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
     let createdEventId = null;
     try {
+      const authSnapshot = getAuthUser();
+
       trackClient('event_create_attempt', {
-        auth_uid_present: !!auth?.currentUser?.uid,
-        owner_matches_auth: auth?.currentUser?.uid === newEvent.ownerId,
+        auth_uid_present: !!authSnapshot?.uid,
+        owner_matches_auth: authSnapshot?.uid === newEvent.ownerId,
         image_selected: !!imageUri,
         has_location: !!newEvent?.location?.geohash,
         interest: newEvent?.interest || null,
@@ -282,10 +304,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         for (let i = 0; i < attempts; i++) {
           try {
             const snap = await getDoc(doc(db, 'events', id));
-            if (
-              snap.exists() &&
-              snap.data()?.ownerId === auth?.currentUser?.uid
-            )
+            const activeUser = getAuthUser();
+            if (snap.exists && snap.data()?.ownerId === activeUser?.uid)
               return true;
           } catch (err) {
             // ignore and retry
@@ -321,12 +341,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
           } else {
             // Retry upload a few times to avoid transient rule/propagation issues
             const tryUpload = async () => {
-              const storageRef = ref(
-                storage,
+              const storageRef = storage.ref(
                 `event-images/${docRef.id}/${Date.now()}.jpg`
               );
-              const snap = await uploadBytes(storageRef, blob, { contentType });
-              return await getDownloadURL(snap.ref);
+              await storageRef.putFile(imageUri, { contentType });
+              return await storageRef.getDownloadURL();
             };
 
             let downloadUrl = null;
@@ -345,15 +364,17 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             // Fallback: if Storage rule still denies under event-images, upload under user's profileImages (still public-read per rules)
             if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
               try {
-                const altRef = ref(
-                  storage,
+                const altRef = storage.ref(
                   `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
                 );
-                const altSnap = await uploadBytes(altRef, blob, {
-                  contentType,
-                });
-                downloadUrl = await getDownloadURL(altSnap.ref);
+                await altRef.putFile(imageUri, { contentType });
+                downloadUrl = await altRef.getDownloadURL();
               } catch (altErr) {
+                logStorageDiagnostic('event-image-fallback', {
+                  code: altErr?.code,
+                  message: altErr?.message,
+                  path: `profileImages/${user.uid}/${docRef.id}`,
+                });
                 console.warn('Fallback upload also failed:', altErr);
               }
             }
@@ -365,15 +386,26 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
               });
               setImageUrl(downloadUrl);
             } else if (lastErr) {
-              console.warn('Image upload failed:', lastErr);
-              Alert.alert(
-                'Image upload failed',
-                'Your event was created without a photo due to permissions.'
-              );
+              const interpreted = interpretStorageError(lastErr, {
+                context: 'create-event',
+                path: `event-images/${docRef.id}`,
+              });
+              logStorageDiagnostic('event-image-upload', interpreted.details);
+              const userMessage = interpreted.needsConsoleFix
+                ? 'Event created, but Firebase Storage needs to be re-linked in the console before photos will work.'
+                : interpreted.userMessage ||
+                  'Your event was created without a photo due to permissions.';
+              Alert.alert('Image upload failed', userMessage);
             }
           }
         } catch (uploadErr) {
+          const interpreted = interpretStorageError(uploadErr, {
+            context: 'create-event-unexpected',
+            path: `event-images/${docRef?.id || 'unknown'}`,
+          });
+          logStorageDiagnostic('event-image-unexpected', interpreted.details);
           console.warn('Image upload unexpected error:', uploadErr);
+          Alert.alert('Image upload failed', interpreted.userMessage);
         }
       }
 

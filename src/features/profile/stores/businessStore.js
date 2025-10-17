@@ -1,13 +1,5 @@
 import { create } from 'zustand';
 import { db } from '../../../firebase/config';
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-} from 'firebase/firestore';
 
 // Description: Store for business accounts, sponsored events, and analytics
 export const useBusinessStore = create((set) => ({
@@ -28,21 +20,21 @@ export const useBusinessStore = create((set) => ({
     set({ loading: true, error: null });
     try {
       // membership mirror: businessMembers/{uid}/memberships/{bizId}
-      const membershipsRef = collection(
-        db,
-        'businessMembers',
-        uid,
-        'memberships'
-      );
-      const memSnap = await getDocs(membershipsRef);
+      const membershipsRef = db
+        .collection('businessMembers')
+        .doc(uid)
+        .collection('memberships');
+      const memSnap = await membershipsRef.get();
       const ids = memSnap.docs.map((d) => d.id);
       if (ids.length === 0) {
         set({ businesses: [] });
       } else {
-        const reads = ids.map((id) => getDoc(doc(db, 'businesses', id)));
+        const reads = ids.map((id) =>
+          db.collection('businesses').doc(id).get()
+        );
         const results = await Promise.allSettled(reads);
         const list = results
-          .filter((r) => r.status === 'fulfilled' && r.value.exists())
+          .filter((r) => r.status === 'fulfilled' && r.value.exists)
           .map((r) => ({ id: r.value.id, ...r.value.data() }))
           // hide suspended/draft by default in app surfaces
           .filter((b) => (b.status || 'active') !== 'suspended');
@@ -58,13 +50,13 @@ export const useBusinessStore = create((set) => ({
   searchBusinesses: async ({ term, category } = {}) => {
     set({ loading: true, error: null });
     try {
-      const qParts = [where('status', '==', 'active')];
-      let token = (term || '').trim().toLowerCase();
-      if (token) qParts.unshift(where('searchTokens', 'array-contains', token));
-      if (category) qParts.push(where('category', '==', category));
-      // Top-level collection, not a collection group
-      const qy = query(collection(db, 'businesses'), ...qParts);
-      const snap = await getDocs(qy);
+      let queryRef = db
+        .collection('businesses')
+        .where('status', '==', 'active');
+      const token = (term || '').trim().toLowerCase();
+      if (token) queryRef = queryRef.where('searchTokens', 'array-contains', token);
+      if (category) queryRef = queryRef.where('category', '==', category);
+      const snap = await queryRef.get();
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       set({ businesses: list });
     } catch (err) {
@@ -78,8 +70,11 @@ export const useBusinessStore = create((set) => ({
     if (!bizId) return [];
     set({ loading: true, error: null });
     try {
-      const locRef = collection(db, 'businesses', bizId, 'locations');
-      const snap = await getDocs(locRef);
+      const locRef = db
+        .collection('businesses')
+        .doc(bizId)
+        .collection('locations');
+      const snap = await locRef.get();
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       set({ locations: list });
       return list;

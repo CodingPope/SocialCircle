@@ -9,18 +9,14 @@ import {
   StyleSheet,
   Image,
 } from 'react-native';
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-  GoogleAuthProvider,
-  signInWithCredential,
-  fetchSignInMethodsForEmail,
-  OAuthProvider,
-  linkWithCredential,
-} from 'firebase/auth';
-import { doc, setDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../../firebase/config';
+import {
+  doc,
+  setDoc,
+  serverTimestamp,
+  getDoc,
+  updateDoc,
+} from '../../../../firebase/firestoreCompat';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
@@ -29,11 +25,6 @@ import {
   registerForPushTokenAsync,
   initPushForUser,
 } from '../../../notifications/services/pushService';
-import {
-  updateDoc,
-  doc as fsDoc,
-  serverTimestamp as fsServerTimestamp,
-} from 'firebase/firestore';
 import { GOOGLE_CLIENT_ID } from '@env';
 import { track as trackClient } from '../../../../lib/analytics';
 import LoadingOverlay from '../../../../components/ui/LoadingOverlay';
@@ -140,7 +131,9 @@ const createStyles = (theme) => {
 
 async function generateNonce(length = 32) {
   const bytes = await Crypto.getRandomBytesAsync(length);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+    ''
+  );
 }
 
 export default function AuthScreen({ navigation, route }) {
@@ -155,6 +148,34 @@ export default function AuthScreen({ navigation, route }) {
   const setNextBusinessRoute = useSessionRole((s) => s.setNextBusinessRoute);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+
+  // Description: Test Firebase Auth configuration on mount
+  useEffect(() => {
+    const testFirebaseConfig = async () => {
+      try {
+        console.log('🔍 Firebase Auth Check:');
+        console.log('   App:', auth().app.name);
+        console.log('   Current User:', auth().currentUser?.email || 'None');
+
+        // Try to get auth state to verify connectivity
+        const unsubscribe = auth().onAuthStateChanged((user) => {
+          console.log(
+            '   Auth State:',
+            user ? `Logged in as ${user.email}` : 'Not logged in'
+          );
+        });
+
+        return unsubscribe;
+      } catch (error) {
+        console.error('❌ Firebase Auth initialization error:', error);
+      }
+    };
+
+    const unsubscribe = testFirebaseConfig();
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (route?.params && 'business' in route.params) {
@@ -221,14 +242,14 @@ export default function AuthScreen({ navigation, route }) {
       }
 
       // Create an OAuth credential for Firebase using the raw nonce
-      const provider = new OAuthProvider('apple.com');
+      const provider = new auth.OAuthProvider('apple.com');
       const oauthCredential = provider.credential({
         idToken: credential.identityToken,
         rawNonce,
       });
 
       try {
-        const result = await signInWithCredential(auth, oauthCredential);
+        const result = await auth().signInWithCredential(oauthCredential);
 
         // If new user, create minimal profile (re-use createUser from profile services)
         if (result?.additionalUserInfo?.isNewUser) {
@@ -270,7 +291,7 @@ export default function AuthScreen({ navigation, route }) {
                       async (user) => {
                         if (user) {
                           try {
-                            await linkWithCredential(user, pendingCred);
+                            await user.linkWithCredential(pendingCred);
                             Alert.alert(
                               'Linked',
                               'Apple account linked successfully.'
@@ -320,8 +341,9 @@ export default function AuthScreen({ navigation, route }) {
     // Description: Handle Google sign-in and create user with full default schema if new
     if (googleResponse?.type === 'success') {
       const { id_token } = googleResponse.params;
-      const credential = GoogleAuthProvider.credential(id_token);
-      signInWithCredential(auth, credential)
+      const credential = auth.GoogleAuthProvider.credential(id_token);
+      auth()
+        .signInWithCredential(credential)
         .then(async (result) => {
           if (result.additionalUserInfo?.isNewUser) {
             const {
@@ -359,10 +381,10 @@ export default function AuthScreen({ navigation, route }) {
     setLoading(true);
     try {
       if (mode === 'login') {
-        const result = await signInWithEmailAndPassword(auth, email, password);
+        const result = await auth().signInWithEmailAndPassword(email, password);
         const userRef = doc(db, 'users', result.user.uid);
         const userSnap = await getDoc(userRef);
-        const userData = userSnap.exists() ? userSnap.data() : {};
+        const userData = userSnap.exists ? userSnap.data() : {};
         setUser({ uid: result.user.uid, ...userData });
         const complete = isProfileComplete(userData);
         setProfileComplete(complete);
@@ -376,14 +398,14 @@ export default function AuthScreen({ navigation, route }) {
         }
 
         // Only initialize push for consumer accounts that have a user profile doc
-        if (userSnap.exists()) {
+        if (userSnap.exists) {
           await initPushForUser(result.user.uid).catch(() => {});
         }
       } else if (mode === 'signup') {
         // Check if account already exists
         let methods = [];
         try {
-          methods = await fetchSignInMethodsForEmail(auth, email);
+          methods = await auth().fetchSignInMethodsForEmail(email);
         } catch (e) {
           // If invalid email, we already validated format; surface other errors
           console.warn('fetchSignInMethodsForEmail error', e);
@@ -408,8 +430,7 @@ export default function AuthScreen({ navigation, route }) {
         }
 
         // Create account
-        const result = await createUserWithEmailAndPassword(
-          auth,
+        const result = await auth().createUserWithEmailAndPassword(
           email,
           password
         );
@@ -434,7 +455,9 @@ export default function AuthScreen({ navigation, route }) {
         const userDocRef = doc(db, 'users', result.user.uid);
         const token = await registerForPushTokenAsync().catch(() => null);
         try {
-          const { createUser } = require('../../../profile/services/userService');
+          const {
+            createUser,
+          } = require('../../../profile/services/userService');
           await createUser(result.user.uid, {
             email: result.user.email,
             deviceToken: token || null,
@@ -455,7 +478,6 @@ export default function AuthScreen({ navigation, route }) {
 
         // Best-effort subcollection seed (non-blocking)
         try {
-          const { collection } = require('firebase/firestore');
           const profileviewsRef = collection(userDocRef, 'profileviews');
           await setDoc(doc(profileviewsRef, 'initialSeed'), {
             timestamp: serverTimestamp(),
@@ -465,15 +487,59 @@ export default function AuthScreen({ navigation, route }) {
 
         // Load into store and continue onboarding for consumers
         const userSnapshot = await getDoc(userDocRef);
-        const userData = userSnapshot.exists() ? userSnapshot.data() : {};
+        const userData = userSnapshot.exists ? userSnapshot.data() : {};
         setUser({ uid: result.user.uid, ...userData });
         setProfileComplete(false);
         await initPushForUser(result.user.uid).catch(() => {});
       }
     } catch (err) {
+      // Description: Enhanced error logging for Firebase Auth debugging
+      const errorDetails = {
+        mode,
+        code: err?.code,
+        message: err?.message,
+        nativeErrorCode: err?.nativeErrorCode,
+        nativeErrorMessage: err?.nativeErrorMessage,
+        userInfo: err?.userInfo,
+        // Extract all enumerable properties
+        allProps: Object.keys(err || {}).reduce((acc, key) => {
+          acc[key] = err[key];
+          return acc;
+        }, {}),
+      };
+
+      console.error('[AuthScreen] auth operation failed', errorDetails);
+
+      // Log the raw error object inspection
+      console.error('[AuthScreen] Raw error:', err);
+      console.error('[AuthScreen] Error constructor:', err?.constructor?.name);
+
+      // Try to get underlying native error
+      if (err?.userInfo) {
+        console.error(
+          '[AuthScreen] UserInfo:',
+          JSON.stringify(err.userInfo, null, 2)
+        );
+      }
+
+      // Check for specific auth errors
+      let errorMessage = 'An unexpected error occurred. Please try again.';
+      if (err?.code === 'auth/internal-error') {
+        errorMessage =
+          'Firebase authentication error. Check Firebase Console:\n\n' +
+          '1. Email/Password sign-in enabled?\n' +
+          '2. User exists in Authentication?\n' +
+          '3. Firestore rules allow access?\n\n' +
+          `Details: ${err?.nativeErrorMessage || err?.message}`;
+      } else if (err?.nativeErrorMessage) {
+        errorMessage = err.nativeErrorMessage;
+      } else if (err?.message) {
+        errorMessage = err.message;
+      }
+
       Alert.alert(
         mode === 'login' ? 'Login failed' : 'Signup failed',
-        err.message
+        errorMessage
       );
     } finally {
       setLoading(false);
@@ -485,7 +551,8 @@ export default function AuthScreen({ navigation, route }) {
       Alert.alert('Reset Password', 'Please enter your email first.');
       return;
     }
-    sendPasswordResetEmail(auth, email)
+    auth()
+      .sendPasswordResetEmail(email)
       .then(() => Alert.alert('Check your email', 'Password reset link sent!'))
       .catch((err) => Alert.alert('Reset Password', err.message));
   };
@@ -515,46 +582,46 @@ export default function AuthScreen({ navigation, route }) {
               keyboardType='email-address'
               autoCorrect={false}
               spellCheck={false}
-            textContentType='emailAddress'
-            autoComplete='email'
-            style={styles.input}
-            placeholderTextColor={theme.colors.neutral600}
-          />
-          <TextInput
-            placeholder='Password'
-            value={password}
-            onChangeText={setPassword}
+              textContentType='emailAddress'
+              autoComplete='email'
+              style={styles.input}
+              placeholderTextColor={theme.colors.neutral600}
+            />
+            <TextInput
+              placeholder='Password'
+              value={password}
+              onChangeText={setPassword}
               secureTextEntry
               textContentType='password'
-            autoComplete='password'
-            autoCorrect={false}
-            spellCheck={false}
-            style={styles.input}
-            placeholderTextColor={theme.colors.neutral600}
-          />
-
-          {loading ? (
-            <ActivityIndicator
-              size='large'
-              color={theme.colors.secondary}
-              style={{ marginVertical: theme.spacing.md }}
+              autoComplete='password'
+              autoCorrect={false}
+              spellCheck={false}
+              style={styles.input}
+              placeholderTextColor={theme.colors.neutral600}
             />
-          ) : (
-            <Button
-              title={mode === 'login' ? 'Login' : 'Create Account'}
-              onPress={handleSubmit}
-              style={styles.buttonSpacing}
-            />
-          )}
 
-          {mode === 'signup' && (
-            <TouchableOpacity
-              style={[styles.secondaryButton, { opacity: 0.5 }]}
-              disabled
-            >
-              <Text style={styles.secondaryButtonText}>
-                Sign up with Google (Coming Soon)
-              </Text>
+            {loading ? (
+              <ActivityIndicator
+                size='large'
+                color={theme.colors.secondary}
+                style={{ marginVertical: theme.spacing.md }}
+              />
+            ) : (
+              <Button
+                title={mode === 'login' ? 'Login' : 'Create Account'}
+                onPress={handleSubmit}
+                style={styles.buttonSpacing}
+              />
+            )}
+
+            {mode === 'signup' && (
+              <TouchableOpacity
+                style={[styles.secondaryButton, { opacity: 0.5 }]}
+                disabled
+              >
+                <Text style={styles.secondaryButtonText}>
+                  Sign up with Google (Coming Soon)
+                </Text>
               </TouchableOpacity>
             )}
 

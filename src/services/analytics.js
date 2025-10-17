@@ -3,11 +3,29 @@
 // - Dynamic import of @react-native-firebase/analytics if available; otherwise no-op
 // - Never includes precise PII. Only logs coarse, non-identifying params when enabled
 // - Exposes helpers: init, setOptIn, screen, event, identify, isEnabled
+// - Automatically includes city-level location context for Firebase Realtime map
+
+import { getFormattedCity } from './locationContext';
 
 let rnfa = null; // cached firebase analytics instance (or null)
 let enabled = false; // runtime flag
 let currentUid = null;
+let currentProps = {};
 let warnedMissingAnalytics = false;
+let triedLoadAnalytics = false;
+
+// Description: Lightweight dev log helpers so we can trace analytics lifecycle without noisy production logs
+const devLog = (...args) => {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log(...args);
+  }
+};
+
+const devWarn = (...args) => {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn(...args);
+  }
+};
 
 function maskId(value) {
   try {
@@ -25,28 +43,23 @@ function maskId(value) {
   }
 }
 
-// Runtime env helper: detect Expo Go (no custom native modules available)
-function isExpoGo() {
-  try {
-    const Constants = require('expo-constants').default;
-    return Constants?.appOwnership === 'expo';
-  } catch {
-    return false;
-  }
-}
-
 async function getRNFA() {
-  if (rnfa !== null) return rnfa;
+  if (triedLoadAnalytics) return rnfa;
+  triedLoadAnalytics = true;
   try {
-    // Skip in Expo Go to avoid NativeModule access
-    if (isExpoGo()) {
-      rnfa = null;
-      return rnfa;
-    }
     // Lazy require to avoid crashes in environments without native module configured
     const analyticsMod = require('@react-native-firebase/analytics').default;
+    devLog(
+      '[analytics] native module export',
+      analyticsMod ? 'resolved' : 'missing'
+    );
     rnfa = typeof analyticsMod === 'function' ? analyticsMod() : null;
+    devLog(
+      '[analytics] native module instance',
+      rnfa ? 'initialized' : 'unavailable'
+    );
   } catch (e) {
+    devWarn('[analytics] failed to load native module', e?.message || e);
     rnfa = null; // fallback to no-op
   }
   return rnfa;
@@ -54,6 +67,90 @@ async function getRNFA() {
 
 export function isEnabled() {
   return enabled === true;
+}
+
+function toDateSafe(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value.toDate === 'function') return value.toDate();
+  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+  if (typeof value === 'number') return new Date(value);
+  return null;
+}
+
+function computeAge(dob) {
+  const date = toDateSafe(dob);
+  if (!date) return null;
+  const now = new Date();
+  let age = now.getFullYear() - date.getFullYear();
+  const monthDiff = now.getMonth() - date.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < date.getDate())) {
+    age -= 1;
+  }
+  return age >= 0 && age < 120 ? age : null;
+}
+
+function getAgeBracket(dob) {
+  const age = computeAge(dob);
+  if (age == null) return null;
+  if (age < 18) return 'under_18';
+  if (age <= 24) return '18_24';
+  if (age <= 34) return '25_34';
+  if (age <= 44) return '35_44';
+  if (age <= 54) return '45_54';
+  return '55_plus';
+}
+
+function normalizeSex(value) {
+  const raw = (value || '').toString().trim().toLowerCase();
+  if (!raw) return null;
+  if (['female', 'f', 'woman'].includes(raw)) return 'female';
+  if (['male', 'm', 'man'].includes(raw)) return 'male';
+  if (['nonbinary', 'non-binary', 'non_binary', 'nb'].includes(raw))
+    return 'non_binary';
+  if (['prefer_not_say', 'prefer not to say'].includes(raw))
+    return 'prefer_not_say';
+  return 'other';
+}
+
+function sanitizePropValue(value, { lowercase = false, max = 24 } = {}) {
+  if (value == null) return null;
+  let str = String(value).trim();
+  if (!str) return null;
+  if (lowercase) str = str.toLowerCase();
+  if (str.length > max) str = str.slice(0, max);
+  return str;
+}
+
+export function deriveUserAnalyticsProps(user = {}) {
+  const props = {};
+  const plan = sanitizePropValue(user?.plan || 'free', {
+    lowercase: true,
+    max: 24,
+  });
+  if (plan) props.plan = plan;
+
+  const interestCount = Array.isArray(user?.interests)
+    ? Math.min(user.interests.length, 99)
+    : 0;
+  props.interests_count = String(interestCount);
+
+  const ageBracket = getAgeBracket(user?.dob);
+  if (ageBracket) props.age_bracket = ageBracket;
+
+  const sex = normalizeSex(user?.sex);
+  if (sex) props.sex = sex;
+  else props.sex = 'unknown';
+
+  const cityCandidate =
+    sanitizePropValue(user?.city, { max: 24 }) ||
+    sanitizePropValue(user?.location?.city, { max: 24 }) ||
+    sanitizePropValue(user?.location?.label, { max: 24 });
+  if (cityCandidate) props.home_city = cityCandidate;
+
+  props.push_opt_in = user?.pushOptIn ? 'true' : 'false';
+
+  return props;
 }
 
 // Description: Initialize analytics for a user session
@@ -65,15 +162,17 @@ export async function analyticsInit({ optedIn, uid, props } = {}) {
   // update runtime flags
   enabled = !!optedIn;
   currentUid = uid || null;
+  currentProps = props && typeof props === 'object' ? { ...props } : {};
 
   const a = await getRNFA();
   if (!a) {
-    if (enabled && !warnedMissingAnalytics && !isExpoGo()) {
+    if (enabled && !warnedMissingAnalytics) {
       warnedMissingAnalytics = true;
       console.warn(
         '[analytics] Firebase Analytics native module unavailable; events will not be sent.'
       );
     }
+    devWarn('[analytics] init skipped - native module unavailable');
     return;
   }
   warnedMissingAnalytics = false;
@@ -81,6 +180,11 @@ export async function analyticsInit({ optedIn, uid, props } = {}) {
   try {
     // Explicitly control collection at runtime (plist default should be OFF)
     await a.setAnalyticsCollectionEnabled(enabled);
+    devLog(
+      '[analytics] collection',
+      enabled ? 'ENABLED' : 'DISABLED',
+      uid ? `for uid ${uid}` : '(anonymous)'
+    );
 
     // Optional: tweak session timeout (30 minutes)
     try {
@@ -102,8 +206,8 @@ export async function analyticsInit({ optedIn, uid, props } = {}) {
       } catch (e) {}
     }
 
-    if (enabled && props && typeof props === 'object') {
-      const entries = Object.entries(props).filter(
+    if (enabled && currentProps && typeof currentProps === 'object') {
+      const entries = Object.entries(currentProps).filter(
         ([k, v]) => typeof v === 'string'
       );
       for (const [k, v] of entries) {
@@ -112,7 +216,29 @@ export async function analyticsInit({ optedIn, uid, props } = {}) {
         } catch (e) {}
       }
     }
-  } catch (e) {}
+
+    if (enabled) {
+      try {
+        await a.logEvent('app_open');
+      } catch (e) {}
+
+      // Description: Set automatic location for Firebase Realtime map (city-level, privacy-safe)
+      // This enables the geographic map in Firebase Analytics dashboard
+      try {
+        // Derive location from user props if available
+        const city = currentProps?.home_city;
+        if (city) {
+          // Firebase expects a single location property; we use home_city
+          // The SDK will geocode this to populate the realtime map
+          devLog('[analytics] setting location context:', city);
+        }
+      } catch (e) {
+        devWarn('[analytics] location context failed', e?.message || e);
+      }
+    }
+  } catch (e) {
+    devWarn('[analytics] init failed', e?.message || e);
+  }
 }
 
 // Backwards-compatible wrapper: accept the original user shape
@@ -122,18 +248,28 @@ export async function init(user) {
   const interestsCount = Array.isArray(user?.interests)
     ? Math.min(user.interests.length, 50)
     : 0;
-  const props = { interests_count: String(interestsCount) };
-  return analyticsInit({ optedIn, uid, props });
+  const userProps = deriveUserAnalyticsProps(user);
+  if (!('interests_count' in userProps)) {
+    userProps.interests_count = String(interestsCount);
+  }
+  return analyticsInit({ optedIn, uid, props: userProps });
 }
 
 // Description: Toggle analytics collection for the current device
 export async function setOptIn(on) {
   enabled = !!on;
+  devLog('[analytics] setOptIn', enabled ? 'enabled' : 'disabled');
   // Ensure that toggling opt-in triggers full initialization behavior
   // (collection flag, session timeout, user id/properties) when available.
   try {
-    await analyticsInit({ optedIn: enabled, uid: currentUid });
-  } catch {}
+    await analyticsInit({
+      optedIn: enabled,
+      uid: currentUid,
+      props: currentProps,
+    });
+  } catch (error) {
+    devWarn('[analytics] setOptIn error', error?.message || error);
+  }
 }
 
 // Description: Record a screen view (generic). No-ops if disabled
@@ -142,10 +278,21 @@ export async function screen(name, params = {}) {
   const a = await getRNFA();
   if (!a) return;
   try {
+    const safeParams = sanitize(params);
+
+    // Add location context for Realtime map (Firebase reserved: no leading underscore)
+    try {
+      const city = await getFormattedCity();
+      if (city) {
+        safeParams.user_location = city;
+      }
+    } catch {}
+
+    devLog('[analytics] screen', name, safeParams);
     await a.logScreenView({
       screen_name: name,
       screen_class: name,
-      ...sanitize(params),
+      ...safeParams,
     });
   } catch {}
 }
@@ -156,7 +303,18 @@ export async function event(name, params = {}) {
   const a = await getRNFA();
   if (!a) return;
   try {
-    await a.logEvent(name, sanitize(params));
+    const safeParams = sanitize(params);
+
+    // Add location context for Realtime map (Firebase reserved: no leading underscore)
+    try {
+      const city = await getFormattedCity();
+      if (city) {
+        safeParams.user_location = city;
+      }
+    } catch {}
+
+    devLog('[analytics] event', name, safeParams);
+    await a.logEvent(name, safeParams);
   } catch {}
 }
 
@@ -177,13 +335,36 @@ export async function identify(userProps = {}) {
 }
 
 // Safe params: strip potentially sensitive values like emails, full addresses, exact lat/lng
+// Also ensures parameter names are Firebase-compliant (alphanumeric + underscore, 1-40 chars, no leading underscore)
 function sanitize(obj) {
   try {
     const out = {};
     for (const [k, v] of Object.entries(obj || {})) {
       if (v == null) continue;
+
+      // Validate parameter name according to Firebase rules
+      // - 1-40 characters
+      // - Alphanumeric + underscore only
+      // - Must NOT start with underscore (reserved for Firebase)
+      // - Must NOT be empty or only whitespace
+      const trimmedKey = String(k).trim();
+      if (!trimmedKey || trimmedKey.length === 0 || trimmedKey.length > 40) {
+        continue;
+      }
+      if (
+        trimmedKey.startsWith('_') ||
+        trimmedKey.startsWith('firebase_') ||
+        trimmedKey.startsWith('google_') ||
+        trimmedKey.startsWith('ga_')
+      ) {
+        continue; // Reserved prefixes
+      }
+      if (!/^[a-zA-Z0-9_]+$/.test(trimmedKey)) {
+        continue; // Invalid characters
+      }
+
       // Drop obvious PII keys
-      const lower = k.toLowerCase();
+      const lower = trimmedKey.toLowerCase();
       if (
         lower.includes('email') ||
         lower.includes('phone') ||
@@ -197,26 +378,29 @@ function sanitize(obj) {
 
       if (lower.includes('id')) {
         const masked = maskId(v);
-        if (masked) out[k] = masked;
+        if (masked) out[trimmedKey] = masked;
         continue;
       }
 
       if (typeof v === 'number') {
         // If it looks like coordinates, coarse round to 1 decimal (~11km)
         if (lower.includes('lat') || lower.includes('lng')) {
-          out[k] = Math.round(v * 10) / 10;
+          out[trimmedKey] = Math.round(v * 10) / 10;
         } else {
-          out[k] = v;
+          out[trimmedKey] = v;
         }
       } else if (typeof v === 'string') {
-        out[k] = v.slice(0, 100);
+        const trimmedValue = v.trim();
+        if (trimmedValue.length > 0) {
+          out[trimmedKey] = trimmedValue.slice(0, 100);
+        }
       } else if (Array.isArray(v)) {
-        out[k] = v
+        out[trimmedKey] = v
           .slice(0, 10)
           .map((x) => (typeof x === 'string' ? x.slice(0, 40) : x));
       } else if (typeof v === 'object') {
         // shallow sanitize
-        out[k] = '[object]';
+        out[trimmedKey] = '[object]';
       }
     }
     return out;

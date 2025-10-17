@@ -11,13 +11,13 @@ import {
   PanResponder,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../../firebase/config';
+import { db, serverTimestamp } from '../../../firebase/config';
 import { useUserStore } from '../stores/userStore';
 import {
   setOptIn as analyticsSetOptIn,
-  analyticsInit,
+  analyticsInit as configureAnalytics,
   event as analyticsEvent,
+  deriveUserAnalyticsProps,
 } from '../../../services/analytics';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
@@ -38,13 +38,14 @@ export default function PrivacyInfoScreen({ navigation }) {
   const toggleAnalytics = async () => {
     const next = !analyticsOptIn;
     const now = new Date();
+    const firestoreTimestamp = serverTimestamp();
     setAnalyticsOptIn(next);
     let persisted = false;
     if (user?.uid) {
       try {
-        await updateDoc(doc(db, 'users', user.uid), {
+        await db.collection('users').doc(user.uid).update({
           analyticsOptIn: next,
-          analyticsUpdatedAt: now,
+          analyticsUpdatedAt: firestoreTimestamp,
         });
         persisted = true;
       } catch (error) {
@@ -78,13 +79,13 @@ export default function PrivacyInfoScreen({ navigation }) {
     try {
       await analyticsSetOptIn(next);
       if (user?.uid) {
-        await analyticsInit({
+        await configureAnalytics({
           optedIn: next,
           uid: user.uid,
-          props: {
-            plan: user.plan || 'free',
-            interests_count: String(user.interests?.length || 0),
-          },
+          props: deriveUserAnalyticsProps({
+            ...user,
+            analyticsOptIn: next,
+          }),
         });
       }
       await analyticsEvent('analytics_personalization_toggle', {

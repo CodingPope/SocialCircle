@@ -4,7 +4,7 @@ applyTo: '**'
 
 # 🧠 Social Circle – Copilot Coding Instruction
 
-You're helping me build **Social Circle** — a mobile app designed for adults (ages 21–40+) to make friends and meet in person through short-term events. This is not a dating app. It's casual, interest-based, and time-limited. Think “Snap Map meets Meetup” — fast, map-first, and highly local.
+You're helping me build **Social Circle** — a mobile app designed for adults (ages 21–40+) to make friends and meet in person through short-term events. This is not a dating app. It's casual, interest-based, and time-limited. Think “Snap Map meets Meetup” — fast, map-first, and highly local. DO NOT CREATE UNNECESSARY MD FILES.
 
 ---
 

@@ -1,0 +1,237 @@
+// Description: Manages user location context for analytics (city-level, privacy-safe)
+// Caches location to avoid excessive API calls; updates on app foreground
+import * as Location from 'expo-location';
+
+let cachedLocation = null;
+let lastFetchTime = 0;
+const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes to keep location fresh
+const ACCEPTABLE_ACCURACY_METERS = 5000; // ~3 miles radius for neighborhood-level context
+
+// Description: Ordered list of accuracy levels to attempt for high fidelity without exposing exact coords
+const HIGH_ACCURACY_SEQUENCE = (() => {
+  const accuracy = Location.Accuracy || {};
+  const sequence = [];
+
+  if (typeof accuracy.High !== 'undefined') {
+    sequence.push({ label: 'High', value: accuracy.High });
+  }
+
+  if (typeof accuracy.BestForNavigation !== 'undefined') {
+    sequence.push({
+      label: 'BestForNavigation',
+      value: accuracy.BestForNavigation,
+    });
+  } else if (typeof accuracy.Highest !== 'undefined') {
+    sequence.push({ label: 'Highest', value: accuracy.Highest });
+  }
+
+  const balanced =
+    typeof accuracy.Balanced !== 'undefined'
+      ? { label: 'Balanced', value: accuracy.Balanced }
+      : null;
+  const low =
+    typeof accuracy.Low !== 'undefined'
+      ? { label: 'Low', value: accuracy.Low }
+      : null;
+
+  if (balanced) {
+    sequence.push(balanced);
+  } else if (low) {
+    sequence.push(low);
+  }
+
+  return sequence.length > 0
+    ? sequence
+    : [{ label: 'Default', value: undefined }];
+})();
+
+// Description: Attempt to fetch current position with escalating accuracy until within acceptable radius
+async function getPositionWithEscalation({ force = false } = {}) {
+  let lastError = null;
+
+  for (const { label, value } of HIGH_ACCURACY_SEQUENCE) {
+    try {
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: value,
+        maximumAge: 15_000,
+        timeout: 20_000,
+        mayShowUserSettingsDialog: force,
+      });
+
+      const accuracyRadius = position?.coords?.accuracy;
+
+      if (__DEV__) {
+        console.log(
+          `[locationContext] accuracy attempt ${label} -> radius: ${
+            typeof accuracyRadius === 'number'
+              ? `${accuracyRadius.toFixed(0)}m`
+              : 'unknown'
+          }`
+        );
+      }
+
+      if (
+        !accuracyRadius ||
+        accuracyRadius <= ACCEPTABLE_ACCURACY_METERS ||
+        label ===
+          HIGH_ACCURACY_SEQUENCE[HIGH_ACCURACY_SEQUENCE.length - 1].label
+      ) {
+        return position;
+      }
+
+      // Otherwise escalate to the next accuracy tier.
+    } catch (error) {
+      lastError = error;
+      if (__DEV__) {
+        console.warn(
+          `[locationContext] failed accuracy attempt ${label}`,
+          error?.message || error
+        );
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+  return null;
+}
+
+// Description: Get coarse location (city/region) for analytics context
+// Returns { city, region, country } or null if unavailable/denied
+export async function getCoarseLocation({ force = false } = {}) {
+  const now = Date.now();
+
+  // Return cached if fresh
+  if (!force && cachedLocation && now - lastFetchTime < CACHE_DURATION_MS) {
+    if (__DEV__) {
+      console.log('[locationContext] using cached location:', cachedLocation);
+    }
+    return cachedLocation;
+  }
+
+  try {
+    const servicesEnabled = await Location.hasServicesEnabledAsync?.();
+    if (servicesEnabled === false) {
+      if (__DEV__) {
+        console.warn('[locationContext] location services disabled');
+      }
+      cachedLocation = null;
+      return null;
+    }
+
+    // Check permission first
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      if (__DEV__) {
+        console.warn('[locationContext] location permission not granted');
+      }
+      cachedLocation = null;
+      return null;
+    }
+
+    // Get current position with escalating accuracy to achieve neighborhood-level precision
+    const position = await getPositionWithEscalation({ force });
+
+    if (!position || !position.coords) {
+      if (__DEV__) {
+        console.warn(
+          '[locationContext] no position acquired after accuracy escalation'
+        );
+      }
+      cachedLocation = null;
+      lastFetchTime = 0;
+      return null;
+    }
+
+    if (__DEV__) {
+      console.log('[locationContext] GPS coords:', {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      });
+    }
+
+    // Guard: ignore simulator defaults (Cupertino / San Francisco) if force refresh requested
+    const roundedLat = Number(position.coords.latitude?.toFixed(4));
+    const roundedLng = Number(position.coords.longitude?.toFixed(4));
+    const simulatorDefaults = [
+      { lat: 37.3346, lng: -122.009 }, // Apple Park (default simulator)
+      { lat: 37.7749, lng: -122.4194 }, // San Francisco (test script)
+    ];
+    if (
+      force &&
+      simulatorDefaults.some(
+        (loc) =>
+          Math.abs(loc.lat - roundedLat) < 0.0002 &&
+          Math.abs(loc.lng - roundedLng) < 0.0002
+      )
+    ) {
+      if (__DEV__) {
+        console.warn(
+          '[locationContext] ignoring simulator default coordinates – provide a custom simulator location or test on device'
+        );
+      }
+      cachedLocation = null;
+      lastFetchTime = 0;
+      return null;
+    }
+
+    // Reverse geocode to city/region
+    const [geocode] = await Location.reverseGeocodeAsync({
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+    });
+
+    if (geocode) {
+      cachedLocation = {
+        city: geocode.city || geocode.subregion || null,
+        region: geocode.region || geocode.isoCountryCode || null,
+        country: geocode.country || geocode.isoCountryCode || null,
+      };
+      lastFetchTime = now;
+      if (__DEV__) {
+        console.log('[locationContext] geocoded location:', cachedLocation);
+      }
+      return cachedLocation;
+    }
+
+    return null;
+  } catch (error) {
+    // Silent fail for permission denied, timeout, etc.
+    if (__DEV__) {
+      console.warn(
+        '[locationContext] failed to get location',
+        error?.message || error
+      );
+    }
+    return null;
+  }
+}
+
+// Description: Clear cached location (useful for testing or manual refresh)
+export function clearLocationCache() {
+  cachedLocation = null;
+  lastFetchTime = 0;
+}
+
+// Description: Force-refresh location (bypasses cache and ignores simulator defaults)
+export async function refreshLocation() {
+  return getCoarseLocation({ force: true });
+}
+
+// Description: Get formatted city string for analytics (e.g., "San Francisco, CA")
+export async function getFormattedCity() {
+  const loc = await getCoarseLocation();
+  if (!loc) return null;
+
+  if (loc.city && loc.region) {
+    return `${loc.city}, ${loc.region}`;
+  }
+  if (loc.city) {
+    return loc.city;
+  }
+  if (loc.region) {
+    return loc.region;
+  }
+  return null;
+}

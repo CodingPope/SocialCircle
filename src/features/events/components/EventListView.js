@@ -6,8 +6,6 @@ import BottomSheet, {
 } from '@gorhom/bottom-sheet';
 import EventPopUpCard from './EventPopUpCard';
 import PostCard from './PostCard';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../../../firebase/config';
 import { getUserById } from '../../profile/services/userService';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import {

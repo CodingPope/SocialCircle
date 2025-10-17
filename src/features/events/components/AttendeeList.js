@@ -11,17 +11,7 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  updateDoc,
-  arrayRemove,
-  doc,
-  deleteField,
-} from 'firebase/firestore';
-import { db, reportContent } from '../../../firebase/config';
+import { db, reportContent, arrayRemove, deleteField } from '../../../firebase/config';
 import { trackReportContent } from '../../../lib/analytics';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
@@ -136,16 +126,16 @@ export default function AttendeeList({
     if (!eventId || !userId) return;
     try {
       // Description: Remove userId from event.attendees array and clear snippet
-      const eventRef = doc(db, 'events', eventId);
+      const eventRef = db.collection('events').doc(eventId);
       const updates = {
         attendees: arrayRemove(userId),
         [`attendeeSnippets.${userId}`]: deleteField(),
       };
-      await updateDoc(eventRef, updates);
+      await eventRef.update(updates);
 
       // Description: Remove eventId from user's attended / attending arrays (support both naming variants)
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
+      const userRef = db.collection('users').doc(userId);
+      await userRef.update({
         attendedEvents: arrayRemove(eventId),
         attendingEvents: arrayRemove(eventId), // in case this variant exists
       });

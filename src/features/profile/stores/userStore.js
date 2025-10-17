@@ -1,12 +1,6 @@
 // Description: Zustand store for user authentication and profile
 import { create } from 'zustand';
 import { auth, db, getUserData, updateUserData } from '../../../firebase/config';
-import { disableNetwork, enableNetwork } from 'firebase/firestore';
-import {
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-} from 'firebase/auth';
 import { findSoftDeletedUserByEmail, reactivateUser } from '../services/userService';
 import { navigationRef, resetRoot } from '../../../navigation/RootNavigation';
 import { getNextOnboardingStep } from '../../../utils/onboardingRouter';
@@ -29,14 +23,14 @@ export const useUserStore = create((set) => ({
   login: async (email, password) => {
     set({ loading: true });
     try {
-      const result = await signInWithEmailAndPassword(auth, email, password);
+      const result = await auth().signInWithEmailAndPassword(email, password);
       try {
-        await enableNetwork(db);
+        await db.enableNetwork();
       } catch {}
       const userData = await getUserData(result.user.uid);
       // Restrict login for soft-deleted users
       if (userData && userData.isDeleted) {
-        await signOut(auth);
+        await auth().signOut();
         set({ user: null, loading: false });
         if (typeof global !== 'undefined' && global.Alert) {
           global.Alert.alert(
@@ -125,7 +119,7 @@ export const useUserStore = create((set) => ({
     try {
       // Pause Firestore network first to prevent transient permission-denied callbacks
       try {
-        await disableNetwork(db);
+        await db.disableNetwork();
       } catch {}
 
       // Clean up any globally tracked Firestore listeners
@@ -143,7 +137,7 @@ export const useUserStore = create((set) => ({
         global.unsubscribeAllListeners = [];
       }
 
-      await signOut(auth);
+      await auth().signOut();
       set({ user: null, profileComplete: false, loading: false });
     } catch (err) {
       set({ loading: false });
@@ -187,10 +181,10 @@ export const useUserStore = create((set) => ({
   // Listen to auth state changes (for auto-login)
   listenAuthState: () => {
     set({ loading: true });
-    onAuthStateChanged(auth, async (firebaseUser) => {
+    auth().onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          await enableNetwork(db);
+          await db.enableNetwork();
         } catch {}
         const userData = await getUserData(firebaseUser.uid);
         const complete = getNextOnboardingStep(userData) === null;

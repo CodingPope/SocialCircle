@@ -1,13 +1,6 @@
 // Description: Badge management service for awarding, removing, and managing user badges
 
-import {
-  doc,
-  updateDoc,
-  getDoc,
-  arrayUnion,
-  arrayRemove,
-} from 'firebase/firestore';
-import { db } from '../../../firebase/config';
+import { db, arrayUnion, arrayRemove } from '../../../firebase/config';
 import { getBadgeConfig, badgeExists, DEFAULT_BADGE } from './badgeConfig';
 
 /**
@@ -24,10 +17,10 @@ export async function awardBadge(userId, badgeId, setAsCurrent = false) {
       return false;
     }
 
-    const userRef = doc(db, 'users', userId);
-    const userDoc = await getDoc(userRef);
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
 
-    if (!userDoc.exists()) {
+    if (!userDoc.exists) {
       console.warn(`[badgeService] User ${userId} does not exist`);
       return false;
     }
@@ -50,7 +43,7 @@ export async function awardBadge(userId, badgeId, setAsCurrent = false) {
       updateData.currentBadge = badgeId;
     }
 
-    await updateDoc(userRef, updateData);
+    await userRef.update(updateData);
     console.log(
       `[badgeService] Successfully awarded badge ${badgeId} to user ${userId}`
     );
@@ -72,10 +65,10 @@ export async function awardBadge(userId, badgeId, setAsCurrent = false) {
  */
 export async function removeBadge(userId, badgeId) {
   try {
-    const userRef = doc(db, 'users', userId);
-    const userDoc = await getDoc(userRef);
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
 
-    if (!userDoc.exists()) {
+    if (!userDoc.exists) {
       console.warn(`[badgeService] User ${userId} does not exist`);
       return false;
     }
@@ -101,7 +94,7 @@ export async function removeBadge(userId, badgeId) {
         remainingBadges.length > 0 ? remainingBadges[0] : DEFAULT_BADGE;
     }
 
-    await updateDoc(userRef, updateData);
+    await userRef.update(updateData);
     console.log(
       `[badgeService] Successfully removed badge ${badgeId} from user ${userId}`
     );
@@ -123,10 +116,10 @@ export async function removeBadge(userId, badgeId) {
  */
 export async function setCurrentBadge(userId, badgeId) {
   try {
-    const userRef = doc(db, 'users', userId);
-    const userDoc = await getDoc(userRef);
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
 
-    if (!userDoc.exists()) {
+    if (!userDoc.exists) {
       console.warn(`[badgeService] User ${userId} does not exist`);
       return false;
     }
@@ -142,7 +135,7 @@ export async function setCurrentBadge(userId, badgeId) {
       return false;
     }
 
-    await updateDoc(userRef, {
+    await userRef.update({
       currentBadge: badgeId,
     });
 
@@ -166,10 +159,10 @@ export async function setCurrentBadge(userId, badgeId) {
  */
 export async function getUserBadges(userId) {
   try {
-    const userRef = doc(db, 'users', userId);
-    const userDoc = await getDoc(userRef);
+    const userRef = db.collection('users').doc(userId);
+    const userDoc = await userRef.get();
 
-    if (!userDoc.exists()) {
+    if (!userDoc.exists) {
       console.warn(`[badgeService] User ${userId} does not exist`);
       return [];
     }

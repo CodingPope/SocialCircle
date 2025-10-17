@@ -177,9 +177,9 @@ Create a `.env` file in the project root:
 GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
 
 # Firebase (if not using config file)
-FIREBASE_API_KEY=your_firebase_api_key
-FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-FIREBASE_PROJECT_ID=your_project_id
+FIREBASE_WEB_API_KEY=your_firebase_api_key
+FIREBASE_WEB_AUTH_DOMAIN=your_project.firebaseapp.com
+FIREBASE_WEB_PROJECT_ID=your_project_id
 ```
 
 5️⃣ **Add Firebase config files**

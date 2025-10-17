@@ -1,8 +1,7 @@
 // src/lib/devDiagnostics.js
 // Dev-only diagnostics; never run in production builds
 import { Platform } from 'react-native';
-import { getApp } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { functions } from '../../../firebase/config';
 import { track as trackClient } from '../../../lib/analytics';
 
 export async function runFunctionSmokeTests() {
@@ -10,11 +9,9 @@ export async function runFunctionSmokeTests() {
     return { skipped: true };
   }
   try {
-    const functions = getFunctions(getApp(), 'us-central1');
-
     // getEvents callable
     try {
-      const getEvents = httpsCallable(functions, 'getEvents');
+      const getEvents = functions.httpsCallable('getEvents');
       const res = await getEvents({ limit: 1 });
       console.log(
         '[diagnostics] getEvents ok',
@@ -29,7 +26,7 @@ export async function runFunctionSmokeTests() {
 
     // sendPush callable with no tokens to validate auth errors/handling
     try {
-      const sendPush = httpsCallable(functions, 'sendPush');
+      const sendPush = functions.httpsCallable('sendPush');
       const res = await sendPush({ title: 'Smoke', body: 'Test', tokens: [] });
       console.log('[diagnostics] sendPush ok', res?.data || {});
       trackClient('diag_sendPush_ok', {});

@@ -18,7 +18,7 @@ import {
   collection,
   getDocs,
   getDoc,
-} from 'firebase/firestore';
+} from '../../../firebase/firestoreCompat';
 import { db } from '../../../firebase/config';
 import { useUserStore } from '../stores/userStore';
 import Button from '../../../components/ui/Button';
@@ -190,7 +190,7 @@ export default function ManageInterestsScreen({ navigation }) {
 
         // Fetch user's selected interests
         const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
+        if (userDoc.exists) {
           const userData = userDoc.data();
           setSelected(userData.interests || []); // Prepopulate selected interests
         }

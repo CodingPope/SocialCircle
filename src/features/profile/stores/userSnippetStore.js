@@ -5,14 +5,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../../../firebase/config';
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-} from 'firebase/firestore';
 
 // Build a minimal snippet from a user doc
 function toSnippet(uid, user) {
@@ -82,11 +74,10 @@ export const useUserSnippetStore = create(
           const chunk = missing.slice(i, i + 10);
           if (!chunk.length) continue;
           try {
-            const q = query(
-              collection(db, 'users'),
-              where('__name__', 'in', chunk)
-            );
-            const snap = await getDocs(q);
+            const queryRef = db
+              .collection('users')
+              .where('__name__', 'in', chunk);
+            const snap = await queryRef.get();
             snap.docs.forEach((d) => {
               const s = toSnippet(d.id, d.data());
               fetched.push(s);
@@ -96,8 +87,8 @@ export const useUserSnippetStore = create(
             const results = await Promise.all(
               chunk.map(async (uid) => {
                 try {
-                  const s = await getDoc(doc(db, 'users', uid));
-                  return s.exists()
+                  const s = await db.collection('users').doc(uid).get();
+                  return s.exists
                     ? toSnippet(uid, s.data())
                     : {
                         uid,

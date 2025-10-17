@@ -25,7 +25,7 @@ import {
   getDoc,
   doc,
   onSnapshot,
-} from 'firebase/firestore';
+} from '../../../firebase/firestoreCompat';
 import { db } from '../../../firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
@@ -275,7 +275,7 @@ export default function MyCircle({ navigation }) {
           );
           const eventMap = {};
           eventSnaps.forEach((snap, i) => {
-            if (snap.exists()) {
+            if (snap.exists) {
               eventMap[uniqueEventIds[i]] = { id: snap.id, ...snap.data() };
             }
           });
@@ -316,7 +316,7 @@ export default function MyCircle({ navigation }) {
         const unsub = onSnapshot(
           friendRef,
           (snap) => {
-            if (snap.exists()) {
+            if (snap.exists) {
               acc.set(friendId, { id: friendId, ...snap.data() });
             } else {
               acc.delete(friendId);
@@ -366,7 +366,7 @@ export default function MyCircle({ navigation }) {
       const unsub = onSnapshot(
         ref,
         (snap) => {
-          if (!snap.exists()) {
+          if (!snap.exists) {
             cache.delete(eventId);
             setSavedCacheVersion((v) => v + 1);
             return;
@@ -413,7 +413,7 @@ export default function MyCircle({ navigation }) {
           missingIds.map(async (eventId) => {
             try {
               const snap = await getDoc(doc(db, 'events', eventId));
-              if (snap.exists()) {
+              if (snap.exists) {
                 cache.set(eventId, { id: snap.id, ...snap.data() });
               } else {
                 cache.delete(eventId);

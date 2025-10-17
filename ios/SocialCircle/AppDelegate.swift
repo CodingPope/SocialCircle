@@ -1,6 +1,8 @@
+import UIKit
 import Expo
 import React
 import ReactAppDependencyProvider
+import FirebaseCore
 
 // @generated begin react-native-maps-import - expo prebuild (DO NOT MODIFY) sync-bee50fec513f89284e0fa3f5d935afdde33af98f
 #if canImport(GoogleMaps)
@@ -13,11 +15,39 @@ public class AppDelegate: ExpoAppDelegate {
 
   var reactNativeDelegate: ExpoReactNativeFactoryDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
+  
+  public override init() {
+    super.init()
+    if FirebaseApp.app() == nil {
+      FirebaseApp.configure()
+    }
+  }
+
+  public override func application(
+    _ application: UIApplication,
+    willFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    if FirebaseApp.app() == nil {
+      FirebaseApp.configure()
+    }
+    return super.application(application, willFinishLaunchingWithOptions: launchOptions)
+  }
 
   public override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    if FirebaseApp.app() == nil {
+      FirebaseApp.configure()
+    }
+
+#if DEBUG
+    if let runtimeDelegate = UIApplication.shared.delegate {
+      let delegateClassName = NSStringFromClass(type(of: runtimeDelegate))
+      print("[AppDelegate] Runtime delegate class: \(delegateClassName)")
+    }
+#endif
+
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()

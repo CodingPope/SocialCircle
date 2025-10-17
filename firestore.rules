@@ -12,18 +12,41 @@ service cloud.firestore {
     }
 
     function isEventHost(e) {
-      return signedIn() && e != null && (
-        matchesAuthUid(e.data.ownerId) ||
-        matchesAuthUid(e.data.hostId) ||
-        matchesAuthUid(e.data.owner) ||
-        matchesAuthUid(e.data.ownerUID) ||
-        matchesAuthUid(e.data.host) ||
-        matchesAuthUid(e.data.hostUID) ||
-        listIncludesAuthUid(e.data.hosts) ||
-        listIncludesAuthUid(e.data.coHosts) ||
-        listIncludesAuthUid(e.data.admins) ||
-        listIncludesAuthUid(e.data.moderators)
+      let data = (e == null) ? null : e.data;
+      return signedIn() && data != null && (
+        matchesAuthUid(data.ownerId) ||
+        matchesAuthUid(data.hostId) ||
+        matchesAuthUid(data.owner) ||
+        matchesAuthUid(data.ownerUID) ||
+        matchesAuthUid(data.host) ||
+        matchesAuthUid(data.hostUID) ||
+        listIncludesAuthUid(data.hosts) ||
+        listIncludesAuthUid(data.coHosts) ||
+        listIncludesAuthUid(data.admins) ||
+        listIncludesAuthUid(data.moderators)
       );
+    }
+
+    function validEventCreate() {
+      let data = request.resource.data;
+      return signedIn() &&
+        matchesAuthUid(data.ownerId) &&
+        (!data.keys().hasAny(['hostId']) || matchesAuthUid(data.hostId)) &&
+        (!data.keys().hasAny(['hosts']) || listIncludesAuthUid(data.hosts)) &&
+        (!data.keys().hasAny(['coHosts']) || listIncludesAuthUid(data.coHosts)) &&
+        (!data.keys().hasAny(['admins']) || listIncludesAuthUid(data.admins)) &&
+        (!data.keys().hasAny(['moderators']) || listIncludesAuthUid(data.moderators)) &&
+        (!data.keys().hasAny(['attendees']) || (
+          data.attendees is list &&
+          (data.attendees.size() == 0 || data.attendees.hasOnly([request.auth.uid]))
+        )) &&
+        (!data.keys().hasAny(['requests']) || (data.requests is list && data.requests.size() == 0)) &&
+        (!data.keys().hasAny(['waitlist']) || (data.waitlist is list && data.waitlist.size() == 0)) &&
+        (!data.keys().hasAny(['isDeleted']) || data.isDeleted != true);
+    }
+
+    function eventOwnerUnchanged() {
+      return request.resource.data.ownerId == resource.data.ownerId;
     }
     function isAttendee(e) { return signedIn() && (request.auth.uid in (e.data.attendees == null ? [] : e.data.attendees)); }
     function isValidDeviceToken(t) {
@@ -116,14 +139,16 @@ service cloud.firestore {
       allow read: if signedIn();
 
       // On create, enforce device token validity and sensible defaults for restricted flags
-      allow create: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&
+      allow create: if isOwner(uid) && 
+        isValidDeviceToken(request.resource.data.deviceToken) &&
         // Prevent clients from self-assigning premium/popular/business on create
-        (
-          (request.resource.data.premiumActive == false || !(request.resource.data.keys().hasAny(['premiumActive']))) &&
-          (request.resource.data.isPopular == false || !(request.resource.data.keys().hasAny(['isPopular']))) &&
-          (request.resource.data.type == null || request.resource.data.type == 'user') &&
-          !(request.resource.data.keys().hasAny(['premiumTier','premiumSince','premiumUntil','popularScore','businessTier','plan']))
-        );
+        // Allow premiumActive and isPopular ONLY if explicitly false or missing
+        (!request.resource.data.keys().hasAny(['premiumActive']) || request.resource.data.premiumActive == false) &&
+        (!request.resource.data.keys().hasAny(['isPopular']) || request.resource.data.isPopular == false) &&
+        // Type must be 'user' or missing (defaults to 'user')
+        (!request.resource.data.keys().hasAny(['type']) || request.resource.data.type == 'user') &&
+        // Disallow premium/business tier fields entirely on create
+        !request.resource.data.keys().hasAny(['premiumTier','premiumSince','premiumUntil','popularScore','businessTier','plan']);
 
       // Owners can update their profile, but not restricted fields
       allow update: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&
@@ -151,10 +176,10 @@ service cloud.firestore {
 
     match /events/{eventId} {
       allow read: if signedIn();
-      allow create: if signedIn();
+      allow create: if validEventCreate();
 
       // Host-initiated updates
-      allow update: if isEventHost(resource);
+      allow update: if isEventHost(resource) && eventOwnerUnchanged();
 
       // Self-leave (safe against nulls) OR RSVP request (safe against nulls)
       allow update: if signedIn() && (

@@ -100,6 +100,9 @@ export default function DiscoveryScreen() {
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const pinnedInterestsKey = useMemo(() => {
+    return user?.uid ? `pinnedInterests_${user.uid}` : null;
+  }, [user?.uid]);
   const createPostTutorialKey = useMemo(() => {
     return user?.uid ? `discovery_create_post_tutorial_${user.uid}` : null;
   }, [user?.uid]);
@@ -107,6 +110,105 @@ export default function DiscoveryScreen() {
   const [createPostFabLayout, setCreatePostFabLayout] = useState(null);
   const createPostFabRef = useRef(null);
   const createPostLayoutRef = useRef(null);
+
+  const sanitizeInterests = useCallback((list = []) => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map((interest) => (typeof interest === 'string' ? interest.trim() : ''))
+      .filter((interest) => interest.length > 0);
+  }, []);
+
+  const parseStoredInterests = useCallback(
+    (rawValue) => {
+      if (!rawValue) return [];
+      try {
+        const parsed = JSON.parse(rawValue);
+        return sanitizeInterests(parsed);
+      } catch (err) {
+        console.warn('Failed to parse stored interests:', err?.message || err);
+        return [];
+      }
+    },
+    [sanitizeInterests]
+  );
+
+  const mergeInterestsWithPinned = useCallback(
+    (interests = [], pinned = []) => {
+      const normalizedInterests = sanitizeInterests(interests);
+      const normalizedPinned = sanitizeInterests(pinned)
+        .filter((interest) => normalizedInterests.includes(interest))
+        .slice(0, PINNED_INTERESTS_LIMIT);
+
+      const merged = [
+        ...normalizedPinned,
+        ...normalizedInterests.filter(
+          (interest) => !normalizedPinned.includes(interest)
+        ),
+      ];
+
+      return {
+        orderedInterests: merged,
+        pinnedSnapshot: normalizedPinned,
+      };
+    },
+    [sanitizeInterests]
+  );
+
+  const loadPinnedInterests = useCallback(async () => {
+    if (!pinnedInterestsKey) return [];
+
+    try {
+      const stored = await AsyncStorage.getItem(pinnedInterestsKey);
+      if (stored) {
+        return parseStoredInterests(stored).slice(0, PINNED_INTERESTS_LIMIT);
+      }
+
+      const legacy = await AsyncStorage.getItem('pinnedInterests');
+      if (legacy) {
+        const legacyParsed = parseStoredInterests(legacy).slice(
+          0,
+          PINNED_INTERESTS_LIMIT
+        );
+        await AsyncStorage.setItem(
+          pinnedInterestsKey,
+          JSON.stringify(legacyParsed)
+        );
+        await AsyncStorage.removeItem('pinnedInterests');
+        return legacyParsed;
+      }
+    } catch (err) {
+      console.warn('Failed to load pinned interests:', err?.message || err);
+    }
+
+    return [];
+  }, [parseStoredInterests, pinnedInterestsKey]);
+
+  const persistPinnedSnapshot = useCallback(
+    (snapshot = []) => {
+      if (!pinnedInterestsKey) return;
+      const sanitized = sanitizeInterests(snapshot).slice(
+        0,
+        PINNED_INTERESTS_LIMIT
+      );
+      AsyncStorage.setItem(pinnedInterestsKey, JSON.stringify(sanitized)).catch(
+        (err) =>
+          console.warn(
+            'Failed to persist pinned interests:',
+            err?.message || err
+          )
+      );
+    },
+    [pinnedInterestsKey, sanitizeInterests]
+  );
+
+  useEffect(() => {
+    // Description: Clear discovery selections when the authenticated user changes
+    setUserInterests([]);
+    setSelectedInterest(null);
+    setEvents([]);
+    setPosts([]);
+    setLastDoc(null);
+  }, [user?.uid]);
 
   const blockKey = useMemo(() => {
     const blocked = Array.isArray(user?.blocked)
@@ -119,6 +221,7 @@ export default function DiscoveryScreen() {
   }, [user?.blocked, user?.blockedBy]);
 
   const ALL_LABEL = 'All';
+  const PINNED_INTERESTS_LIMIT = 12;
 
   const feedItems = useMemo(() => {
     const eventItems = (events || []).map((event) => ({
@@ -303,8 +406,10 @@ export default function DiscoveryScreen() {
     const isNewUser = () => {
       if (!user?.createdAt) return false;
       try {
-        const createdDate = user.createdAt?.toDate?.() || new Date(user.createdAt);
-        const daysSinceCreation = (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
+        const createdDate =
+          user.createdAt?.toDate?.() || new Date(user.createdAt);
+        const daysSinceCreation =
+          (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
         return daysSinceCreation <= 7;
       } catch (e) {
         console.warn('Error checking user creation date:', e);
@@ -344,22 +449,60 @@ export default function DiscoveryScreen() {
     });
   }, [blockKey]);
 
+  // Description: Enrich events in the discovery feed with host snippets (cached, batched)
+  const enrichEventsWithHosts = useCallback(
+    async (eventsToEnrich) => {
+      const ownerIds = Array.from(
+        new Set(
+          (eventsToEnrich || [])
+            .map((e) => e.ownerId || e.ownerUID || e.owner)
+            .filter(Boolean)
+        )
+      );
+      if (ownerIds.length === 0) return eventsToEnrich;
+
+      try {
+        const map = await ensureSnippets(ownerIds);
+        return (eventsToEnrich || []).map((e) => {
+          const oid = e?.ownerId || e?.ownerUID || e?.owner;
+          const s = oid ? map.get(oid) : null;
+          if (!s) return e;
+          return {
+            ...e,
+            hostName: s.name || e?.hostName,
+            hostPhoto: s.photoURL || e?.hostPhoto,
+            hostRating: s.rating || e?.hostRating,
+          };
+        });
+      } catch (error) {
+        console.warn('Discovery enrich hosts failed:', error?.message || error);
+        return eventsToEnrich;
+      }
+    },
+    [ensureSnippets]
+  );
+
   useEffect(() => {
+    let isMounted = true;
+
     async function initializeUserData() {
       try {
         // If personalization is disabled, don't request location or interests here
         if (!personalizationEnabled) {
+          if (!isMounted) return;
           setUserLocation(null);
           setUserCity('');
           setUserInterests([]);
-          // Load a generic set of upcoming events
           const generic = await fetchGenericEvents(20);
-          setEvents(
-            filterBlockedEvents(
-              generic.filter((e) => e.isDeleted !== true),
-              user
-            )
+          if (!isMounted) return;
+          const visibleGeneric = filterBlockedEvents(
+            generic.filter((e) => e.isDeleted !== true),
+            user
           );
+          const enrichedGeneric = await enrichEventsWithHosts(visibleGeneric);
+          if (!isMounted) return;
+          setEvents(enrichedGeneric);
+          if (!isMounted) return;
           setPosts([]);
           return;
         }
@@ -368,62 +511,125 @@ export default function DiscoveryScreen() {
         if (status !== 'granted') return;
 
         const location = await Location.getCurrentPositionAsync({});
+        if (!isMounted) return;
         setUserLocation(location.coords);
 
         const geocode = await Location.reverseGeocodeAsync(location.coords);
+        if (!isMounted) return;
         const city = geocode[0]?.city || '';
         setUserCity(city);
 
         const interests = await fetchUserInterests();
-        const storedPinnedInterests = await AsyncStorage.getItem(
-          'pinnedInterests'
+        const pinned = await loadPinnedInterests();
+        const { orderedInterests, pinnedSnapshot } = mergeInterestsWithPinned(
+          interests,
+          pinned
         );
-        const pinnedInterests = storedPinnedInterests
-          ? JSON.parse(storedPinnedInterests)
-          : [];
-        const sortedInterests = [
-          ...pinnedInterests,
-          ...interests.filter((i) => !pinnedInterests.includes(i)),
-        ];
-        setUserInterests(sortedInterests || []);
+
+        if (!isMounted) return;
+        setUserInterests(orderedInterests);
+        setSelectedInterest((prev) => {
+          if (prev === ALL_LABEL) return prev;
+          return orderedInterests.includes(prev) ? prev : null;
+        });
+
+        persistPinnedSnapshot(pinnedSnapshot);
       } catch (error) {
         console.error('Error initializing user data:', error);
       }
     }
 
     initializeUserData();
-  }, [personalizationEnabled]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    personalizationEnabled,
+    loadPinnedInterests,
+    mergeInterestsWithPinned,
+    pinnedInterestsKey,
+    persistPinnedSnapshot,
+    enrichEventsWithHosts,
+    user,
+    user?.uid,
+  ]);
 
   useEffect(() => {
+    let isMounted = true;
+
     async function preloadData() {
       try {
         if (!personalizationEnabled) {
           const cachedEvents = await AsyncStorage.getItem('genericEvents');
-          if (cachedEvents)
-            setEvents(filterBlockedEvents(JSON.parse(cachedEvents), user));
+          if (cachedEvents && isMounted) {
+            try {
+              const parsed = JSON.parse(cachedEvents);
+              const visibleCached = filterBlockedEvents(parsed, user);
+              const enrichedCached = await enrichEventsWithHosts(visibleCached);
+              if (!isMounted) return;
+              setEvents(enrichedCached);
+            } catch (err) {
+              console.warn('Failed to parse cached generic events:', err);
+            }
+          }
           const generic = await fetchGenericEvents(20);
+          if (!isMounted) return;
           const filtered = generic.filter((e) => !e.isDeleted);
-          setEvents(filterBlockedEvents(filtered, user));
+          const visibleFresh = filterBlockedEvents(filtered, user);
+          const enrichedFresh = await enrichEventsWithHosts(visibleFresh);
+          if (!isMounted) return;
+          setEvents(enrichedFresh);
           await AsyncStorage.setItem('genericEvents', JSON.stringify(filtered));
+          if (!isMounted) return;
           setPosts([]);
           return;
         }
 
-        const [location, interests] = await Promise.all([
+        const [location, interests, pinned] = await Promise.all([
           Location.getCurrentPositionAsync({}),
           fetchUserInterests(),
+          loadPinnedInterests(),
         ]);
+
+        if (!isMounted) return;
         setUserLocation(location.coords);
-        setUserInterests(interests);
+
+        const { orderedInterests, pinnedSnapshot } = mergeInterestsWithPinned(
+          interests,
+          pinned
+        );
+        setUserInterests(orderedInterests);
+        setSelectedInterest((prev) => {
+          if (prev === ALL_LABEL) return prev;
+          return orderedInterests.includes(prev) ? prev : null;
+        });
+
+        persistPinnedSnapshot(pinnedSnapshot);
 
         const cachedEvents = await AsyncStorage.getItem('hotEvents');
-        if (cachedEvents) {
-          setEvents(filterBlockedEvents(JSON.parse(cachedEvents), user));
+        if (cachedEvents && isMounted) {
+          try {
+            const parsed = JSON.parse(cachedEvents);
+            const visibleCached = filterBlockedEvents(parsed, user);
+            const enrichedCached = await enrichEventsWithHosts(visibleCached);
+            if (!isMounted) return;
+            setEvents(enrichedCached);
+          } catch (err) {
+            console.warn('Failed to parse cached hot events:', err);
+          }
         }
 
-        const newEvents = await fetchHotEvents(interests, location.coords);
+        const newEvents = await fetchHotEvents(
+          orderedInterests,
+          location.coords
+        );
+        if (!isMounted) return;
         const filteredEvents = newEvents.filter((event) => !event.isDeleted);
-        setEvents(filterBlockedEvents(filteredEvents, user));
+        const visibleEvents = filterBlockedEvents(filteredEvents, user);
+        const enrichedEvents = await enrichEventsWithHosts(visibleEvents);
+        if (!isMounted) return;
+        setEvents(enrichedEvents);
         await AsyncStorage.setItem('hotEvents', JSON.stringify(filteredEvents));
       } catch (error) {
         console.error('Error preloading data:', error);
@@ -431,7 +637,20 @@ export default function DiscoveryScreen() {
     }
 
     preloadData();
-  }, [personalizationEnabled]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    personalizationEnabled,
+    loadPinnedInterests,
+    mergeInterestsWithPinned,
+    pinnedInterestsKey,
+    persistPinnedSnapshot,
+    enrichEventsWithHosts,
+    user,
+    user?.uid,
+  ]);
 
   useEffect(() => {
     if (!personalizationEnabled) {
@@ -464,48 +683,22 @@ export default function DiscoveryScreen() {
     userInterests,
   ]);
 
-  // Description: Enrich events in the discovery feed with host snippets (cached, batched)
-  const enrichEventsWithHosts = useCallback(
-    async (eventsToEnrich) => {
-      const ownerIds = Array.from(
-        new Set(
-          (eventsToEnrich || [])
-            .map((e) => e.ownerId || e.ownerUID || e.owner)
-            .filter(Boolean)
-        )
-      );
-      if (ownerIds.length === 0) return eventsToEnrich;
-
-      try {
-        const map = await ensureSnippets(ownerIds);
-        return eventsToEnrich.map((e) => {
-          const oid = e.ownerId || e.ownerUID || e.owner;
-          const s = oid ? map.get(oid) : null;
-          if (!s) return e;
-          return {
-            ...e,
-            hostName: s.name || e.hostName,
-            hostPhoto: s.photoURL || e.hostPhoto,
-            hostRating: s.rating || e.hostRating,
-          };
-        });
-      } catch {
-        return eventsToEnrich;
-      }
-    },
-    [ensureSnippets]
-  );
-
   async function loadEvents(reset = false) {
     if (!personalizationEnabled) {
       const generic = await fetchGenericEvents(20);
-      const filtered = filterBlockedEvents(
+      const visibleGeneric = filterBlockedEvents(
         generic.filter((e) => e.isDeleted !== true),
         user
       );
+      const enrichedGeneric = await enrichEventsWithHosts(visibleGeneric);
       setEvents((prev) => {
-        const next = reset ? filtered : [...prev, ...filtered];
-        return filterBlockedEvents(next, user);
+        const base = reset ? [] : prev;
+        const merged = [...base, ...enrichedGeneric];
+        const uniqueById = merged.filter(
+          (event, index, self) =>
+            index === self.findIndex((candidate) => candidate.id === event.id)
+        );
+        return filterBlockedEvents(uniqueById, user);
       });
       return;
     }
@@ -638,21 +831,35 @@ export default function DiscoveryScreen() {
   };
 
   function pinInterest(interest) {
+    const [normalizedInterest] = sanitizeInterests([interest]);
+    if (!normalizedInterest) return;
+
     setUserInterests((prev) => {
-      const updated = [interest, ...prev.filter((i) => i !== interest)];
-      AsyncStorage.setItem('pinnedInterests', JSON.stringify(updated));
+      const base = Array.isArray(prev) ? prev : [];
+      const updated = [
+        normalizedInterest,
+        ...base.filter((i) => i !== normalizedInterest),
+      ];
+      persistPinnedSnapshot(updated);
       return updated;
     });
-    setSelectedInterest(interest);
+    setSelectedInterest(normalizedInterest);
   }
 
   function selectInterest(interest) {
+    const [normalizedInterest] = sanitizeInterests([interest]);
+    if (!normalizedInterest) return;
+
     setUserInterests((prev) => {
-      const updated = [interest, ...prev.filter((i) => i !== interest)];
-      AsyncStorage.setItem('pinnedInterests', JSON.stringify(updated));
+      const base = Array.isArray(prev) ? prev : [];
+      const updated = [
+        normalizedInterest,
+        ...base.filter((i) => i !== normalizedInterest),
+      ];
+      persistPinnedSnapshot(updated);
       return updated;
     });
-    setSelectedInterest(interest);
+    setSelectedInterest(normalizedInterest);
     chipScrollViewRef.current?.scrollTo({ x: 0, animated: true });
   }
 

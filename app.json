@@ -16,18 +16,28 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.socialcirclellc.app",
       "config": {
-        "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}"
+        "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}",
+        "usesNonExemptEncryption": false
       },
-      "buildNumber": "1",
+      "buildNumber": "3",
+      "useFrameworks": "dynamic",
+      "entitlements": {
+        "aps-environment": "development",
+        "com.apple.developer.applesignin": ["Default"],
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.socialcirclellc.app"
+        ]
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Social Circle uses your location to show nearby events and improve discovery.",
         "NSCameraUsageDescription": "Allow camera access to take photos for events and your profile.",
         "NSPhotoLibraryUsageDescription": "Allow photo library access to choose images for events and your profile.",
-        "NSPhotoLibraryAddUsageDescription": "Allow saving images from Social Circle to your photo library.",
+        "NSPhotoLibraryAddUsageDescription": "We save event photos and profile pictures to your library on request.",
         "NSRemindersUsageDescription": "Allow reminders access if you choose to manage reminders in Social Circle.",
-        "NSCalendarsUsageDescription": "Social Circle uses your calendar to add events you join or host.",
-        "ITSAppUsesNonExemptEncryption": false
-      }
+        "NSCalendarsUsageDescription": "Allow calendar access so you can add events to your calendar.",
+        "FIREBASE_ANALYTICS_COLLECTION_ENABLED": false
+      },
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "package": "com.socialcirclellc.app",
@@ -46,8 +56,14 @@
     },
     "plugins": [
       "expo-apple-authentication",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png"
+        }
+      ],
       "expo-video",
+      ["expo-location", {}],
       "expo-calendar",
       "expo-font",
       "expo-asset"

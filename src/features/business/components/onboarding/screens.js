@@ -6,14 +6,14 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useBizOnboarding } from '../../stores/businessOnboardingStore';
 import { db, storage } from '../../../../firebase/config';
-import { collection, getDocs } from 'firebase/firestore';
+import { useAuth } from '../../../auth/context/AuthContext';
 import * as ImagePicker from 'expo-image-picker';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 export function Step0ChooseType({ navigation: navProp }) {
   const navigation = useNavigation();
@@ -85,7 +85,7 @@ export function Step1Basics() {
     let mounted = true;
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'categories'));
+        const snap = await db.collection('categories').get();
         const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
         if (mounted) setCategories(list);
       } catch {}
@@ -261,11 +261,19 @@ export function Step1Basics() {
 export function Step2Brand() {
   const navigation = useNavigation();
   const { saveBrand, loading, error, draft } = useBizOnboarding();
+  const { user } = useAuth();
   const [logoUrl, setLogoUrl] = useState(draft?.logoUrl || '');
   const [coverUrl, setCoverUrl] = useState(draft?.coverUrl || '');
 
   // Helper: pick from gallery and upload to Firebase Storage
   const pickAndUpload = async (kind) => {
+    if (!user?.uid) {
+      Alert.alert(
+        'Sign in required',
+        'You need an account to upload brand assets.'
+      );
+      return;
+    }
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -273,14 +281,26 @@ export function Step2Brand() {
       });
       if (res.canceled || !res.assets?.length) return;
       const uri = res.assets[0].uri;
-      const path = `businesses/${Date.now()}_${kind}.jpg`;
-      const blob = await (await fetch(uri)).blob();
-      const r = ref(storage, path);
-      await uploadBytes(r, blob);
-      const url = await getDownloadURL(r);
+      const contentType = res.assets[0]?.mimeType || 'image/jpeg';
+      const path = `businesses/${user.uid}/${Date.now()}_${kind}.jpg`;
+      const reference = storage.ref(path);
+      if (uri.startsWith('http')) {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        await reference.put(blob, { contentType });
+      } else {
+        await reference.putFile(uri, { contentType });
+      }
+      const url = await reference.getDownloadURL();
       if (kind === 'logo') setLogoUrl(url);
       else setCoverUrl(url);
-    } catch {}
+    } catch (uploadError) {
+      console.warn('Business asset upload failed', uploadError);
+      Alert.alert(
+        'Upload failed',
+        'Unable to upload that image. Please try again.'
+      );
+    }
   };
 
   return (

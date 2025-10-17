@@ -17,17 +17,9 @@ import {
   Modal,
   Alert,
 } from 'react-native';
-import {
-  GoogleAuthProvider,
-  signInWithCredential,
-} from 'firebase/auth';
 import * as Google from 'expo-auth-session/providers/google';
 import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
 
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-} from 'firebase/auth';
 import { useUserStore } from '../../../profile';
 import {
   registerForPushTokenAsync,
@@ -61,10 +53,12 @@ export default function LoginScreen({ navigation }) {
   useEffect(() => {
     if (googleResponse?.type === 'success') {
       const { id_token } = googleResponse.params;
-      const credential = GoogleAuthProvider.credential(id_token);
-      signInWithCredential(auth, credential).catch((err) => {
-        setError(err.message);
-      });
+      const credential = auth.GoogleAuthProvider.credential(id_token);
+      auth()
+        .signInWithCredential(credential)
+        .catch((err) => {
+          setError(err.message);
+        });
     }
   }, [googleResponse]);
 
@@ -72,7 +66,7 @@ export default function LoginScreen({ navigation }) {
   const handleLogin = async () => {
     setError('');
     try {
-      const res = await signInWithEmailAndPassword(auth, email, password);
+      const res = await auth().signInWithEmailAndPassword(email, password);
       // Refresh token for returning users (best-effort)
       initPushForUser(res.user.uid).catch(() => {});
       // On successful login, reset navigation to MainTabs (default tab is Map)
@@ -89,7 +83,18 @@ export default function LoginScreen({ navigation }) {
         ],
       });
     } catch (e) {
-      setError(e.message);
+      const debugInfo = {
+        code: e?.code,
+        message: e?.message,
+        nativeErrorCode: e?.nativeErrorCode,
+        nativeErrorMessage: e?.nativeErrorMessage,
+      };
+      console.error('[LoginScreen] signInWithEmailAndPassword failed', debugInfo);
+      setError(
+        debugInfo.nativeErrorMessage ||
+          debugInfo.message ||
+          'Login failed. Please try again.'
+      );
     }
   };
 
@@ -98,10 +103,21 @@ export default function LoginScreen({ navigation }) {
     try {
       // Try to sign in first to check if user exists
       try {
-        await signInWithEmailAndPassword(auth, email, password);
+        await auth().signInWithEmailAndPassword(email, password);
         setError('An account with this email already exists. Please log in.');
         return;
       } catch (signInErr) {
+        if (signInErr && signInErr.code !== 'auth/user-not-found') {
+          console.warn(
+            '[LoginScreen] pre-signup signInWithEmailAndPassword error',
+            {
+              code: signInErr?.code,
+              message: signInErr?.message,
+              nativeErrorCode: signInErr?.nativeErrorCode,
+              nativeErrorMessage: signInErr?.nativeErrorMessage,
+            }
+          );
+        }
         if (signInErr.code === 'auth/user-disabled') {
           // User exists but is disabled (soft-deleted)
           Alert.alert(
@@ -144,7 +160,7 @@ export default function LoginScreen({ navigation }) {
         }
       }
       // If we reach here, user does not exist, proceed with normal signup
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      const cred = await auth().createUserWithEmailAndPassword(email, password);
       // Request push permission (best-effort); do not block if denied
       const token = await registerForPushTokenAsync().catch(() => null);
       await createUser(cred.user.uid, {
@@ -155,7 +171,18 @@ export default function LoginScreen({ navigation }) {
       // Best-effort init to store platform and timestamps
       initPushForUser(cred.user.uid).catch(() => {});
     } catch (e) {
-      setError(e.message);
+      const debugInfo = {
+        code: e?.code,
+        message: e?.message,
+        nativeErrorCode: e?.nativeErrorCode,
+        nativeErrorMessage: e?.nativeErrorMessage,
+      };
+      console.error('[LoginScreen] createUserWithEmailAndPassword failed', debugInfo);
+      setError(
+        debugInfo.nativeErrorMessage ||
+          debugInfo.message ||
+          'Unable to create the account. Please try again.'
+      );
     }
   };
 
@@ -167,7 +194,7 @@ export default function LoginScreen({ navigation }) {
       return;
     }
     try {
-      await auth.sendPasswordResetEmail(resetEmail);
+      await auth().sendPasswordResetEmail(resetEmail);
       Alert.alert('Success', 'Password reset email sent! Check your inbox.');
       setShowReset(false);
       setResetEmail('');

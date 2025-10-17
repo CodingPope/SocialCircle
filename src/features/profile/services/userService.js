@@ -1,16 +1,5 @@
 // Description: Check for soft-deleted user by email and offer reactivation
-import {
-  getFirestore,
-  collection,
-  query,
-  where,
-  getDocs,
-  doc,
-  updateDoc,
-  setDoc,
-  getDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { db, serverTimestamp } from '../../../firebase/config';
 import { geohashForLocation } from 'geofire-common';
 import { track as trackClient } from '../../../lib/analytics';
 import { DEFAULT_BADGE } from '../utils/badgeConfig';
@@ -20,15 +9,13 @@ import { DEFAULT_BADGE } from '../utils/badgeConfig';
  * If found, returns the user document reference and data.
  */
 export async function findSoftDeletedUserByEmail(email) {
-  const db = getFirestore();
   console.log('[userService] Checking for soft-deleted user by email:', email);
   trackClient('user_soft_deleted_check', {});
-  const q = query(
-    collection(db, 'users'),
-    where('email', '==', email),
-    where('isDeleted', '==', true)
-  );
-  const snap = await getDocs(q);
+  const q = db
+    .collection('users')
+    .where('email', '==', email)
+    .where('isDeleted', '==', true);
+  const snap = await q.get();
   if (!snap.empty) {
     const docSnap = snap.docs[0];
     console.log('[userService] Soft-deleted user found:', docSnap.id);
@@ -44,22 +31,20 @@ export async function findSoftDeletedUserByEmail(email) {
  * Reactivates a soft-deleted user account by resetting isDeleted and deletedAt, and optionally updating fields.
  * Also re-enables the Auth user if disabled (via a callable cloud function).
  */
-import { httpsCallable } from 'firebase/functions';
 import { functions as firebaseFunctions } from '../../../firebase/config';
 
 export async function reactivateUser(userId, updates = {}) {
-  const db = getFirestore();
-  const userRef = doc(db, 'users', userId);
+  const userRef = db.collection('users').doc(userId);
   console.log('[userService] Reactivating user:', userId, updates);
   trackClient('user_reactivate_attempt', {});
-  await updateDoc(userRef, {
+  await userRef.update({
     isDeleted: false,
     deletedAt: null,
     ...updates,
   });
   // Call a callable function to re-enable the Auth user
   try {
-    const enableUser = httpsCallable(firebaseFunctions, 'enableAuthUser');
+    const enableUser = firebaseFunctions.httpsCallable('enableAuthUser');
     await enableUser({ uid: userId });
     console.log(
       '[userService] Called enableAuthUser cloud function for:',
@@ -75,9 +60,8 @@ export async function reactivateUser(userId, updates = {}) {
 // Description: Fetch user data by user ID from Firestore
 export async function getUserById(userId) {
   try {
-    const db = getFirestore();
-    const userDoc = await getDoc(doc(db, 'users', userId));
-    if (userDoc.exists()) {
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (userDoc.exists) {
       const userData = userDoc.data();
       // Restrict access for soft-deleted users
       if (userData.isDeleted) {
@@ -120,12 +104,87 @@ const CLIENT_RESTRICTED_USER_KEYS = [
   'type',
 ];
 
+function isTimestampLike(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.toDate === 'function' &&
+    typeof value.toMillis === 'function' &&
+    typeof value.seconds === 'number' &&
+    typeof value.nanoseconds === 'number'
+  );
+}
+
+function isGeoPointLike(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    typeof value.latitude === 'number' &&
+    typeof value.longitude === 'number' &&
+    typeof value.isEqual === 'function'
+  );
+}
+
+function stripUnsupportedFirestoreValues(value) {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number' && Number.isNaN(value)) return undefined;
+
+  if (
+    value === null ||
+    typeof value === 'boolean' ||
+    typeof value === 'string'
+  ) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value;
+  }
+
+  if (
+    value instanceof Date ||
+    isTimestampLike(value) ||
+    isGeoPointLike(value)
+  ) {
+    return value;
+  }
+
+  if (
+    value &&
+    typeof value === 'object' &&
+    typeof value._methodName === 'string'
+  ) {
+    // FieldValue sentinel (e.g., serverTimestamp, arrayUnion, etc.)
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const cleaned = value
+      .map((item) => stripUnsupportedFirestoreValues(item))
+      .filter((item) => item !== undefined);
+    return cleaned;
+  }
+
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [key, nested] of Object.entries(value)) {
+      const cleaned = stripUnsupportedFirestoreValues(nested);
+      if (cleaned !== undefined) {
+        out[key] = cleaned;
+      }
+    }
+    return out;
+  }
+
+  return undefined;
+}
+
 function sanitizeUserPayload(data = {}) {
   const clone = { ...data };
   for (const key of CLIENT_RESTRICTED_USER_KEYS) {
     if (key in clone) delete clone[key];
   }
-  return clone;
+  return stripUnsupportedFirestoreValues(clone);
 }
 
 function normalizeDeviceToken(token) {
@@ -134,7 +193,6 @@ function normalizeDeviceToken(token) {
 }
 
 export async function createUser(uid, userData = {}) {
-  const db = getFirestore();
   const sanitizedInput = sanitizeUserPayload(userData);
 
   const defaultUser = {
@@ -165,7 +223,10 @@ export async function createUser(uid, userData = {}) {
     isPopular: false,
     deviceToken: null,
     pushOptIn: false,
-    analyticsOptIn: undefined, // Let user choose during onboarding (will show consent prompt)
+    analyticsOptIn: null, // null signals "no decision" for consent prompt logic
+    analyticsUpdatedAt: null,
+    analyticsPromptedAt: null,
+    analyticsConsentVersion: null,
     isDeleted: false,
     deletedAt: null,
     // Badge system fields
@@ -189,7 +250,7 @@ export async function createUser(uid, userData = {}) {
 
   const now = serverTimestamp();
   const deviceToken = normalizeDeviceToken(sanitizedInput.deviceToken);
-  const payload = {
+  const payload = stripUnsupportedFirestoreValues({
     ...defaultUser,
     ...sanitizedInput,
     email: sanitizedInput.email ?? defaultUser.email,
@@ -198,9 +259,9 @@ export async function createUser(uid, userData = {}) {
     createdAt: sanitizedInput.createdAt ?? now,
     lastActive: sanitizedInput.lastActive ?? now,
     coarseGeohash5: coarse ?? defaultUser.coarseGeohash5,
-  };
+  });
 
-  const minimalFallback = {
+  const minimalFallback = stripUnsupportedFirestoreValues({
     type: 'user',
     email: payload.email,
     premiumActive: false,
@@ -213,18 +274,25 @@ export async function createUser(uid, userData = {}) {
     lastActive: now,
     isDeleted: false,
     deletedAt: null,
-  };
+    analyticsOptIn: payload?.analyticsOptIn ?? null,
+    analyticsUpdatedAt: payload?.analyticsUpdatedAt ?? null,
+    analyticsPromptedAt: payload?.analyticsPromptedAt ?? null,
+    analyticsConsentVersion: payload?.analyticsConsentVersion ?? null,
+  });
 
   console.log('[userService] Creating user in Firestore:', uid, sanitizedInput);
   try {
-    await setDoc(doc(db, 'users', uid), payload, { merge: true });
+    await db.collection('users').doc(uid).set(payload, { merge: true });
   } catch (err) {
     if (err?.code === 'permission-denied') {
       console.warn(
         '[userService] Primary createUser denied, attempting minimal fallback',
         err?.message || err
       );
-      await setDoc(doc(db, 'users', uid), minimalFallback, { merge: true });
+      await db
+        .collection('users')
+        .doc(uid)
+        .set(minimalFallback, { merge: true });
     } else {
       throw err;
     }
@@ -234,7 +302,6 @@ export async function createUser(uid, userData = {}) {
 
 export async function mergeUserFields(uid, data = {}) {
   if (!uid) return;
-  const db = getFirestore();
   const sanitizedInput = sanitizeUserPayload(data);
   const patch = { ...sanitizedInput };
 
@@ -263,12 +330,12 @@ export async function mergeUserFields(uid, data = {}) {
   }
 
   try {
-    await setDoc(doc(db, 'users', uid), patch, { merge: true });
+    await db.collection('users').doc(uid).set(patch, { merge: true });
   } catch (err) {
     if (err?.code === 'permission-denied') {
-      await setDoc(doc(db, 'users', uid), basePayload, { merge: true });
+      await db.collection('users').doc(uid).set(basePayload, { merge: true });
       if (Object.keys(patch).length > 0) {
-        await setDoc(doc(db, 'users', uid), patch, { merge: true });
+        await db.collection('users').doc(uid).set(patch, { merge: true });
       }
     } else {
       throw err;
@@ -276,13 +343,18 @@ export async function mergeUserFields(uid, data = {}) {
   }
 }
 
+// Description: Internal exports for unit testing sanitization logic
+export const __userServiceInternals = {
+  stripUnsupportedFirestoreValues,
+  sanitizeUserPayload,
+};
+
 // Description: Update user location and persist coarse geohash-5 + optional city/postalCode
 export async function updateUserLocation(
   uid,
   { latitude, longitude, city, postalCode } = {}
 ) {
   if (!uid) return;
-  const db = getFirestore();
   const patch = {};
   if (typeof latitude === 'number' && typeof longitude === 'number') {
     patch.location = { latitude, longitude };
@@ -293,5 +365,5 @@ export async function updateUserLocation(
 
   if (Object.keys(patch).length === 0) return;
 
-  await updateDoc(doc(db, 'users', uid), patch);
+  await db.collection('users').doc(uid).update(patch);
 }

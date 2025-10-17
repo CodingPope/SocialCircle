@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../../../firebase/config';
 import { useUserStore } from '../../../../profile';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
@@ -291,10 +290,10 @@ function InterestsScreen({ navigation }) {
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const categorySnap = await getDocs(collection(db, 'categories'));
+        const categorySnap = await db.collection('categories').get();
         let userSnap = null;
         try {
-          userSnap = await getDocs(collection(db, 'users'));
+          userSnap = await db.collection('users').get();
         } catch (countErr) {
           console.warn('Failed to load interest adoption counts', countErr);
         }
@@ -450,7 +449,7 @@ function InterestsScreen({ navigation }) {
         return;
       }
       // Update Firestore and local user store
-      await updateDoc(doc(db, 'users', user.uid), { interests: selected });
+      await db.collection('users').doc(user.uid).update({ interests: selected });
 
       // Update the user store with new interests immediately
       useUserStore.getState().setUser({ ...user, interests: selected });

@@ -22,7 +22,7 @@ import {
   doc,
   getDoc,
   onSnapshot, // live updates for event doc
-} from 'firebase/firestore';
+} from '../../../firebase/firestoreCompat';
 import { db, reportContent } from '../../../firebase/config';
 import BottomSheet, {
   BottomSheetBackdrop,
@@ -167,7 +167,7 @@ export default function EventPopUpCard({
     const unsub = onSnapshot(
       ref,
       (snap) => {
-        if (!snap.exists()) {
+        if (!snap.exists) {
           onClose && onClose();
           return;
         }
@@ -246,7 +246,7 @@ export default function EventPopUpCard({
         try {
           const ref = doc(db, 'users', ownerId);
           const snap = await getDoc(ref);
-          if (snap.exists()) setUserDetails({ id: snap.id, ...snap.data() });
+          if (snap.exists) setUserDetails({ id: snap.id, ...snap.data() });
         } catch (err2) {
           console.error('Error fetching user details:', err2);
           setUserDetails(null);

@@ -15,8 +15,7 @@ import {
 } from '@react-navigation/native';
 import { navigationRef, navigate } from './src/navigation/RootNavigation';
 import { useUserStore } from './src/features/profile';
-import { db } from './src/firebase/config';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db, serverTimestamp } from './src/firebase/config';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
 import {
@@ -30,9 +29,11 @@ import {
 } from './src/lib/errorReporting';
 import {
   init as analyticsInit,
+  analyticsInit as configureAnalytics,
   setOptIn as analyticsSetOptIn,
   screen as analyticsScreen,
   event as analyticsEvent,
+  deriveUserAnalyticsProps,
 } from './src/services/analytics';
 
 // Initialize error reporting once at module load to capture early errors
@@ -195,8 +196,9 @@ function AppContent() {
       initializedPushRef.current.add(user.uid);
       (async () => {
         try {
-          const snap = await getDoc(doc(db, 'users', user.uid));
-          if (snap.exists()) {
+          const userDocRef = db.collection('users').doc(user.uid);
+          const snap = await userDocRef.get();
+          if (snap.exists) {
             await initPushForUser(user.uid);
           }
         } catch {}
@@ -207,8 +209,9 @@ function AppContent() {
   useEffect(() => {
     const check = async () => {
       if (user) {
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (snap.exists()) {
+        const userDocRef = db.collection('users').doc(user.uid);
+        const snap = await userDocRef.get();
+        if (snap.exists) {
           const data = snap.data();
           const nextStep = getNextOnboardingStep(data);
           setOnboardingStep(nextStep);
@@ -254,13 +257,13 @@ function AppContent() {
     async (accepted) => {
       if (!user?.uid) return;
       setConsentBusy(true);
+      const userDocRef = db.collection('users').doc(user.uid);
       const timestamp = serverTimestamp();
       const acceptedFlag = !!accepted;
       const localTimestamp = new Date();
       let writeSucceeded = false;
       try {
-        await setDoc(
-          doc(db, 'users', user.uid),
+        await userDocRef.set(
           {
             analyticsOptIn: acceptedFlag,
             analyticsUpdatedAt: timestamp,
@@ -273,8 +276,7 @@ function AppContent() {
       } catch (err) {
         if (err?.code === 'permission-denied') {
           try {
-            await setDoc(
-              doc(db, 'users', user.uid),
+            await userDocRef.set(
               {
                 type: 'user',
                 email: user.email || '',
@@ -326,13 +328,13 @@ function AppContent() {
 
       try {
         await analyticsSetOptIn(acceptedFlag);
-        await analyticsInit({
+        await configureAnalytics({
           optedIn: acceptedFlag,
           uid: user.uid,
-          props: {
-            plan: user?.plan || 'free',
-            interests_count: String(user?.interests?.length || 0),
-          },
+          props: deriveUserAnalyticsProps({
+            ...user,
+            analyticsOptIn: acceptedFlag,
+          }),
         });
         await analyticsEvent('analytics_consent', {
           status: acceptedFlag ? 'accepted' : 'declined',
@@ -345,14 +347,14 @@ function AppContent() {
   const showLoadingOverlay = storeLoading || checking;
 
   useEffect(() => {
-    if (user?.uid) {
+    if (user?.uid && user?.analyticsOptIn) {
       recordDailySessionHeartbeat(user);
     }
-  }, [user?.uid]);
+  }, [user?.uid, user?.analyticsOptIn]);
 
   useEffect(() => {
     const handleAppStateChange = (nextState) => {
-      if (nextState === 'active' && user?.uid) {
+      if (nextState === 'active' && user?.uid && user?.analyticsOptIn) {
         recordDailySessionHeartbeat(user);
       }
     };

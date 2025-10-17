@@ -1,24 +1,15 @@
 import { useState, useEffect } from 'react';
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  Timestamp,
-} from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 
 export function useEvents(interests = [], rollingDays = 7) {
   const [events, setEvents] = useState([]);
 
   useEffect(() => {
-    const eventsRef = collection(db, 'events');
+    const queryRef = db
+      .collection('events')
+      .where('status', '==', 'active');
 
-    // Fetch all active events, no category filtering in Firestore
-    const q = query(eventsRef, where('status', '==', 'active'));
-
-    let unsub = onSnapshot(
-      q,
+    let unsub = queryRef.onSnapshot(
       (snapshot) => {
         const now = Date.now();
         const docs = snapshot.docs

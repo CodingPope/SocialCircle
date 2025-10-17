@@ -3,13 +3,18 @@
   "version": "1.0.4",
   "main": "index.js",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --dev-client",
+    "start:clear": "expo start --dev-client -c",
     "android": "expo run:android",
     "ios": "expo run:ios",
+    "ios:device": "expo run:ios --device",
     "web": "expo start --web",
     "test": "jest",
     "seed:categories": "node scripts/replaceCategories.js",
-    "clean:ios": "cd ios && xcodebuild clean -workspace SocialCircle.xcworkspace -scheme SocialCircle && cd .."
+    "clean:ios": "cd ios && xcodebuild clean -workspace SocialCircle.xcworkspace -scheme SocialCircle && cd ..",
+    "clean:android": "cd android && ./gradlew clean && cd ..",
+    "rebuild:ios": "cd ios && pod install && cd .. && npm run ios",
+    "rebuild:android": "npm run clean:android && npm run android"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",

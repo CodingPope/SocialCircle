@@ -1,16 +1,6 @@
 // Description: Zustand store for notifications (subscribe, mark as read, soft delete)
 import { create } from 'zustand';
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  doc,
-  writeBatch,
-  updateDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '../../../firebase/config';
+import { db, serverTimestamp } from '../../../firebase/config';
 
 export const useNotificationStore = create((set, get) => ({
   notifications: [],
@@ -53,12 +43,10 @@ export const useNotificationStore = create((set, get) => ({
       }
 
       set({ loading: true, error: null });
-      const q = query(
-        collection(db, 'notifications'),
-        where('recipientId', '==', userId)
-      );
-      const unsub = onSnapshot(
-        q,
+      const queryRef = db
+        .collection('notifications')
+        .where('recipientId', '==', userId);
+      const unsub = queryRef.onSnapshot(
         async (snap) => {
           const list = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
@@ -115,7 +103,7 @@ export const useNotificationStore = create((set, get) => ({
   markAsRead: async (id) => {
     if (!id) return;
     try {
-      await updateDoc(doc(db, 'notifications', id), {
+      await db.collection('notifications').doc(id).update({
         read: true,
         readAt: serverTimestamp(),
       });
@@ -144,9 +132,10 @@ export const useNotificationStore = create((set, get) => ({
     const unread = list.filter((n) => !n.read);
     if (!unread.length) return;
     try {
-      const batch = writeBatch(db);
+      const batch = db.batch();
       unread.forEach((n) => {
-        batch.update(doc(db, 'notifications', n.id), {
+        const docRef = db.collection('notifications').doc(n.id);
+        batch.update(docRef, {
           read: true,
           readAt: serverTimestamp(),
         });
@@ -171,7 +160,7 @@ export const useNotificationStore = create((set, get) => ({
   softDelete: async (id) => {
     if (!id) return;
     try {
-      await updateDoc(doc(db, 'notifications', id), {
+      await db.collection('notifications').doc(id).update({
         isDeleted: true,
         deletedAt: serverTimestamp(),
       });

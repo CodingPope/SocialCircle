@@ -2,8 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import LoadingOverlay from './components/ui/LoadingOverlay';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth as firebaseAuth } from './firebase/config';
+import { auth } from './firebase/config';
 import AppNavigator from './navigation/AppNavigator';
 import { AuthScreen } from './features/auth';
 
@@ -12,7 +11,7 @@ export default function AppEntry() {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(firebaseAuth, (u) => {
+    const unsub = auth().onAuthStateChanged((u) => {
       setUser(u);
       setChecking(false);
     });

@@ -1,32 +1,156 @@
 // src/firebase/config.js
 // Description: React Native Firebase configuration using native modules
-import {
-  FIREBASE_API_KEY,
-  FIREBASE_AUTH_DOMAIN,
-  FIREBASE_PROJECT_ID,
-  FIREBASE_STORAGE_BUCKET,
-  FIREBASE_MESSAGING_SENDER_ID,
-  FIREBASE_APP_ID,
-} from '@env';
-
+import { USE_FIREBASE_EMULATORS } from '@env';
 // React Native Firebase native modules
-import auth from '@react-native-firebase/auth';
+import nativeAuth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import storage from '@react-native-firebase/storage';
 
-// Export auth module - consumers should call auth() to get the instance
+let authInstance = null;
+
+const initializeAuthSingleton = () => {
+  if (authInstance) return authInstance;
+  if (typeof nativeAuth !== 'function') {
+    console.warn(
+      '[Firebase Auth] Native module not linked. @react-native-firebase/auth is required.'
+    );
+    return null;
+  }
+  try {
+    authInstance = nativeAuth();
+  } catch (error) {
+    console.warn(
+      '[Firebase Auth] Failed to initialize default instance:',
+      error?.message || error
+    );
+    authInstance = null;
+  }
+  return authInstance;
+};
+
+const resolveAuthInstance = (...args) => {
+  if (typeof nativeAuth === 'function') {
+    try {
+      const instance = nativeAuth(...args);
+      if (instance && typeof instance === 'object') {
+        if (!authInstance) authInstance = instance;
+        return instance;
+      }
+    } catch (error) {
+      console.warn(
+        '[Firebase Auth] auth() call failed, using singleton:',
+        error?.message || error
+      );
+    }
+  }
+
+  const fallback = initializeAuthSingleton();
+  if (fallback) return fallback;
+
+  throw new Error(
+    '[Firebase Auth] Native module is unavailable. Did you install @react-native-firebase/auth and rebuild the app?'
+  );
+};
+
+const auth = function (...args) {
+  return resolveAuthInstance(...args);
+};
+
+if (nativeAuth && typeof nativeAuth === 'function') {
+  const keys = [
+    ...Object.getOwnPropertyNames(nativeAuth),
+    ...Object.getOwnPropertySymbols(nativeAuth),
+  ];
+  keys.forEach((key) => {
+    if (key === 'length' || key === 'name' || key === 'prototype') return;
+    const descriptor = Object.getOwnPropertyDescriptor(nativeAuth, key);
+    try {
+      if (descriptor) {
+        Object.defineProperty(auth, key, descriptor);
+      } else {
+        auth[key] = nativeAuth[key];
+      }
+    } catch (error) {
+      try {
+        auth[key] = nativeAuth[key];
+      } catch {}
+    }
+  });
+}
+
+initializeAuthSingleton();
+
+// Dev helpers: optional emulator support
+if (__DEV__ && USE_FIREBASE_EMULATORS === '1') {
+  try {
+    auth().useEmulator('http://localhost:9099');
+  } catch (e) {}
+  try {
+    firestore().useEmulator('localhost', 8080);
+  } catch (e) {}
+  try {
+    functions().useEmulator('localhost', 5001);
+  } catch (e) {}
+  try {
+    storage().useEmulator('localhost', 9199);
+  } catch (e) {}
+}
+
+// Module singletons
+const firestoreInstance = firestore();
+const functionsInstance = functions();
+const storageInstance = storage();
+
+// Description: Disable App Verification for development (fixes auth/internal-error)
+// This is required for iOS simulator and development builds
+// Reference: https://rnfirebase.io/auth/usage#disable-app-verification
+if (__DEV__) {
+  const instanceForDev = authInstance || initializeAuthSingleton();
+  try {
+    if (instanceForDev?.settings) {
+      instanceForDev.settings.appVerificationDisabledForTesting = true;
+      console.log('🔧 [Firebase Auth] App verification disabled for development');
+    }
+  } catch (error) {
+    console.warn('[Firebase Auth] Could not disable app verification:', error);
+  }
+}
+
+// Description: Enable Firestore offline persistence (required for React Native)
+// This must be called before any Firestore operations
+try {
+  firestoreInstance.settings({
+    persistence: true, // Enable offline persistence
+    cacheSizeBytes: firestore.CACHE_SIZE_UNLIMITED, // Optional: unlimited cache
+  });
+} catch (error) {
+  // Settings can only be called once, so ignore if already set
+  if (error.code !== 'failed-precondition') {
+    console.warn('[Firebase] Firestore settings error:', error);
+  }
+}
+
+// Export auth module - consumers should call auth() to get the live instance
 export { auth };
+export { authInstance };
 
-// Export Firestore instance
-export const db = firestore();
+// Export Firestore instance and helpers
+export const db = firestoreInstance;
+export const FieldValue = firestore.FieldValue;
+export const Timestamp = firestore.Timestamp;
+export const GeoPoint = firestore.GeoPoint;
+export const serverTimestamp = () => firestore.FieldValue.serverTimestamp();
+export const arrayUnion = (...values) =>
+  firestore.FieldValue.arrayUnion(...values);
+export const arrayRemove = (...values) =>
+  firestore.FieldValue.arrayRemove(...values);
+export const deleteField = () => firestore.FieldValue.delete();
 
-// Export Functions instance with region  
-export const functionsInstance = functions().useRegion('us-central1');
+// Export Functions instance
 export { functionsInstance as functions };
 
 // Export Storage instance
-export const storageInstance = storage();
 export { storageInstance as storage };
 
 // Description: Fetch user data from Firestore
@@ -47,12 +171,13 @@ export const uploadProfileImage = async (uid, imageFile) => {
 
   const fileName = `${Date.now()}.jpg`;
   const imageRef = storageInstance.ref(`profileImages/${uid}/${fileName}`);
-  
+
   // Metadata for the upload
   const metadata = {
-    contentType: (typeof imageFile === 'object' && imageFile?.type)
-      ? imageFile.type
-      : 'image/jpeg',
+    contentType:
+      typeof imageFile === 'object' && imageFile?.type
+        ? imageFile.type
+        : 'image/jpeg',
   };
 
   // Handle both URI strings and blobs
@@ -63,7 +188,7 @@ export const uploadProfileImage = async (uid, imageFile) => {
     // Blob or other object - use put
     await imageRef.put(imageFile, metadata);
   }
-  
+
   return await imageRef.getDownloadURL();
 };
 
@@ -102,50 +227,74 @@ export const updateEventCount = async (uid) => {
 // Description: Add a friend (mutual)
 export const addFriend = async (currentUid, targetUid) => {
   // Add each user to the other's friends array
-  await db.collection('users').doc(currentUid).update({
-    friends: firestore.FieldValue.arrayUnion(targetUid),
-  });
-  await db.collection('users').doc(targetUid).update({
-    friends: firestore.FieldValue.arrayUnion(currentUid),
-  });
+  await db
+    .collection('users')
+    .doc(currentUid)
+    .update({
+      friends: firestore.FieldValue.arrayUnion(targetUid),
+    });
+  await db
+    .collection('users')
+    .doc(targetUid)
+    .update({
+      friends: firestore.FieldValue.arrayUnion(currentUid),
+    });
 };
 
 // Description: Remove a friend (mutual)
 export const removeFriend = async (currentUid, targetUid) => {
-  await db.collection('users').doc(currentUid).update({
-    friends: firestore.FieldValue.arrayRemove(targetUid),
-  });
-  await db.collection('users').doc(targetUid).update({
-    friends: firestore.FieldValue.arrayRemove(currentUid),
-  });
+  await db
+    .collection('users')
+    .doc(currentUid)
+    .update({
+      friends: firestore.FieldValue.arrayRemove(targetUid),
+    });
+  await db
+    .collection('users')
+    .doc(targetUid)
+    .update({
+      friends: firestore.FieldValue.arrayRemove(currentUid),
+    });
 };
 
 // Description: Request to follow (private profile)
 export const requestFollow = async (currentUid, targetUid) => {
   // Description: Add currentUid to target user's followRequests array
-  await db.collection('users').doc(targetUid).update({
-    followRequests: firestore.FieldValue.arrayUnion(currentUid),
-  });
+  await db
+    .collection('users')
+    .doc(targetUid)
+    .update({
+      followRequests: firestore.FieldValue.arrayUnion(currentUid),
+    });
 };
 
 // Description: Approve follow request
 export const approveFollowRequest = async (currentUid, requesterUid) => {
   // Description: Remove requesterUid from followRequests, add to followers/following
-  await db.collection('users').doc(currentUid).update({
-    followRequests: firestore.FieldValue.arrayRemove(requesterUid),
-    followers: firestore.FieldValue.arrayUnion(requesterUid),
-  });
-  await db.collection('users').doc(requesterUid).update({
-    following: firestore.FieldValue.arrayUnion(currentUid),
-  });
+  await db
+    .collection('users')
+    .doc(currentUid)
+    .update({
+      followRequests: firestore.FieldValue.arrayRemove(requesterUid),
+      followers: firestore.FieldValue.arrayUnion(requesterUid),
+    });
+  await db
+    .collection('users')
+    .doc(requesterUid)
+    .update({
+      following: firestore.FieldValue.arrayUnion(currentUid),
+    });
 };
 
 // Description: Deny follow request
 export const denyFollowRequest = async (currentUid, requesterUid) => {
   // Description: Remove requesterUid from followRequests
-  await db.collection('users').doc(currentUid).update({
-    followRequests: firestore.FieldValue.arrayRemove(requesterUid),
-  });
+  await db
+    .collection('users')
+    .doc(currentUid)
+    .update({
+      followRequests: firestore.FieldValue.arrayRemove(requesterUid),
+    });
 };
 
 // Description: Follow a user (one-way, for public profiles)
@@ -156,9 +305,7 @@ export const followUser = async (currentUid, targetUid) => {
   // Description: Add targetUid to current user's following array if not already present
   const currentUserRef = db.collection('users').doc(currentUid);
   const currentUserSnap = await currentUserRef.get();
-  const currentUserData = currentUserSnap.exists
-    ? currentUserSnap.data()
-    : {};
+  const currentUserData = currentUserSnap.exists ? currentUserSnap.data() : {};
   const alreadyFollowing =
     Array.isArray(currentUserData.following) &&
     currentUserData.following.includes(targetUid);
@@ -182,9 +329,7 @@ export const unfollowUser = async (currentUid, targetUid) => {
   // Description: Remove targetUid from current user's following array if present
   const currentUserRef = db.collection('users').doc(currentUid);
   const currentUserSnap = await currentUserRef.get();
-  const currentUserData = currentUserSnap.exists
-    ? currentUserSnap.data()
-    : {};
+  const currentUserData = currentUserSnap.exists ? currentUserSnap.data() : {};
   const isFollowing =
     Array.isArray(currentUserData.following) &&
     currentUserData.following.includes(targetUid);
@@ -208,9 +353,10 @@ export const sendNotification = async (type, recipientId, data = {}) => {
   }
 
   const basePayload = { type, recipientId, data };
-  
+
   try {
-    const createNotification = functionsInstance.httpsCallable('createNotification');
+    const createNotification =
+      functionsInstance.httpsCallable('createNotification');
     const result = await createNotification(basePayload);
     if (result?.data) return result.data;
     return { ok: true };
@@ -224,7 +370,8 @@ export const sendNotification = async (type, recipientId, data = {}) => {
       try {
         // Force token refresh
         await currentUser.getIdToken(true);
-        const createNotification = functionsInstance.httpsCallable('createNotification');
+        const createNotification =
+          functionsInstance.httpsCallable('createNotification');
         const retryResult = await createNotification(basePayload);
         if (retryResult?.data) return retryResult.data;
         return { ok: true };
@@ -312,9 +459,12 @@ export const deleteEvent = async (eventId, userId) => {
         deletedAt: new Date(),
       });
       if (userId) {
-        await db.collection('users').doc(userId).update({
-          createdEvents: firestore.FieldValue.arrayRemove(eventId),
-        });
+        await db
+          .collection('users')
+          .doc(userId)
+          .update({
+            createdEvents: firestore.FieldValue.arrayRemove(eventId),
+          });
       }
       await updateEventCount(userId).catch(() => {});
       return { ok: true, fallback: true };

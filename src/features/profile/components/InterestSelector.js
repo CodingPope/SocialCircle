@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../firebase/config';
 import categoriesData from '../../events/constants/categoriesData.json';
 import { useTheme } from '../../../theme';
@@ -87,9 +86,7 @@ const InterestSelector = ({
 
         // Try Firestore first
         try {
-          const categoriesSnapshot = await getDocs(
-            collection(db, 'categories')
-          );
+          const categoriesSnapshot = await db.collection('categories').get();
           if (
             categoriesSnapshot &&
             categoriesSnapshot.docs &&

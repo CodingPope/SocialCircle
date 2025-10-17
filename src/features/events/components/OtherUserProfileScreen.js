@@ -35,7 +35,6 @@ import {
   unfollowUser,
   functions,
 } from '../../../firebase/config';
-import { httpsCallable } from 'firebase/functions';
 import {
   collection,
   getDocs,
@@ -43,7 +42,7 @@ import {
   where,
   doc,
   getDoc,
-} from 'firebase/firestore';
+} from '../../../firebase/firestoreCompat';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import PopupMenu from './PopupMenu';
@@ -684,7 +683,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const handleRateUser = async (rating) => {
     try {
       // Use callable directly to satisfy security rules and validate mutual events
-      const fn = httpsCallable(functions, 'rateUser');
+      const fn = functions.httpsCallable('rateUser');
       await fn({ targetUid: userId, rating });
 
       // Fetch the updated user data after rating

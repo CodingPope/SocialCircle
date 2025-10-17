@@ -22,13 +22,7 @@ import Avatar from '../../../components/ui/Avatar';
 import PopupMenu from './PopupMenu';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useEventStore } from '../stores/eventStore';
-import {
-  deleteEvent,
-  reportContent,
-  db,
-  updateUserData,
-} from '../../../firebase/config';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { deleteEvent, reportContent, db, updateUserData } from '../../../firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { Video } from 'expo-video';
 import joinEvent from '../services/joinEvent';
