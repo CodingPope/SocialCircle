@@ -126,16 +126,27 @@ function AppContent() {
     const sub = Notifications.addNotificationResponseReceivedListener(
       (resp) => {
         const data = resp?.notification?.request?.content?.data || {};
-        // Deep link routing: prefer chat if eventId + chat
+        // Deep link routing with proper screen targeting
         try {
-          if (data.eventId && data.linkType === 'chat') {
+          if (data.linkType === 'chat' && data.eventId) {
+            // Navigate to event chat for chat messages
+            navigate('EventChat', { eventId: data.eventId });
+          } else if (data.linkType === 'event' && data.eventId) {
+            // Navigate to event details for other event notifications
+            navigate('EventDetail', { eventId: data.eventId });
+          } else if (data.eventId && data.linkType === 'chat') {
+            // Fallback for older chat notifications
             navigate('EventChat', { eventId: data.eventId });
           } else if (data.eventId) {
+            // Default to event detail
             navigate('EventDetail', { eventId: data.eventId });
           } else if (data.linkType && data.linkId) {
+            // Generic navigation
             navigate(data.linkType, { id: data.linkId });
           }
-        } catch {}
+        } catch (err) {
+          console.error('[notification-handler] navigation error:', err);
+        }
       }
     );
     return () => sub.remove();

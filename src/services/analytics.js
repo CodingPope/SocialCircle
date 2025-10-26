@@ -226,11 +226,38 @@ export async function analyticsInit({ optedIn, uid, props } = {}) {
       // This enables the geographic map in Firebase Analytics dashboard
       try {
         // Derive location from user props if available
-        const city = currentProps?.home_city;
+        let city = currentProps?.home_city || null;
+        if (!city) {
+          // Fallback to device city when profile metadata is missing
+          city = await getFormattedCity();
+        }
+
         if (city) {
-          // Firebase expects a single location property; we use home_city
-          // The SDK will geocode this to populate the realtime map
           devLog('[analytics] setting location context:', city);
+
+          if (typeof a.setUserProperty === 'function') {
+            try {
+              await a.setUserProperty('user_location', city);
+            } catch (propError) {
+              devWarn(
+                '[analytics] setUserProperty user_location failed',
+                propError?.message || propError
+              );
+            }
+          }
+
+          if (typeof a.setDefaultEventParameters === 'function') {
+            try {
+              await a.setDefaultEventParameters({ user_location: city });
+            } catch (paramError) {
+              devWarn(
+                '[analytics] setDefaultEventParameters failed',
+                paramError?.message || paramError
+              );
+            }
+          }
+        } else {
+          devLog('[analytics] location context unavailable');
         }
       } catch (e) {
         devWarn('[analytics] location context failed', e?.message || e);
@@ -285,6 +312,22 @@ export async function screen(name, params = {}) {
       const city = await getFormattedCity();
       if (city) {
         safeParams.user_location = city;
+
+        // Update user property and default parameters if location changed
+        // This ensures the Realtime map updates when permission is granted after init
+        if (city !== currentProps?.user_location) {
+          currentProps.user_location = city;
+          try {
+            await a.setUserProperty('user_location', city);
+            await a.setDefaultEventParameters({ user_location: city });
+            devLog('[analytics] updated location context:', city);
+          } catch (updateError) {
+            devWarn(
+              '[analytics] failed to update location context:',
+              updateError?.message || updateError
+            );
+          }
+        }
       }
     } catch {}
 
@@ -310,6 +353,22 @@ export async function event(name, params = {}) {
       const city = await getFormattedCity();
       if (city) {
         safeParams.user_location = city;
+
+        // Update user property and default parameters if location changed
+        // This ensures the Realtime map updates when permission is granted after init
+        if (city !== currentProps?.user_location) {
+          currentProps.user_location = city;
+          try {
+            await a.setUserProperty('user_location', city);
+            await a.setDefaultEventParameters({ user_location: city });
+            devLog('[analytics] updated location context:', city);
+          } catch (updateError) {
+            devWarn(
+              '[analytics] failed to update location context:',
+              updateError?.message || updateError
+            );
+          }
+        }
       }
     } catch {}
 

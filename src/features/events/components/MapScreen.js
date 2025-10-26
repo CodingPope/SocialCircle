@@ -1514,12 +1514,28 @@ export default function MapScreen() {
             // Defensive: ensure marker has a valid location and isn't soft-deleted
             .filter((e) => e && e.location && !e.isDeleted)
             .map((event) => {
+              // Description: Check if event owner is a friend/following for blue border
+              // Handle multiple possible owner field names
+              const eventOwnerId =
+                event?.ownerId || event?.ownerUID || event?.owner || null;
+
+              // Description: Check both friends and following arrays since "friends" can be stored in following
+              const userFriends = user?.friends || [];
+              const userFollowing = user?.following || [];
+              const isFriendEvent =
+                eventOwnerId &&
+                (userFriends.includes(eventOwnerId) ||
+                  userFollowing.includes(eventOwnerId));
+
+              const borderColor = isFriendEvent ? '#3B82F6' : '#fff';
+
               // Rendering CategoryMarker for event with category emoji
               return (
                 <CategoryMarker
                   key={event.id}
                   event={event}
                   onPress={() => onMarkerPress(event)}
+                  borderColor={borderColor}
                 />
               );
             })}

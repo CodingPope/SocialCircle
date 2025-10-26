@@ -746,7 +746,14 @@ export default function EventPopUpCard({
           >
             <Image source={profileImageSource} style={styles.hostAvatar} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.hostName}>{displayName}</Text>
+              <View
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+              >
+                <Text style={styles.hostName}>{displayName}</Text>
+                {userDetails?.verification?.status === 'verified' && (
+                  <Ionicons name='checkmark-circle' size={16} color='#2563EB' />
+                )}
+              </View>
               <Text style={styles.hostSub}>
                 {typeof userDetails.rating === 'number' &&
                 userDetails.rating > 0

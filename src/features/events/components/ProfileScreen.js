@@ -67,6 +67,7 @@ import {
 } from '../utils/dateUtils';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
+import VerificationModal from '../../profile/components/VerificationModal';
 
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -352,6 +353,7 @@ export default function ProfileScreen({ navigation }) {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [showProfileTutorial, setShowProfileTutorial] = useState(false);
   const [menuHighlightLayout, setMenuHighlightLayout] = useState(null);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
 
   // Add animated sidebar state/refs
   const sidebarPan = useRef(null);
@@ -784,11 +786,13 @@ export default function ProfileScreen({ navigation }) {
         const hostName = s?.name || event.ownerName || 'Unknown Host';
         const hostPhoto = s?.photoURL || null;
         const hostRating = typeof s?.rating === 'number' ? s.rating : 0;
+        const hostVerified = s?.verification?.status === 'verified';
         return {
           ...event,
           hostPhoto,
           hostRating,
           hostName,
+          hostVerified,
           formattedDate: event.date?.seconds
             ? new Date(event.date.seconds * 1000).toLocaleString('en-US', {
                 weekday: 'short',
@@ -1015,6 +1019,9 @@ export default function ProfileScreen({ navigation }) {
       case 'Privacy and Info':
         navigation.navigate('PrivacyInfo');
         break;
+      case 'Get Verified':
+        setShowVerificationModal(true);
+        break;
       case 'Logout':
         handleLogout();
         break;
@@ -1191,6 +1198,45 @@ export default function ProfileScreen({ navigation }) {
                       </Text>
                     </TouchableOpacity>
                   ))}
+
+                  {/* Get Verified Button - Show only if not already verified */}
+                  {!verified && (
+                    <TouchableOpacity
+                      style={[
+                        styles.sidebarOption,
+                        {
+                          backgroundColor: theme.colors.backgroundSecondary,
+                          borderBottomColor: theme.colors.border,
+                        },
+                      ]}
+                      onPress={() => {
+                        closeSidebar();
+                        setTimeout(
+                          () => handleMenuOptionClick('Get Verified'),
+                          200
+                        );
+                      }}
+                    >
+                      <View
+                        style={{ flexDirection: 'row', alignItems: 'center' }}
+                      >
+                        <Text
+                          style={[
+                            styles.sidebarOptionText,
+                            { color: theme.colors.text },
+                          ]}
+                        >
+                          Get Verified
+                        </Text>
+                        <Ionicons
+                          name='checkmark-circle'
+                          size={18}
+                          color={theme.colors.primary}
+                          style={{ marginLeft: 8 }}
+                        />
+                      </View>
+                    </TouchableOpacity>
+                  )}
 
                   {/* Dark Mode Toggle */}
                   <View
@@ -1425,33 +1471,52 @@ export default function ProfileScreen({ navigation }) {
           )}
         </View>
         {/* Bio */}
-        <View style={styles.bioContainer}>
-          <TextInput
-            style={[styles.bioText, isEditing && styles.bioEditing]}
-            value={bio}
-            onChangeText={setBio}
-            editable={isEditing}
-            placeholder='Write your bio here...'
-            multiline
-          />
-          {bio.length > MAX_BIO_LENGTH && !showFullBio && (
-            <TouchableOpacity onPress={() => setShowFullBio(true)}>
-              <Text style={styles.showMoreText}>Show More</Text>
+        <View style={styles.bioSection}>
+          <View style={styles.bioCard}>
+            <TextInput
+              style={[
+                styles.bioInput,
+                isEditing && styles.bioInputEditing,
+                { color: theme.colors.text },
+              ]}
+              value={bio}
+              onChangeText={setBio}
+              editable={isEditing}
+              placeholder='Share a bit about yourself...'
+              placeholderTextColor={theme.colors.textSecondary}
+              multiline
+              maxLength={300}
+              textAlignVertical='top'
+            />
+            {isEditing && (
+              <Text style={styles.bioCharCount}>
+                {bio.length}/300 characters
+              </Text>
+            )}
+            {bio.length > MAX_BIO_LENGTH && !showFullBio && !isEditing && (
+              <TouchableOpacity onPress={() => setShowFullBio(true)}>
+                <Text style={styles.showMoreText}>Read More</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {/* Edit & Save Buttons */}
+          {isEditing && (
+            <TouchableOpacity
+              style={styles.saveButtonModern}
+              onPress={handleSaveChanges}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={['#10b981', '#059669']}
+                style={styles.saveButtonGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <Text style={styles.saveButtonTextModern}>Save Changes</Text>
+              </LinearGradient>
             </TouchableOpacity>
           )}
         </View>
-        {/* Edit & Save Buttons */}
-        {isEditing && (
-          <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={styles.saveButton}
-              onPress={handleSaveChanges}
-            >
-              <MaterialIcons name='check' size={18} color='#fff' />
-              <Text style={styles.saveButtonText}>Save Changes</Text>
-            </TouchableOpacity>
-          </View>
-        )}
         {/* Events Timeline */}
         <View style={styles.timelineHeader}>
           <View style={styles.tabsRow}>
@@ -1496,11 +1561,7 @@ export default function ProfileScreen({ navigation }) {
               ? 'Your Current Events'
               : 'Your Timeline'}
           </Text>
-          {selectedTab === 'Current' && (
-            <Text style={{ color: '#666', marginTop: 4 }}>
-              Saved events coming soon
-            </Text>
-          )}
+          {selectedTab === 'Current'}
         </View>
         {loadingEvents ? (
           <Text style={{ textAlign: 'center', marginTop: 20 }}>
@@ -1565,6 +1626,32 @@ export default function ProfileScreen({ navigation }) {
       </ScrollView>
       {/* ActionModals for share, report, sign out */}
       <ActionModals modals={modals} setModals={setModals} />
+
+      {/* Verification Modal */}
+      <VerificationModal
+        isVisible={showVerificationModal}
+        onClose={() => setShowVerificationModal(false)}
+        onSuccess={() => {
+          // Update local verified state immediately
+          setVerified(true);
+          // Refresh user data from Firestore to get verifiedAt timestamp and update Zustand store
+          if (user?.uid) {
+            getUserData(user.uid)
+              .then((userData) => {
+                if (userData?.verified) {
+                  setVerified(true);
+                  // Update the Zustand store with fresh user data
+                  useUserStore.setState({
+                    user: { ...user, ...userData },
+                  });
+                }
+              })
+              .catch((err) =>
+                console.warn('Failed to refresh user data:', err)
+              );
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1730,7 +1817,6 @@ const createStyles = (theme) =>
       backgroundColor: '#fff',
     },
     profileImage: { width: 120, height: 120, borderRadius: 15 },
-    verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
     verifiedBadgeAdjusted: {
       position: 'absolute',
       bottom: 0,
@@ -1768,6 +1854,76 @@ const createStyles = (theme) =>
       color: theme.colors.textSecondary,
       marginTop: 2,
     },
+    bioSection: {
+      marginTop: 20,
+      marginHorizontal: 16,
+      gap: 12,
+    },
+    bioCard: {
+      backgroundColor: theme.colors.card,
+      padding: 16,
+      borderRadius: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: theme.isDark ? 0.4 : 0.08,
+      shadowRadius: 8,
+      elevation: 4,
+      borderWidth: 1,
+      borderColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+    },
+    bioInput: {
+      fontSize: 15,
+      lineHeight: 22,
+      color: theme.colors.text,
+      minHeight: 80,
+      padding: 12,
+      borderRadius: 10,
+      backgroundColor: theme.isDark
+        ? 'rgba(255,255,255,0.03)'
+        : 'rgba(0,0,0,0.02)',
+    },
+    bioInputEditing: {
+      borderWidth: 2,
+      borderColor: theme.colors.primary,
+      backgroundColor: theme.isDark
+        ? 'rgba(59,130,246,0.08)'
+        : 'rgba(59,130,246,0.04)',
+      shadowColor: theme.colors.primary,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      elevation: 2,
+    },
+    bioCharCount: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textAlign: 'right',
+      marginTop: 6,
+      fontWeight: '500',
+    },
+    saveButtonModern: {
+      borderRadius: 14,
+      overflow: 'hidden',
+      shadowColor: '#10b981',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    saveButtonGradient: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 24,
+      gap: 8,
+    },
+    saveButtonTextModern: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+    },
     bioContainer: {
       backgroundColor: theme.colors.card,
       marginTop: 16,
@@ -1785,7 +1941,12 @@ const createStyles = (theme) =>
       borderWidth: 1,
       borderRadius: 8,
     },
-    showMoreText: { color: theme.colors.primary, fontSize: 14, marginTop: 4 },
+    showMoreText: {
+      color: theme.colors.primary,
+      fontSize: 14,
+      marginTop: 8,
+      fontWeight: '600',
+    },
     buttonRow: {
       flexDirection: 'row',
       justifyContent: 'center',

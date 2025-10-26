@@ -111,7 +111,12 @@
       "^firebase/auth$": "<rootDir>/__tests__/__mocks__/firebaseAuth.js",
       "^firebase/firestore$": "<rootDir>/__tests__/__mocks__/firebaseFirestore.js",
       "^firebase/functions$": "<rootDir>/__tests__/__mocks__/firebaseFunctions.js",
-      "^firebase/storage$": "<rootDir>/__tests__/__mocks__/firebaseStorage.js"
+      "^firebase/storage$": "<rootDir>/__tests__/__mocks__/firebaseStorage.js",
+      "^@react-native-firebase/app$": "<rootDir>/__mocks__/@react-native-firebase/app.js",
+      "^@react-native-firebase/auth$": "<rootDir>/__mocks__/@react-native-firebase/auth.js",
+      "^@react-native-firebase/firestore$": "<rootDir>/__mocks__/@react-native-firebase/firestore.js",
+      "^@react-native-firebase/functions$": "<rootDir>/__mocks__/@react-native-firebase/functions.js",
+      "^@react-native-firebase/storage$": "<rootDir>/__mocks__/@react-native-firebase/storage.js"
     }
   },
   "expo": {

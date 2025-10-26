@@ -110,7 +110,9 @@ if (__DEV__) {
   try {
     if (instanceForDev?.settings) {
       instanceForDev.settings.appVerificationDisabledForTesting = true;
-      console.log('🔧 [Firebase Auth] App verification disabled for development');
+      console.log(
+        '🔧 [Firebase Auth] App verification disabled for development'
+      );
     }
   } catch (error) {
     console.warn('[Firebase Auth] Could not disable app verification:', error);
@@ -606,4 +608,34 @@ export const submitBusiness = async (payload) => {
   const fn = functionsInstance.httpsCallable('submitBusiness');
   const res = await fn(payload);
   return res?.data; // { ok, status }
+};
+
+// -------------------- USER VERIFICATION --------------------
+
+// Description: Request email verification code
+export const requestEmailVerification = async () => {
+  const fn = functionsInstance.httpsCallable('requestEmailVerification');
+  const res = await fn();
+  return res?.data;
+};
+
+// Description: Verify email code
+export const verifyEmailCode = async (code) => {
+  const fn = functionsInstance.httpsCallable('verifyEmailCode');
+  const res = await fn({ code });
+  return res?.data;
+};
+
+// Description: Request phone verification code
+export const requestPhoneVerification = async (phoneNumber) => {
+  const fn = functionsInstance.httpsCallable('requestPhoneVerification');
+  const res = await fn({ phoneNumber });
+  return res?.data;
+};
+
+// Description: Verify phone code
+export const verifyPhoneCode = async (code) => {
+  const fn = functionsInstance.httpsCallable('verifyPhoneCode');
+  const res = await fn({ code });
+  return res?.data;
 };

@@ -1572,470 +1572,522 @@ const EventChatScreen = () => {
           style={styles.modal}
           backdropOpacity={0.4}
           propagateSwipe
+          swipeThreshold={80}
         >
-          <ScrollView
-            style={[
-              styles.modalContent,
-              { paddingBottom: (insets.bottom || 0) + 32 }, // Ensure bottom actions are above home indicator / nav bar
-            ]}
-            contentContainerStyle={{
-              paddingBottom: (insets.bottom || 0) + 32,
-              paddingTop: 12,
-              flexGrow: 1,
-            }}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps='handled'
-          >
-            <View style={styles.dragHandle} />
-
-            {/* Event Title + Host Info */}
-            <TouchableOpacity
-              style={styles.card}
-              activeOpacity={hostUser ? 0.7 : 1}
-              onPress={() => {
-                // Description: Consistent profile navigation logic + close modal after navigation
-                const ownerId = event?.ownerId;
-                if (hostUser && ownerId) {
-                  setIsModalVisible(false);
-                  if (ownerId === auth().currentUser?.uid) {
-                    // Navigate to the main Profile tab
-                    navigation.reset({
-                      index: 0,
-                      routes: [
-                        {
-                          name: 'MainTabs',
-                          params: { screen: 'ProfileStack' },
-                        },
-                      ],
-                    });
-                  } else {
-                    navigateToOtherUserProfile(ownerId);
-                  }
-                }
+          <View style={styles.modalWrapper}>
+            <View style={styles.dragHandleContainer}>
+              <View style={styles.dragHandle} />
+            </View>
+            <ScrollView
+              style={styles.modalContent}
+              contentContainerStyle={{
+                paddingBottom: (insets.bottom || 0) + 32,
+                paddingTop: 12,
               }}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps='handled'
+              nestedScrollEnabled={true}
+              bounces={true}
+              alwaysBounceVertical={true}
+              scrollEventThrottle={16}
+              directionalLockEnabled={true}
             >
-              <Text style={styles.cardTitle}>{event?.title}</Text>
-              {hostUser && (
-                <View style={styles.hostRow}>
-                  <Image
-                    source={
-                      hostUser?.photoURL
-                        ? { uri: hostUser.photoURL }
-                        : smileDefault // Fallback to default image
-                    }
-                    style={styles.hostAvatar}
-                  />
-                  <View style={{ marginLeft: 10 }}>
-                    <Text style={styles.hostName}>
-                      Host: {hostUser.displayName}
-                    </Text>
-                    <Text style={styles.hostRating}>
-                      {typeof hostUser.rating === 'number'
-                        ? `⭐ Rating: ${hostUser.rating.toFixed(1)} `
-                        : 'Rating: Unrated'}
-                    </Text>
-                  </View>
-                </View>
-              )}
-              {!hostUser && (
-                <View style={styles.hostRow}>
-                  <Image source={smileDefault} style={styles.hostAvatar} />
-                  <View style={{ marginLeft: 10 }}>
-                    <Text style={styles.hostName}>Host: User</Text>
-                    <Text style={styles.hostRating}>Rating: Unrated</Text>
-                  </View>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* Location */}
-            <View
-              style={[
-                styles.card,
-                isCreator && isEditingEvent && styles.cardEditing,
-              ]}
-            >
-              <Text style={styles.sectionTitle}>Location</Text>
-              {isCreator && isEditingEvent ? (
-                <View style={styles.autocompleteWrapper}>
-                  <GooglePlacesAutocomplete
-                    placeholder='Search for a location or address'
-                    minLength={2}
-                    enablePoweredByContainer={false}
-                    fetchDetails
-                    debounce={300}
-                    predefinedPlaces={[]}
-                    keyboardShouldPersistTaps='handled'
-                    textInputProps={{
-                      value: editLocation,
-                      onChangeText: (text) => {
-                        setEditLocation(text);
-                        setEditPlaceDetails(null);
-                      },
-                      placeholderTextColor: '#9CA3AF',
-                      autoCorrect: false,
-                      autoCapitalize: 'none',
-                    }}
-                    styles={{
-                      container: styles.autocompleteContainer,
-                      textInput: styles.modalInput,
-                      listView: styles.autocompleteList,
-                      row: styles.autocompleteRow,
-                      separator: styles.autocompleteSeparator,
-                      description: styles.autocompleteDescription,
-                    }}
-                    onPress={(data, details = null) => {
-                      const description = data?.description || '';
-                      const formattedAddress =
-                        details?.formatted_address || description;
-                      const primaryText =
-                        data?.structured_formatting?.main_text || details?.name;
-                      setEditLocation(description);
-                      const lat = details?.geometry?.location?.lat;
-                      const lng = details?.geometry?.location?.lng;
-                      if (typeof lat === 'number' && typeof lng === 'number') {
-                        setEditLocationCoords({
-                          latitude: lat,
-                          longitude: lng,
-                        });
-                      }
-                      setEditPlaceDetails({
-                        name: primaryText || formattedAddress || description,
-                        address: formattedAddress || description,
-                        placeId: data?.place_id || details?.place_id || null,
-                        latitude: typeof lat === 'number' ? lat : null,
-                        longitude: typeof lng === 'number' ? lng : null,
-                        raw: details || null,
+              {/* Event Title + Host Info */}
+              <TouchableOpacity
+                style={styles.card}
+                activeOpacity={hostUser ? 0.7 : 1}
+                onPress={() => {
+                  // Description: Consistent profile navigation logic + close modal after navigation
+                  const ownerId = event?.ownerId;
+                  if (hostUser && ownerId) {
+                    setIsModalVisible(false);
+                    if (ownerId === auth().currentUser?.uid) {
+                      // Navigate to the main Profile tab
+                      navigation.reset({
+                        index: 0,
+                        routes: [
+                          {
+                            name: 'MainTabs',
+                            params: { screen: 'ProfileStack' },
+                          },
+                        ],
                       });
-                    }}
-                    onFail={(error) =>
-                      console.error('Places autocomplete error:', error)
+                    } else {
+                      navigateToOtherUserProfile(ownerId);
                     }
-                    query={{
-                      key: GOOGLE_MAPS_API_KEY,
-                      language: 'en',
-                    }}
-                  />
-                </View>
-              ) : (
-                <TouchableOpacity
-                  onPress={() => {
-                    if (
-                      resolvedLocationLabel &&
-                      resolvedLocationLabel !== 'Location not available'
-                    ) {
-                      Linking.openURL(
-                        `https://maps.google.com/?q=${encodeURIComponent(
-                          resolvedLocationLabel
-                        )}`
-                      );
-                    }
-                  }}
-                  disabled={
-                    !resolvedLocationLabel ||
-                    resolvedLocationLabel === 'Location not available'
                   }
-                >
-                  <Text style={styles.linkText}>{resolvedLocationLabel}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Date & Time */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Date & Time</Text>
-              <View style={styles.rowBetween}>
-                <Text style={[styles.normalText, styles.dateText]}>
-                  {formatEventDate(
-                    isCreator && isEditingEvent ? editDate : event?.date
-                  )}
-                </Text>
-                <TouchableOpacity
-                  style={styles.calendarButton}
-                  onPress={() => {
-                    trackClient('add_to_calendar_clicked', {
-                      event_id_present: !!eventId,
-                    });
-                  }}
-                  accessibilityLabel='Add to calendar'
-                >
-                  <Ionicons name='calendar-outline' size={20} color='#fff' />
-                </TouchableOpacity>
-              </View>
-              {isCreator && isEditingEvent && (
-                <TouchableOpacity
-                  style={styles.editDateButton}
-                  onPress={() => setIsEditDatePickerVisible(true)}
-                  disabled={isSavingEvent}
-                >
-                  <Ionicons name='time-outline' size={20} color='#2563EB' />
-                  <Text style={styles.editDateButtonText}>
-                    Adjust Date & Time
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Description */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Description</Text>
-              {isCreator && isEditingEvent ? (
-                <>
-                  <TextInput
-                    style={[styles.modalInput, styles.modalTextarea]}
-                    multiline
-                    value={editDescription}
-                    onChangeText={setEditDescription}
-                    placeholder='Share what attendees should know'
-                    placeholderTextColor='#9CA3AF'
-                  />
-                  <Text style={styles.editInfoNotice}>
-                    Update details attendees see about this event.
-                  </Text>
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={styles.normalText}
-                    numberOfLines={isDescriptionExpanded ? undefined : 3}
-                  >
-                    {event?.description || 'No description provided.'}
-                  </Text>
-                  {event?.description?.length > 120 && ( // Show toggle only if long enough
-                    <TouchableOpacity
-                      onPress={() =>
-                        setIsDescriptionExpanded(!isDescriptionExpanded)
-                      }
-                    >
-                      <Text style={styles.linkText}>
-                        {isDescriptionExpanded ? 'Show Less' : 'Show More'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </>
-              )}
-            </View>
-
-            {/* Attendees */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Attendees</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.attendeeScrollContent}
+                }}
               >
-                {attendees.slice(0, 10).map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.attendeePill}
-                    onPress={() => {
-                      setIsModalVisible(false);
-                      if (item?.id) navigateToOtherUserProfile(item.id);
-                    }}
-                    onLongPress={() => openAttendeeOptions(item)}
-                    delayLongPress={350}
-                  >
+                <Text style={styles.cardTitle}>{event?.title}</Text>
+                {hostUser && (
+                  <View style={styles.hostRow}>
                     <Image
                       source={
-                        item.photoURL ? { uri: item.photoURL } : smileDefault // Fallback to default image
+                        hostUser?.photoURL
+                          ? { uri: hostUser.photoURL }
+                          : smileDefault // Fallback to default image
                       }
-                      style={styles.attendeeImage}
+                      style={styles.hostAvatar}
                     />
-                    <Text style={styles.attendeeName}>
-                      {item.displayName?.split(' ')[0]}
+                    <View style={{ marginLeft: 10 }}>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        <Text style={styles.hostName}>
+                          Host: {hostUser.displayName}
+                        </Text>
+                        {hostUser?.verification?.status === 'verified' && (
+                          <Ionicons
+                            name='checkmark-circle'
+                            size={16}
+                            color='#2563EB'
+                          />
+                        )}
+                      </View>
+                      <Text style={styles.hostRating}>
+                        {typeof hostUser.rating === 'number'
+                          ? `⭐ Rating: ${hostUser.rating.toFixed(1)} `
+                          : 'Rating: Unrated'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+                {!hostUser && (
+                  <View style={styles.hostRow}>
+                    <Image source={smileDefault} style={styles.hostAvatar} />
+                    <View style={{ marginLeft: 10 }}>
+                      <Text style={styles.hostName}>Host: User</Text>
+                      <Text style={styles.hostRating}>Rating: Unrated</Text>
+                    </View>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* Location */}
+              <View
+                style={[
+                  styles.card,
+                  isCreator && isEditingEvent && styles.cardEditing,
+                ]}
+              >
+                <Text style={styles.sectionTitle}>Location</Text>
+                {isCreator && isEditingEvent ? (
+                  <View style={styles.autocompleteWrapper}>
+                    <GooglePlacesAutocomplete
+                      placeholder='Search for a location or address'
+                      minLength={2}
+                      enablePoweredByContainer={false}
+                      fetchDetails
+                      debounce={300}
+                      predefinedPlaces={[]}
+                      keyboardShouldPersistTaps='handled'
+                      textInputProps={{
+                        value: editLocation,
+                        onChangeText: (text) => {
+                          setEditLocation(text);
+                          setEditPlaceDetails(null);
+                        },
+                        placeholderTextColor: '#9CA3AF',
+                        autoCorrect: false,
+                        autoCapitalize: 'none',
+                      }}
+                      styles={{
+                        container: styles.autocompleteContainer,
+                        textInput: styles.modalInput,
+                        listView: styles.autocompleteList,
+                        row: styles.autocompleteRow,
+                        separator: styles.autocompleteSeparator,
+                        description: styles.autocompleteDescription,
+                      }}
+                      onPress={(data, details = null) => {
+                        const description = data?.description || '';
+                        const formattedAddress =
+                          details?.formatted_address || description;
+                        const primaryText =
+                          data?.structured_formatting?.main_text ||
+                          details?.name;
+                        setEditLocation(description);
+                        const lat = details?.geometry?.location?.lat;
+                        const lng = details?.geometry?.location?.lng;
+                        if (
+                          typeof lat === 'number' &&
+                          typeof lng === 'number'
+                        ) {
+                          setEditLocationCoords({
+                            latitude: lat,
+                            longitude: lng,
+                          });
+                        }
+                        setEditPlaceDetails({
+                          name: primaryText || formattedAddress || description,
+                          address: formattedAddress || description,
+                          placeId: data?.place_id || details?.place_id || null,
+                          latitude: typeof lat === 'number' ? lat : null,
+                          longitude: typeof lng === 'number' ? lng : null,
+                          raw: details || null,
+                        });
+                      }}
+                      onFail={(error) =>
+                        console.error('Places autocomplete error:', error)
+                      }
+                      query={{
+                        key: GOOGLE_MAPS_API_KEY,
+                        language: 'en',
+                      }}
+                    />
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (
+                        resolvedLocationLabel &&
+                        resolvedLocationLabel !== 'Location not available'
+                      ) {
+                        Linking.openURL(
+                          `https://maps.google.com/?q=${encodeURIComponent(
+                            resolvedLocationLabel
+                          )}`
+                        );
+                      }
+                    }}
+                    disabled={
+                      !resolvedLocationLabel ||
+                      resolvedLocationLabel === 'Location not available'
+                    }
+                  >
+                    <Text style={styles.linkText}>{resolvedLocationLabel}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Date & Time */}
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Date & Time</Text>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.normalText, styles.dateText]}>
+                    {formatEventDate(
+                      isCreator && isEditingEvent ? editDate : event?.date
+                    )}
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.calendarButton}
+                    onPress={async () => {
+                      trackClient('add_to_calendar_clicked', {
+                        event_id_present: !!eventId,
+                      });
+
+                      // Add event to calendar
+                      try {
+                        const result = await addSocialCircleEventToCalendar(
+                          event
+                        );
+                        if (result.success) {
+                          console.log(
+                            '[EventChatScreen] Event added to calendar:',
+                            result.eventId
+                          );
+                        }
+                      } catch (error) {
+                        console.error(
+                          '[EventChatScreen] Calendar export failed:',
+                          error
+                        );
+                      }
+                    }}
+                    accessibilityLabel='Add to calendar'
+                  >
+                    <Ionicons name='calendar-outline' size={20} color='#fff' />
+                  </TouchableOpacity>
+                </View>
+                {isCreator && isEditingEvent && (
+                  <TouchableOpacity
+                    style={styles.editDateButton}
+                    onPress={() => setIsEditDatePickerVisible(true)}
+                    disabled={isSavingEvent}
+                  >
+                    <Ionicons name='time-outline' size={20} color='#2563EB' />
+                    <Text style={styles.editDateButtonText}>
+                      Adjust Date & Time
                     </Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                )}
+              </View>
 
-              {attendees.length > 10 && (
-                <TouchableOpacity
-                  onPress={() => {
-                    trackClient('view_all_attendees_clicked', {
-                      count: attendees.length,
-                    });
-                  }}
-                >
-                  <Text style={styles.linkText}>
-                    View All ({attendees.length})
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Requests Section */}
-            {event.ownerId === auth().currentUser?.uid && (
+              {/* Description */}
               <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Requests</Text>
-                {requesters.length > 0 ? (
-                  requesters.map((requester) => (
+                <Text style={styles.sectionTitle}>Description</Text>
+                {isCreator && isEditingEvent ? (
+                  <>
+                    <TextInput
+                      style={[styles.modalInput, styles.modalTextarea]}
+                      multiline
+                      value={editDescription}
+                      onChangeText={setEditDescription}
+                      placeholder='Share what attendees should know'
+                      placeholderTextColor='#9CA3AF'
+                    />
+                    <Text style={styles.editInfoNotice}>
+                      Update details attendees see about this event.
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text
+                      style={styles.normalText}
+                      numberOfLines={isDescriptionExpanded ? undefined : 3}
+                    >
+                      {event?.description || 'No description provided.'}
+                    </Text>
+                    {event?.description?.length > 120 && ( // Show toggle only if long enough
+                      <TouchableOpacity
+                        onPress={() =>
+                          setIsDescriptionExpanded(!isDescriptionExpanded)
+                        }
+                      >
+                        <Text style={styles.linkText}>
+                          {isDescriptionExpanded ? 'Show Less' : 'Show More'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </>
+                )}
+              </View>
+
+              {/* Attendees */}
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Attendees</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.attendeeScrollContent}
+                >
+                  {attendees.slice(0, 10).map((item) => (
                     <TouchableOpacity
-                      key={requester.userId}
-                      style={styles.requestItem}
+                      key={item.id}
+                      style={styles.attendeePill}
                       onPress={() => {
                         setIsModalVisible(false);
-                        if (requester?.userId)
-                          navigateToOtherUserProfile(requester.userId);
+                        if (item?.id) navigateToOtherUserProfile(item.id);
                       }}
+                      onLongPress={() => openAttendeeOptions(item)}
+                      delayLongPress={350}
                     >
                       <Image
                         source={
-                          requester.photoURL
-                            ? { uri: requester.photoURL }
-                            : smileDefault // Fallback to default image
+                          item.photoURL ? { uri: item.photoURL } : smileDefault // Fallback to default image
                         }
-                        style={styles.requestAvatar}
+                        style={styles.attendeeImage}
                       />
-                      <View style={styles.requestDetails}>
-                        <Text style={styles.requestName}>
-                          {requester.displayName}
-                        </Text>
-                        <Text style={styles.requestRating}>
-                          Rating: {requester.rating}
-                        </Text>
-                      </View>
-                      <View style={styles.requestActions}>
-                        <TouchableOpacity
-                          style={styles.acceptButton}
-                          onPress={() => handleAcceptRequest(requester.userId)}
-                        >
-                          <Text style={styles.acceptButtonText}>Accept</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.declineButton}
-                          onPress={() => handleDeclineRequest(requester.userId)}
-                        >
-                          <Text style={styles.declineButtonText}>Decline</Text>
-                        </TouchableOpacity>
-                      </View>
+                      <Text style={styles.attendeeName}>
+                        {item.displayName?.split(' ')[0]}
+                      </Text>
                     </TouchableOpacity>
-                  ))
-                ) : (
-                  <Text style={styles.emptyText}>
-                    No requests at the moment.
-                  </Text>
-                )}
-              </View>
-            )}
+                  ))}
+                </ScrollView>
 
-            {/* Actions */}
-            {isCreator && (
-              <View style={styles.editActionsContainer}>
-                {isEditingEvent ? (
-                  <>
-                    <TouchableOpacity
-                      style={[
-                        styles.editPrimaryButton,
-                        isSavingEvent && { opacity: 0.7 },
-                      ]}
-                      onPress={handleSaveEventEdits}
-                      disabled={isSavingEvent}
-                    >
-                      {isSavingEvent ? (
-                        <ActivityIndicator color='#fff' />
-                      ) : (
-                        <Text style={styles.editPrimaryButtonText}>
-                          Save Changes
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.editSecondaryButton}
-                      onPress={handleCancelEdit}
-                      disabled={isSavingEvent}
-                    >
-                      <Text style={styles.editSecondaryButtonText}>Cancel</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
+                {attendees.length > 10 && (
                   <TouchableOpacity
-                    style={styles.editPrimaryButton}
-                    onPress={handleStartEdit}
+                    onPress={() => {
+                      trackClient('view_all_attendees_clicked', {
+                        count: attendees.length,
+                      });
+                    }}
                   >
-                    <Text style={styles.editPrimaryButtonText}>Edit Event</Text>
+                    <Text style={styles.linkText}>
+                      View All ({attendees.length})
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
-            )}
-            <TouchableOpacity
-              style={[
-                styles.leaveButton,
-                leaveInProgress && styles.leaveButtonDisabled,
-              ]}
-              onPress={() => {
-                if (isCreator) {
-                  Alert.alert(
-                    'Delete Event',
-                    'Are you sure you want to delete this event? This action cannot be undone.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Delete',
-                        style: 'destructive',
-                        onPress: () => {
-                          // Description: Delete event from Firestore
-                          // const eventRef = doc(db, 'events', eventId);
-                          // deleteDoc(eventRef)
-                          //   .then(() => {
-                          //     navigation.goBack();
-                          //     Alert.alert(
-                          //       'Event Deleted',
-                          //       'The event has been deleted.'
-                          //     );
-                          //   })
-                          //   .catch((error) => {
-                          //     console.error('Error deleting event:', error);
-                          //     Alert.alert(
-                          //       'Error',
-                          //       'Failed to delete the event.'
-                          //     );
-                          //   });
 
-                          // Soft delete flow
-                          deleteEvent(eventId, auth().currentUser.uid)
-                            .then(() => {
-                              safeExitChat();
-                              Alert.alert(
-                                'Event Deleted',
-                                'The event has been deleted.'
-                              );
-                            })
-                            .catch((error) => {
-                              console.error('Error deleting event:', error);
-                              Alert.alert(
-                                'Error',
-                                'Failed to delete the event.'
-                              );
-                            });
+              {/* Requests Section */}
+              {event.ownerId === auth().currentUser?.uid && (
+                <View style={styles.card}>
+                  <Text style={styles.sectionTitle}>Requests</Text>
+                  {requesters.length > 0 ? (
+                    requesters.map((requester) => (
+                      <TouchableOpacity
+                        key={requester.userId}
+                        style={styles.requestItem}
+                        onPress={() => {
+                          setIsModalVisible(false);
+                          if (requester?.userId)
+                            navigateToOtherUserProfile(requester.userId);
+                        }}
+                      >
+                        <Image
+                          source={
+                            requester.photoURL
+                              ? { uri: requester.photoURL }
+                              : smileDefault // Fallback to default image
+                          }
+                          style={styles.requestAvatar}
+                        />
+                        <View style={styles.requestDetails}>
+                          <Text style={styles.requestName}>
+                            {requester.displayName}
+                          </Text>
+                          <Text style={styles.requestRating}>
+                            Rating: {requester.rating}
+                          </Text>
+                        </View>
+                        <View style={styles.requestActions}>
+                          <TouchableOpacity
+                            style={styles.acceptButton}
+                            onPress={() =>
+                              handleAcceptRequest(requester.userId)
+                            }
+                          >
+                            <Text style={styles.acceptButtonText}>Accept</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.declineButton}
+                            onPress={() =>
+                              handleDeclineRequest(requester.userId)
+                            }
+                          >
+                            <Text style={styles.declineButtonText}>
+                              Decline
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <Text style={styles.emptyText}>
+                      No requests at the moment.
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* Actions */}
+              {isCreator && (
+                <View style={styles.editActionsContainer}>
+                  {isEditingEvent ? (
+                    <>
+                      <TouchableOpacity
+                        style={[
+                          styles.editPrimaryButton,
+                          isSavingEvent && { opacity: 0.7 },
+                        ]}
+                        onPress={handleSaveEventEdits}
+                        disabled={isSavingEvent}
+                      >
+                        {isSavingEvent ? (
+                          <ActivityIndicator color='#fff' />
+                        ) : (
+                          <Text style={styles.editPrimaryButtonText}>
+                            Save Changes
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.editSecondaryButton}
+                        onPress={handleCancelEdit}
+                        disabled={isSavingEvent}
+                      >
+                        <Text style={styles.editSecondaryButtonText}>
+                          Cancel
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.editPrimaryButton}
+                      onPress={handleStartEdit}
+                    >
+                      <Text style={styles.editPrimaryButtonText}>
+                        Edit Event
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+              <TouchableOpacity
+                style={[
+                  styles.leaveButton,
+                  leaveInProgress && styles.leaveButtonDisabled,
+                ]}
+                onPress={() => {
+                  if (isCreator) {
+                    Alert.alert(
+                      'Delete Event',
+                      'Are you sure you want to delete this event? This action cannot be undone.',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Delete',
+                          style: 'destructive',
+                          onPress: () => {
+                            // Description: Delete event from Firestore
+                            // const eventRef = doc(db, 'events', eventId);
+                            // deleteDoc(eventRef)
+                            //   .then(() => {
+                            //     navigation.goBack();
+                            //     Alert.alert(
+                            //       'Event Deleted',
+                            //       'The event has been deleted.'
+                            //     );
+                            //   })
+                            //   .catch((error) => {
+                            //     console.error('Error deleting event:', error);
+                            //     Alert.alert(
+                            //       'Error',
+                            //       'Failed to delete the event.'
+                            //     );
+                            //   });
+
+                            // Soft delete flow
+                            deleteEvent(eventId, auth().currentUser.uid)
+                              .then(() => {
+                                safeExitChat();
+                                Alert.alert(
+                                  'Event Deleted',
+                                  'The event has been deleted.'
+                                );
+                              })
+                              .catch((error) => {
+                                console.error('Error deleting event:', error);
+                                Alert.alert(
+                                  'Error',
+                                  'Failed to delete the event.'
+                                );
+                              });
+                          },
                         },
-                      },
-                    ]
-                  );
-                } else {
-                  handleLeaveEvent();
-                }
-              }}
-              disabled={leaveInProgress}
-            >
-              <Text style={styles.leaveButtonText}>
-                {leaveInProgress
-                  ? 'Leaving...'
-                  : isCreator
-                  ? 'Delete Event'
-                  : 'Leave Event'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.reportButton}
-              onPress={() => {
-                trackClient('report_event_clicked', {
-                  event_id_present: !!eventId,
-                });
-              }}
-            >
-              <Text style={styles.reportButtonText}>Report Event</Text>
-            </TouchableOpacity>
-          </ScrollView>
+                      ]
+                    );
+                  } else {
+                    handleLeaveEvent();
+                  }
+                }}
+                disabled={leaveInProgress}
+              >
+                <Text style={styles.leaveButtonText}>
+                  {leaveInProgress
+                    ? 'Leaving...'
+                    : isCreator
+                    ? 'Delete Event'
+                    : 'Leave Event'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.reportButton}
+                onPress={() => {
+                  trackClient('report_event_clicked', {
+                    event_id_present: !!eventId,
+                  });
+                }}
+              >
+                <Text style={styles.reportButtonText}>Report Event</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
         </Modal>
 
         <DateTimePickerModal
@@ -2188,14 +2240,32 @@ const createStyles = (theme) =>
     sendText: { color: theme.colors.primary, fontWeight: 'bold', fontSize: 16 },
 
     // Modal
-    modal: { justifyContent: 'flex-end', margin: 0, flex: 1 },
+    modal: { justifyContent: 'flex-end', margin: 0 },
+    modalWrapper: {
+      backgroundColor: theme.colors.background,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      maxHeight: '90%', // Description: Max height to leave room for scrolling
+      height: '90%', // Description: Fixed height so ScrollView can calculate scroll area
+      overflow: 'hidden',
+    },
+    dragHandleContainer: {
+      paddingTop: 12,
+      paddingBottom: 8,
+      alignItems: 'center',
+      backgroundColor: theme.colors.background,
+    },
     modalContent: {
       backgroundColor: theme.colors.background,
       padding: 16,
-      borderTopLeftRadius: 16,
-      borderTopRightRadius: 16,
-      maxHeight: '100%', // Slightly taller & allow internal padding to show last button
-      overflow: 'visible',
+      paddingTop: 4,
+      flex: 1, // Description: Take up remaining space after drag handle
+    },
+    dragHandle: {
+      width: 40,
+      height: 5,
+      backgroundColor: theme.isDark ? '#64748B' : '#ccc',
+      borderRadius: 3,
     },
     card: {
       backgroundColor: theme.colors.card,
@@ -2256,15 +2326,13 @@ const createStyles = (theme) =>
       fontSize: 12,
       color: theme.colors.textSecondary,
     },
-    editActionsContainer: {
-      marginBottom: 16,
-    },
+    editActionsContainer: {},
     editPrimaryButton: {
       backgroundColor: theme.colors.primary,
       paddingVertical: 14,
       borderRadius: 12,
       alignItems: 'center',
-      marginBottom: 10,
+      marginBottom: 8, // Description: Reduced from 10 to bring buttons closer
     },
     editPrimaryButtonText: {
       color: '#fff',
@@ -2277,7 +2345,7 @@ const createStyles = (theme) =>
       paddingVertical: 14,
       borderRadius: 12,
       alignItems: 'center',
-      marginBottom: 8,
+      marginBottom: 6, // Description: Reduced from 8 to bring buttons closer
     },
     editSecondaryButtonText: {
       color: theme.colors.primary,
@@ -2357,7 +2425,7 @@ const createStyles = (theme) =>
       paddingVertical: 14,
       borderRadius: 12,
       alignItems: 'center',
-      marginBottom: 8,
+      marginBottom: 10, // Description: Equal spacing between all action buttons
     },
     leaveButtonDisabled: {
       opacity: 0.7,
@@ -2372,19 +2440,12 @@ const createStyles = (theme) =>
       paddingVertical: 14,
       borderRadius: 12,
       alignItems: 'center',
+      marginBottom: 0, // Description: Removed bottom margin since it's the last element
     },
     reportButtonText: {
       color: theme.colors.text,
       fontWeight: 'bold',
       fontSize: 16,
-    },
-    dragHandle: {
-      width: 40,
-      height: 5,
-      backgroundColor: theme.isDark ? '#64748B' : '#ccc',
-      borderRadius: 3,
-      alignSelf: 'center',
-      marginBottom: 12,
     },
     hostRow: {
       flexDirection: 'row',

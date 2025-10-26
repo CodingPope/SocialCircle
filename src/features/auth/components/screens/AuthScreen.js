@@ -31,6 +31,12 @@ import LoadingOverlay from '../../../../components/ui/LoadingOverlay';
 import AnimatedGradientBackground from '../../../../components/ui/AnimatedGradientBackground';
 import Button from '../../../../components/ui/Button';
 import { useTheme } from '../../../../theme';
+import {
+  getAuthErrorMessage,
+  isValidEmail,
+  validatePassword,
+  logAuthError,
+} from '../../utils/authErrorHandler';
 
 const createStyles = (theme) => {
   const { colors, radii, spacing } = theme;
@@ -242,11 +248,11 @@ export default function AuthScreen({ navigation, route }) {
       }
 
       // Create an OAuth credential for Firebase using the raw nonce
-      const provider = new auth.OAuthProvider('apple.com');
-      const oauthCredential = provider.credential({
-        idToken: credential.identityToken,
-        rawNonce,
-      });
+      // FIXED: Use auth.AppleAuthProvider instead of OAuthProvider
+      const oauthCredential = auth.AppleAuthProvider.credential(
+        credential.identityToken,
+        rawNonce
+      );
 
       try {
         const result = await auth().signInWithCredential(oauthCredential);
@@ -330,7 +336,17 @@ export default function AuthScreen({ navigation, route }) {
       if (err && err.code === 'ERR_CANCELED') {
         // user cancelled, don't alert
       } else {
-        Alert.alert('Apple Sign-In Error', err?.message || String(err));
+        // Log detailed error for debugging
+        console.error('[Apple Sign-In] Error details:', {
+          code: err?.code,
+          message: err?.message,
+          nativeError: err?.nativeError,
+          fullError: err,
+        });
+
+        logAuthError(err, 'apple-signin', {});
+        const { title, message } = getAuthErrorMessage(err, 'login');
+        Alert.alert(title, message);
       }
     } finally {
       setLoading(false);
@@ -360,7 +376,11 @@ export default function AuthScreen({ navigation, route }) {
             initPushForUser(result.user.uid).catch(() => {});
           }
         })
-        .catch((err) => Alert.alert('Google Sign Up Error', err.message));
+        .catch((err) => {
+          logAuthError(err, 'google-signin', {});
+          const { title, message } = getAuthErrorMessage(err, 'login');
+          Alert.alert(title, message);
+        });
     }
   }, [googleResponse]);
 
@@ -369,15 +389,20 @@ export default function AuthScreen({ navigation, route }) {
       Alert.alert('Error', 'Please fill in all fields.');
       return;
     }
-    const emailOk = /.+@+\..+/.test(String(email).trim());
-    if (!/.+@.+\..+/.test(String(email).trim())) {
-      Alert.alert('Invalid email', 'Enter a valid email address.');
+
+    // Description: Validate email format using utility function
+    if (!isValidEmail(email)) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address.');
       return;
     }
-    if (typeof password !== 'string' || password.length < 6) {
-      Alert.alert('Weak password', 'Password must be at least 6 characters.');
+
+    // Description: Validate password strength using utility function
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
+      Alert.alert('Invalid Password', passwordValidation.message);
       return;
     }
+
     setLoading(true);
     try {
       if (mode === 'login') {
@@ -493,54 +518,13 @@ export default function AuthScreen({ navigation, route }) {
         await initPushForUser(result.user.uid).catch(() => {});
       }
     } catch (err) {
-      // Description: Enhanced error logging for Firebase Auth debugging
-      const errorDetails = {
-        mode,
-        code: err?.code,
-        message: err?.message,
-        nativeErrorCode: err?.nativeErrorCode,
-        nativeErrorMessage: err?.nativeErrorMessage,
-        userInfo: err?.userInfo,
-        // Extract all enumerable properties
-        allProps: Object.keys(err || {}).reduce((acc, key) => {
-          acc[key] = err[key];
-          return acc;
-        }, {}),
-      };
+      // Description: Use centralized error handler for user-friendly messages
+      logAuthError(err, mode, {
+        email: email ? email.substring(0, 3) + '***' : 'N/A',
+      });
 
-      console.error('[AuthScreen] auth operation failed', errorDetails);
-
-      // Log the raw error object inspection
-      console.error('[AuthScreen] Raw error:', err);
-      console.error('[AuthScreen] Error constructor:', err?.constructor?.name);
-
-      // Try to get underlying native error
-      if (err?.userInfo) {
-        console.error(
-          '[AuthScreen] UserInfo:',
-          JSON.stringify(err.userInfo, null, 2)
-        );
-      }
-
-      // Check for specific auth errors
-      let errorMessage = 'An unexpected error occurred. Please try again.';
-      if (err?.code === 'auth/internal-error') {
-        errorMessage =
-          'Firebase authentication error. Check Firebase Console:\n\n' +
-          '1. Email/Password sign-in enabled?\n' +
-          '2. User exists in Authentication?\n' +
-          '3. Firestore rules allow access?\n\n' +
-          `Details: ${err?.nativeErrorMessage || err?.message}`;
-      } else if (err?.nativeErrorMessage) {
-        errorMessage = err.nativeErrorMessage;
-      } else if (err?.message) {
-        errorMessage = err.message;
-      }
-
-      Alert.alert(
-        mode === 'login' ? 'Login failed' : 'Signup failed',
-        errorMessage
-      );
+      const { title, message } = getAuthErrorMessage(err, mode);
+      Alert.alert(title, message);
     } finally {
       setLoading(false);
     }
@@ -548,13 +532,29 @@ export default function AuthScreen({ navigation, route }) {
 
   const handlePasswordReset = () => {
     if (!email) {
-      Alert.alert('Reset Password', 'Please enter your email first.');
+      Alert.alert('Reset Password', 'Please enter your email address first.');
       return;
     }
+
+    // Description: Validate email before attempting password reset
+    if (!isValidEmail(email)) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address.');
+      return;
+    }
+
     auth()
       .sendPasswordResetEmail(email)
-      .then(() => Alert.alert('Check your email', 'Password reset link sent!'))
-      .catch((err) => Alert.alert('Reset Password', err.message));
+      .then(() =>
+        Alert.alert(
+          'Check Your Email',
+          'A password reset link has been sent to your email address. Please check your inbox and follow the instructions.'
+        )
+      )
+      .catch((err) => {
+        logAuthError(err, 'reset', { email: email.substring(0, 3) + '***' });
+        const { title, message } = getAuthErrorMessage(err, 'reset');
+        Alert.alert(title, message);
+      });
   };
 
   return (
@@ -659,23 +659,28 @@ export default function AuthScreen({ navigation, route }) {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={styles.businessFab}
-            accessibilityRole='button'
-            accessibilityLabel={businessMode ? 'User login' : 'Business login'}
-            onPress={() => {
-              const next = !businessMode;
-              try {
-                navigation.setParams &&
-                  navigation.setParams({ business: next });
-              } catch {}
-              setBusinessMode(next);
-            }}
-          >
-            <Text style={styles.businessFabText}>
-              {businessMode ? 'User login' : 'Business login'}
-            </Text>
-          </TouchableOpacity>
+          {/* Business login toggle - only available in development */}
+          {__DEV__ && (
+            <TouchableOpacity
+              style={styles.businessFab}
+              accessibilityRole='button'
+              accessibilityLabel={
+                businessMode ? 'User login' : 'Business login'
+              }
+              onPress={() => {
+                const next = !businessMode;
+                try {
+                  navigation.setParams &&
+                    navigation.setParams({ business: next });
+                } catch {}
+                setBusinessMode(next);
+              }}
+            >
+              <Text style={styles.businessFabText}>
+                {businessMode ? 'User login' : 'Business login'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </AnimatedGradientBackground>

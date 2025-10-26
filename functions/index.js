@@ -616,7 +616,11 @@ exports.onMessageCreateNotify = onDocumentCreated(
     );
     if (targetUids.size === 0) return;
 
-    // 3) Fetch tokens
+    // 3) Fetch tokens and sender info
+    const senderSnap = await db.doc(`users/${senderId}`).get();
+    const senderData = senderSnap.exists ? senderSnap.data() : {};
+    const senderName = senderData.displayName || senderData.name || 'Someone';
+
     const userRefs = [...targetUids].map((uid) => db.doc(`users/${uid}`));
     const userSnaps = await db.getAll(...userRefs);
     const expoTokens = userSnaps
@@ -636,13 +640,18 @@ exports.onMessageCreateNotify = onDocumentCreated(
       return;
     }
 
-    // 4) Build and send
-    const title = ev.title || 'New message';
+    // 4) Build and send with sender name and chat link
+    const title = `${senderName} in ${ev.title || 'event chat'}`;
     const body =
       typeof message.text === 'string' && message.text.trim().length
         ? message.text.trim()
-        : 'You have a new message';
-    const data = { eventId };
+        : 'Sent a message';
+    const data = {
+      eventId,
+      linkType: 'chat',
+      senderId,
+      senderName,
+    };
 
     const messages = expoTokens.map((to) => ({
       to,
@@ -1012,8 +1021,33 @@ exports.rsvpEvent = onCall(
         tx.update(userRef, {
           attendingEvents: admin.firestore.FieldValue.arrayUnion(eventId),
         });
-        return { chatId: eventId, participants: participantsArray };
+        return { chatId: eventId, participants: participantsArray, ownerId };
       });
+
+      // Notify host that someone joined their event (best-effort outside transaction)
+      try {
+        if (result.ownerId && result.ownerId !== userId) {
+          const eventSnap = await eventRef.get();
+          const eventData = eventSnap.data();
+          const userSnap = await userRef.get();
+          const userData = userSnap.exists ? userSnap.data() : {};
+          const userName = userData.displayName || userData.name || 'Someone';
+
+          await db.collection('notifications').add({
+            type: 'event_joined',
+            recipientId: result.ownerId,
+            eventId,
+            userId, // who joined
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            linkType: 'event',
+            linkId: eventId,
+            message: `${userName} joined ${eventData?.title || 'your event'}`,
+            read: false,
+          });
+        }
+      } catch (e) {
+        logger.error('[rsvpEvent] event_joined notify error', e?.message || e);
+      }
 
       return result;
     } catch (err) {
@@ -1167,6 +1201,24 @@ exports.deleteEvent = onCall(
             createdEvents: admin.firestore.FieldValue.arrayRemove(eventId),
             // keep legacy attending/attended cleanup out of scope
           });
+        }
+
+        // Notify all attendees that the event was cancelled
+        const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
+        const notifRef = db.collection('notifications');
+        for (const attendeeId of attendees) {
+          if (attendeeId !== ownerId) {
+            tx.set(notifRef.doc(), {
+              type: 'event_cancelled',
+              recipientId: attendeeId,
+              eventId,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              message: `${ev.title || 'Event'} has been cancelled`,
+              linkType: 'event',
+              linkId: eventId,
+              read: false,
+            });
+          }
         }
 
         return { success: true };
@@ -1393,6 +1445,32 @@ exports.acceptRsvpRequest = onCall(
       });
     } catch (e) {
       logger.error('[acceptRsvpRequest] notify error', e?.message || e);
+    }
+
+    // Notify host that someone joined their event (best-effort)
+    try {
+      const eventSnap = await eventRef.get();
+      const eventData = eventSnap.data();
+      const userSnap = await userRef.get();
+      const userData = userSnap.exists ? userSnap.data() : {};
+      const userName = userData.displayName || userData.name || 'Someone';
+
+      await db.collection('notifications').add({
+        type: 'event_joined',
+        recipientId: hostUid,
+        eventId,
+        userId, // who joined
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        linkType: 'event',
+        linkId: eventId,
+        message: `${userName} joined ${eventData?.title || 'your event'}`,
+        read: false,
+      });
+    } catch (e) {
+      logger.error(
+        '[acceptRsvpRequest] event_joined notify error',
+        e?.message || e
+      );
     }
 
     // Mark host's rsvp_request notification as handled/read (best-effort)
@@ -2436,6 +2514,100 @@ exports.rollupDailyAnalytics = onSchedule(
   }
 );
 
+// Description: Scheduled function to send event reminders 1 hour before events start
+exports.sendEventReminders = onSchedule(
+  {
+    schedule: 'every 15 minutes',
+    timeZone: 'UTC',
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 120,
+  },
+  async () => {
+    logger.log('[sendEventReminders] starting');
+
+    // Find events starting in the next 60-75 minutes (to catch them in this window)
+    const now = new Date();
+    const reminderStart = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+    const reminderEnd = new Date(now.getTime() + 75 * 60 * 1000); // 1 hour 15 min from now
+
+    const eventsQuery = db
+      .collection('events')
+      .where('date', '>=', admin.firestore.Timestamp.fromDate(reminderStart))
+      .where('date', '<=', admin.firestore.Timestamp.fromDate(reminderEnd))
+      .where('isDeleted', '==', false);
+
+    const eventsSnap = await eventsQuery.get();
+
+    if (eventsSnap.empty) {
+      logger.log('[sendEventReminders] No events found in reminder window');
+      return;
+    }
+
+    logger.log(
+      `[sendEventReminders] Found ${eventsSnap.size} events to remind`
+    );
+
+    for (const eventDoc of eventsSnap.docs) {
+      const eventId = eventDoc.id;
+      const event = eventDoc.data();
+
+      // Check if we already sent reminder for this event
+      const reminderCheckSnap = await db
+        .collection('notifications')
+        .where('eventId', '==', eventId)
+        .where('type', '==', 'event_reminder')
+        .limit(1)
+        .get();
+
+      if (!reminderCheckSnap.empty) {
+        logger.log(`[sendEventReminders] Already sent reminder for ${eventId}`);
+        continue;
+      }
+
+      const attendees = Array.isArray(event.attendees) ? event.attendees : [];
+      const ownerId = event.ownerId;
+
+      // Notify all attendees and host
+      const notifRef = db.collection('notifications');
+      const batch = db.batch();
+      let batchCount = 0;
+
+      const allRecipients = new Set([...attendees, ownerId].filter(Boolean));
+
+      for (const recipientId of allRecipients) {
+        const newNotifRef = notifRef.doc();
+        batch.set(newNotifRef, {
+          type: 'event_reminder',
+          recipientId,
+          eventId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          message: `${event.title || 'Your event'} starts in 1 hour!`,
+          linkType: 'event',
+          linkId: eventId,
+          read: false,
+        });
+        batchCount++;
+
+        if (batchCount >= 500) {
+          await batch.commit();
+          batchCount = 0;
+        }
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+
+      logger.log(
+        `[sendEventReminders] Sent ${allRecipients.size} reminders for event ${eventId}`
+      );
+    }
+
+    logger.log('[sendEventReminders] completed');
+  }
+);
+
 // -------------------- BUSINESSES: CALLABLE API --------------------
 function assertAuth(req) {
   const uid = req.auth?.uid || null;
@@ -3255,6 +3427,315 @@ exports.aggregateUsageMetrics = onSchedule(
       wau: totals.wau,
       mau: totals.mau,
     });
+  }
+);
+
+// -------------------- USER VERIFICATION --------------------
+
+// Description: Request email verification
+// Sends verification email to user's registered email address
+exports.requestEmailVerification = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+    invoker: 'public',
+  },
+  async (req) => {
+    logger.info('[requestEmailVerification] Function called');
+    const uid = req.auth?.uid;
+    logger.info(`[requestEmailVerification] UID: ${uid}`);
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+
+    try {
+      // Get user data
+      const userDoc = await db.doc(`users/${uid}`).get();
+      if (!userDoc.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const userData = userDoc.data();
+      logger.info(`[requestEmailVerification] User email: ${userData.email}`);
+
+      // Check if already verified
+      if (userData.verified === true) {
+        logger.info('[requestEmailVerification] User already verified');
+        return { ok: true, alreadyVerified: true };
+      }
+
+      // Check if email is set
+      const email = userData.email || req.auth.token.email;
+      if (!email) {
+        throw new HttpsError('failed-precondition', 'No email address on file');
+      }
+
+      // Generate verification code (6 digits)
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + 15 * 60 * 1000 // 15 minutes
+      );
+
+      logger.info(
+        `[requestEmailVerification] Generated code: ${code} for ${email}`
+      );
+
+      // Store verification request
+      await db.doc(`users/${uid}`).update({
+        verificationRequest: {
+          type: 'email',
+          code,
+          email,
+          expiresAt,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          attempts: 0,
+        },
+      });
+
+      // TODO: Send email with code (integrate with SendGrid/similar)
+      // For now, log the code (development only)
+      logger.info(`✅ VERIFICATION CODE for ${email}: ${code}`);
+      console.log(`✅✅✅ VERIFICATION CODE for ${email}: ${code} ✅✅✅`);
+
+      // DEVELOPMENT ONLY: Return code in response (remove in production!)
+      return { ok: true, email, codeLength: 6, devCode: code };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      logger.error('[requestEmailVerification] error', err?.message || err);
+      throw new HttpsError('internal', 'Verification request failed');
+    }
+  }
+);
+
+// Description: Verify email code
+// Validates the verification code and marks user as verified
+exports.verifyEmailCode = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+    invoker: 'public',
+  },
+  async (req) => {
+    const uid = req.auth?.uid;
+    const { code } = req.data || {};
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+
+    if (!code || typeof code !== 'string') {
+      throw new HttpsError('invalid-argument', 'Verification code required');
+    }
+
+    try {
+      const userRef = db.doc(`users/${uid}`);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const userData = userDoc.data();
+      const request = userData.verificationRequest;
+
+      if (!request || request.type !== 'email') {
+        throw new HttpsError(
+          'failed-precondition',
+          'No pending email verification'
+        );
+      }
+
+      // Check expiration
+      const now = Date.now();
+      const expiresMs = request.expiresAt?.toMillis?.() || 0;
+      if (now > expiresMs) {
+        throw new HttpsError('deadline-exceeded', 'Verification code expired');
+      }
+
+      // Check attempts (max 5)
+      if (request.attempts >= 5) {
+        throw new HttpsError(
+          'resource-exhausted',
+          'Too many failed attempts. Please request a new code.'
+        );
+      }
+
+      // Validate code
+      if (request.code !== code.trim()) {
+        // Increment attempts
+        await userRef.update({
+          'verificationRequest.attempts':
+            admin.firestore.FieldValue.increment(1),
+        });
+        throw new HttpsError('invalid-argument', 'Invalid verification code');
+      }
+
+      // Success! Mark user as verified
+      await userRef.update({
+        verified: true,
+        verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+        verificationMethod: 'email',
+        verificationRequest: admin.firestore.FieldValue.delete(),
+      });
+
+      logger.info(`[verification] User ${uid} verified via email`);
+
+      return { ok: true, verified: true };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      logger.error('[verifyEmailCode] error', err?.message || err);
+      throw new HttpsError('internal', 'Verification failed');
+    }
+  }
+);
+
+// Description: Request phone verification (optional - requires Twilio/similar)
+exports.requestPhoneVerification = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+    invoker: 'public',
+  },
+  async (req) => {
+    const uid = req.auth?.uid;
+    const { phoneNumber } = req.data || {};
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+
+    if (!phoneNumber) {
+      throw new HttpsError('invalid-argument', 'Phone number required');
+    }
+
+    try {
+      // Get user data
+      const userDoc = await db.doc(`users/${uid}`).get();
+      if (!userDoc.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const userData = userDoc.data();
+
+      // Check if already verified
+      if (userData.verified === true) {
+        return { ok: true, alreadyVerified: true };
+      }
+
+      // Generate verification code (6 digits)
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + 10 * 60 * 1000 // 10 minutes
+      );
+
+      // Store verification request
+      await db.doc(`users/${uid}`).update({
+        verificationRequest: {
+          type: 'phone',
+          code,
+          phoneNumber,
+          expiresAt,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          attempts: 0,
+        },
+      });
+
+      // TODO: Send SMS with code (integrate with Twilio)
+      logger.info(`[verification] SMS code for ${phoneNumber}: ${code}`);
+
+      // DEVELOPMENT ONLY: Return code in response (remove in production!)
+      return { ok: true, phoneNumber, codeLength: 6, devCode: code };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      logger.error('[requestPhoneVerification] error', err?.message || err);
+      throw new HttpsError('internal', 'Phone verification request failed');
+    }
+  }
+);
+
+// Description: Verify phone code
+exports.verifyPhoneCode = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+    invoker: 'public',
+  },
+  async (req) => {
+    const uid = req.auth?.uid;
+    const { code } = req.data || {};
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Authentication required');
+    }
+
+    if (!code) {
+      throw new HttpsError('invalid-argument', 'Verification code required');
+    }
+
+    try {
+      const userRef = db.doc(`users/${uid}`);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const userData = userDoc.data();
+      const request = userData.verificationRequest;
+
+      if (!request || request.type !== 'phone') {
+        throw new HttpsError(
+          'failed-precondition',
+          'No pending phone verification'
+        );
+      }
+
+      // Check expiration
+      const now = Date.now();
+      const expiresMs = request.expiresAt?.toMillis?.() || 0;
+      if (now > expiresMs) {
+        throw new HttpsError('deadline-exceeded', 'Verification code expired');
+      }
+
+      // Check attempts
+      if (request.attempts >= 5) {
+        throw new HttpsError(
+          'resource-exhausted',
+          'Too many failed attempts. Please request a new code.'
+        );
+      }
+
+      // Validate code
+      if (request.code !== code.trim()) {
+        await userRef.update({
+          'verificationRequest.attempts':
+            admin.firestore.FieldValue.increment(1),
+        });
+        throw new HttpsError('invalid-argument', 'Invalid verification code');
+      }
+
+      // Success!
+      await userRef.update({
+        verified: true,
+        verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+        verificationMethod: 'phone',
+        phoneNumber: request.phoneNumber, // Store verified phone
+        verificationRequest: admin.firestore.FieldValue.delete(),
+      });
+
+      logger.info(`[verification] User ${uid} verified via phone`);
+
+      return { ok: true, verified: true };
+    } catch (err) {
+      if (err instanceof HttpsError) throw err;
+      logger.error('[verifyPhoneCode] error', err?.message || err);
+      throw new HttpsError('internal', 'Phone verification failed');
+    }
   }
 );
 

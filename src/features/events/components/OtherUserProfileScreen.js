@@ -720,16 +720,17 @@ export default function OtherUserProfileScreen({ route, navigation }) {
           </View>
           <View style={styles.avatarWrapper}>
             <Image source={{ uri: avatarURL }} style={styles.profileImage} />
+          </View>
+          <Text style={styles.name}>
+            {fullName}
             {verified && (
               <MaterialIcons
                 name='verified'
-                size={22}
-                color='#fff'
+                size={20}
                 style={styles.verifiedBadge}
               />
             )}
-          </View>
-          <Text style={styles.name}>{fullName}</Text>
+          </Text>
           <Text style={styles.since}>User since {userSince}</Text>
         </LinearGradient>
 
@@ -762,7 +763,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
 
         {/* Follow/Unfollow and Rate User Buttons */}
         {currentUser?.uid !== userId && (
-          <View style={styles.buttonRow}>
+          <View style={styles.buttonContainer}>
             {!viewerBlocksTarget && !viewerIsBlocked && (
               <TouchableOpacity
                 style={[
@@ -771,6 +772,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
                 ]}
                 onPress={isFollowing ? handleUnfollow : handleFollow}
                 disabled={requestingFollow}
+                activeOpacity={0.8}
               >
                 <Text
                   style={[
@@ -790,6 +792,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
               <TouchableOpacity
                 style={[styles.followButton, { backgroundColor: '#FFD700' }]}
                 onPress={() => setRatingModalVisible(true)}
+                activeOpacity={0.8}
               >
                 <Text style={[styles.followButtonText, { color: '#333' }]}>
                   Rate User
@@ -801,8 +804,10 @@ export default function OtherUserProfileScreen({ route, navigation }) {
 
         {/* Bio */}
         {user.bio ? (
-          <View style={styles.bioContainer}>
-            <Text style={styles.bioText}>{user.bio}</Text>
+          <View style={styles.bioSection}>
+            <View style={styles.bioCard}>
+              <Text style={styles.bioText}>{user.bio}</Text>
+            </View>
           </View>
         ) : null}
 
@@ -1007,7 +1012,11 @@ const createStyles = (theme) =>
       backgroundColor: '#fff',
     },
     profileImage: { width: 120, height: 120, borderRadius: 15 },
-    verifiedBadge: { position: 'absolute', bottom: 0, right: 0 },
+    verifiedBadge: {
+      position: 'absolute',
+      bottom: 0,
+      right: -10,
+    },
     name: {
       fontSize: 24,
       fontWeight: 'bold',
@@ -1040,6 +1049,12 @@ const createStyles = (theme) =>
       color: theme.colors.textSecondary,
       marginTop: 4,
     },
+    buttonContainer: {
+      flexDirection: 'row',
+      marginTop: 16,
+      marginHorizontal: 16,
+      gap: 10,
+    },
     buttonRow: {
       flexDirection: 'row',
       justifyContent: 'space-around',
@@ -1047,12 +1062,34 @@ const createStyles = (theme) =>
     },
     followButton: {
       flex: 1,
-      marginHorizontal: 5,
-      paddingVertical: 10,
-      borderRadius: 25,
+      paddingVertical: 12,
+      borderRadius: 14,
       alignItems: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: theme.isDark ? 0.3 : 0.1,
+      shadowRadius: 4,
+      elevation: 3,
     },
-    followButtonText: { fontWeight: 'bold', fontSize: 16 },
+    followButtonText: { fontWeight: '600', fontSize: 16, letterSpacing: 0.3 },
+    bioSection: {
+      marginTop: 20,
+      marginHorizontal: 16,
+      gap: 12,
+    },
+    bioCard: {
+      backgroundColor: theme.colors.card,
+      padding: 16,
+      borderRadius: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: theme.isDark ? 0.4 : 0.08,
+      shadowRadius: 8,
+      elevation: 4,
+      borderWidth: 1,
+      borderColor: theme.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+    },
+
     bioContainer: {
       backgroundColor: theme.colors.card,
       marginTop: 16,
@@ -1064,7 +1101,7 @@ const createStyles = (theme) =>
       shadowOpacity: theme.isDark ? 0.35 : 0.05,
       shadowRadius: 4,
     },
-    bioText: { fontSize: 15, color: theme.colors.text },
+    bioText: { fontSize: 15, color: theme.colors.text, lineHeight: 22 },
     timelineHeader: { marginTop: 20, marginHorizontal: 16 },
     timelineTitle: {
       fontSize: 18,

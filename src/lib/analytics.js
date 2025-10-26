@@ -261,7 +261,8 @@ export async function track(name, payload = {}) {
     try {
       await analyticsEvent(safeName, safePayload);
     } catch (analyticsError) {
-      console.warn('Native analytics event failed:', analyticsError?.message);
+      // Silently fail - native analytics is best-effort, no need to warn
+      // This can fail during app initialization or if analytics is disabled
     }
 
     // Also track via Cloud Function for server-side processing
@@ -271,42 +272,64 @@ export async function track(name, payload = {}) {
       const code = callableError?.code || '';
       const message = callableError?.message || String(callableError);
 
-      if (code === 'functions/unauthenticated') {
-        try {
-          const currentUser = auth().currentUser;
-          if (currentUser) {
-            await currentUser.getIdToken(true);
-            await cf({ name: safeName, payload: safePayload });
-            return;
-          }
-        } catch (retryError) {
-          const retryMessage = retryError?.message || String(retryError);
-          if (!loggedCallableWarnings.has('unauthenticated-retry')) {
-            console.warn('Analytics callable retry failed:', retryMessage);
-            loggedCallableWarnings.add('unauthenticated-retry');
-          }
-        }
-      }
+      // Handle authentication errors (both formats: 'UNAUTHENTICATED' and 'functions/unauthenticated')
+      const codeUpper = String(code).toUpperCase();
+      const messageUpper = String(message).toUpperCase();
 
       if (
+        code === 'functions/unauthenticated' ||
+        code === 'unauthenticated' ||
+        codeUpper === 'UNAUTHENTICATED' ||
+        messageUpper.includes('UNAUTHENTICATED')
+      ) {
+        // Authentication errors are expected during auth state transitions
+        // Analytics should never block or retry - just log once and continue
+        // Native Firebase Analytics will still track locally
+        if (!loggedCallableWarnings.has('auth-skip')) {
+          console.info(
+            '[Analytics] Server-side tracking skipped during auth transition. Local analytics continues normally.'
+          );
+          loggedCallableWarnings.add('auth-skip');
+        }
+        return; // Silently skip - don't retry
+      }
+
+      // Handle unavailable/service errors
+      const isUnavailable =
         code === 'functions/unavailable' ||
         code === 'unavailable' ||
-        message?.toUpperCase?.() === 'UNAVAILABLE'
-      ) {
+        codeUpper === 'UNAVAILABLE' ||
+        messageUpper.includes('UNAVAILABLE');
+
+      if (isUnavailable) {
         if (!loggedCallableWarnings.has('unavailable')) {
-          console.warn(
-            'Analytics callable temporarily unavailable; skipping until service recovers.'
+          console.info(
+            '[Analytics] Server temporarily unavailable. Local analytics continues normally.'
           );
           loggedCallableWarnings.add('unavailable');
         }
         return;
       }
 
-      console.warn('Analytics callable failed:', message);
+      // Log other errors only once per error type to avoid spam
+      const errorKey = `${code || 'unknown'}-${
+        message?.slice(0, 30) || 'no-msg'
+      }`;
+      if (!loggedCallableWarnings.has(errorKey)) {
+        console.warn(
+          '[Analytics] Server tracking failed:',
+          code || 'unknown',
+          message?.slice(0, 80)
+        );
+        loggedCallableWarnings.add(errorKey);
+      }
     }
   } catch (error) {
-    // Never throw from analytics
-    console.warn('Analytics track failed:', error?.message);
+    // Never throw from analytics - it's best-effort
+    if (!loggedCallableWarnings.has('track-outer-error')) {
+      console.warn('[Analytics] Unexpected error:', error?.message);
+      loggedCallableWarnings.add('track-outer-error');
+    }
   }
 }
 

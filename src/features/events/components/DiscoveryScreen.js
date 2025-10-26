@@ -472,6 +472,7 @@ export default function DiscoveryScreen() {
             hostName: s.name || e?.hostName,
             hostPhoto: s.photoURL || e?.hostPhoto,
             hostRating: s.rating || e?.hostRating,
+            hostVerified: s?.verification?.status === 'verified',
           };
         });
       } catch (error) {

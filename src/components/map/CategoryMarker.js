@@ -12,7 +12,7 @@ const EMOJI_SIZE = 18; // Emoji size for readability
 const BADGE_SIZE = 20; // Attendee badge size
 const BORDER_WIDTH = 2.5; // Border for visual separation
 
-export const CategoryMarker = ({ event, onPress }) => {
+export const CategoryMarker = ({ event, onPress, borderColor = '#fff' }) => {
   // Handle cases where location might not exist
   if (!event?.location) {
     console.warn('[CategoryMarker] Event has no location:', event?.id);
@@ -33,7 +33,10 @@ export const CategoryMarker = ({ event, onPress }) => {
       <View style={styles.markerContainer}>
         {/* Main pin with emoji */}
         <View
-          style={[styles.pinBody, { backgroundColor: categoryConfig.color }]}
+          style={[
+            styles.pinBody,
+            { backgroundColor: categoryConfig.color, borderColor },
+          ]}
         >
           <Text style={styles.emoji}>{categoryConfig.emoji}</Text>
 
@@ -62,7 +65,7 @@ const styles = StyleSheet.create({
     height: MARKER_SIZE,
     borderRadius: MARKER_SIZE / 2,
     borderWidth: BORDER_WIDTH,
-    borderColor: '#fff',
+    // borderColor now set dynamically via prop
     alignItems: 'center',
     justifyContent: 'center',
     // Enhanced shadow for better visibility at all zoom levels

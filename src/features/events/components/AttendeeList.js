@@ -11,7 +11,12 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { db, reportContent, arrayRemove, deleteField } from '../../../firebase/config';
+import {
+  db,
+  reportContent,
+  arrayRemove,
+  deleteField,
+} from '../../../firebase/config';
 import { trackReportContent } from '../../../lib/analytics';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
@@ -273,7 +278,12 @@ export default function AttendeeList({
         }
         style={styles.avatar}
       />
-      <Text style={styles.name}>{item.displayName || 'User'}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <Text style={styles.name}>{item.displayName || 'User'}</Text>
+        {item?.verification?.status === 'verified' && (
+          <Ionicons name='checkmark-circle' size={14} color='#2563EB' />
+        )}
+      </View>
     </TouchableOpacity>
   );
 

@@ -22,7 +22,12 @@ import Avatar from '../../../components/ui/Avatar';
 import PopupMenu from './PopupMenu';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useEventStore } from '../stores/eventStore';
-import { deleteEvent, reportContent, db, updateUserData } from '../../../firebase/config';
+import {
+  deleteEvent,
+  reportContent,
+  db,
+  updateUserData,
+} from '../../../firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { Video } from 'expo-video';
 import joinEvent from '../services/joinEvent';
@@ -652,7 +657,14 @@ export default function PostCard({ event, onPress, onJoinPress }) {
           <View style={styles.hostRow}>
             <Avatar uri={event.hostPhoto} size={50} />
             <View style={{ marginLeft: 8 }}>
-              <Text style={styles.hostName}>{event.hostName}</Text>
+              <View
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+              >
+                <Text style={styles.hostName}>{event.hostName}</Text>
+                {event?.hostVerified && (
+                  <Ionicons name='checkmark-circle' size={16} color='#2563EB' />
+                )}
+              </View>
               <Text style={styles.rating}>
                 {event.hostRating
                   ? `⭐ ${event.hostRating.toFixed(1)}`
