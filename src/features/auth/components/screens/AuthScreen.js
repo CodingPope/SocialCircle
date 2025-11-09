@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,7 @@ import {
   validatePassword,
   logAuthError,
 } from '../../utils/authErrorHandler';
+import { useBizOnboarding } from '../../../business';
 
 const createStyles = (theme) => {
   const { colors, radii, spacing } = theme;
@@ -92,19 +93,40 @@ const createStyles = (theme) => {
       marginBottom: spacing.sm,
       textTransform: 'none',
     },
-    businessFab: {
-      position: 'absolute',
-      left: spacing.lg,
-      bottom: spacing.lg,
-      backgroundColor: 'rgba(0,0,0,0.65)',
-      paddingVertical: spacing.sm + 2,
-      paddingHorizontal: spacing.md,
+    accountSwitchContainer: {
+      flexDirection: 'row',
+      backgroundColor: colors.neutral200,
+      padding: spacing.xs,
       borderRadius: radii.lg,
+      marginBottom: spacing.md,
     },
-    businessFabText: {
-      color: colors.neutral100,
-      fontWeight: '600',
+    accountSwitchButton: {
+      flex: 1,
+      paddingVertical: spacing.sm,
+      borderRadius: radii.md,
+      alignItems: 'center',
+    },
+    accountSwitchButtonActive: {
+      backgroundColor: colors.neutral100,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowOffset: { width: 0, height: 2 },
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    accountSwitchText: {
       fontSize: 14,
+      fontWeight: '600',
+      color: colors.neutral600,
+    },
+    accountSwitchTextActive: {
+      color: colors.primary,
+    },
+    accountSwitchHelper: {
+      fontSize: 12,
+      color: colors.neutral600,
+      marginBottom: spacing.md,
+      textAlign: 'center',
     },
     appleButton: {
       width: '100%',
@@ -154,6 +176,16 @@ export default function AuthScreen({ navigation, route }) {
   const setNextBusinessRoute = useSessionRole((s) => s.setNextBusinessRoute);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const handleAccountModeChange = useCallback(
+    (nextBusiness) => {
+      try {
+        navigation.setParams &&
+          navigation.setParams({ business: !!nextBusiness });
+      } catch {}
+      setBusinessMode(!!nextBusiness);
+    },
+    [navigation, setBusinessMode]
+  );
 
   // Description: Test Firebase Auth configuration on mount
   useEffect(() => {
@@ -189,6 +221,13 @@ export default function AuthScreen({ navigation, route }) {
       setBusinessMode(!!route.params.business);
     }
   }, [route?.params?.business]);
+
+  // Description: Reset session role to consumer when component mounts (unless in business mode)
+  useEffect(() => {
+    if (!businessMode) {
+      setRole('consumer');
+    }
+  }, [businessMode, setRole]);
 
   const isProfileComplete = (userData) => {
     return (
@@ -256,6 +295,9 @@ export default function AuthScreen({ navigation, route }) {
 
       try {
         const result = await auth().signInWithCredential(oauthCredential);
+
+        // Description: Reset session role to consumer for Apple login
+        setRole('consumer');
 
         // If new user, create minimal profile (re-use createUser from profile services)
         if (result?.additionalUserInfo?.isNewUser) {
@@ -361,6 +403,9 @@ export default function AuthScreen({ navigation, route }) {
       auth()
         .signInWithCredential(credential)
         .then(async (result) => {
+          // Description: Reset session role to consumer for Google login
+          setRole('consumer');
+
           if (result.additionalUserInfo?.isNewUser) {
             const {
               createUser,
@@ -417,10 +462,34 @@ export default function AuthScreen({ navigation, route }) {
         // If user is logging in as business, do not attempt user doc push init
         if (businessMode) {
           setRole('business');
-          setNextBusinessRoute('BusinessOnboarding');
+          try {
+            const resume = await useBizOnboarding
+              .getState()
+              .resumeLatestDraft(result.user.uid, { force: true });
+            const statusRaw =
+              resume?.data?.status ||
+              useBizOnboarding.getState().draft?.status ||
+              'draft';
+            const normalizedStatus = String(statusRaw || 'draft').toLowerCase();
+            const sendToTabs = ['active', 'pending_review'].includes(
+              normalizedStatus
+            );
+            setNextBusinessRoute(
+              sendToTabs ? 'BusinessTabs' : 'BusinessOnboarding'
+            );
+          } catch (resumeErr) {
+            console.warn(
+              '[AuthScreen] Failed to resume business draft:',
+              resumeErr?.message || resumeErr
+            );
+            setNextBusinessRoute('BusinessOnboarding');
+          }
           setLoading(false);
           return;
         }
+
+        // Description: Reset session role to consumer for normal login to prevent persisted business mode
+        setRole('consumer');
 
         // Only initialize push for consumer accounts that have a user profile doc
         if (userSnap.exists) {
@@ -475,6 +544,9 @@ export default function AuthScreen({ navigation, route }) {
           setLoading(false);
           return;
         }
+
+        // Description: Reset session role to consumer for normal signup
+        setRole('consumer');
 
         // Consumer signup: create minimal, rule-compliant user profile
         const userDocRef = doc(db, 'users', result.user.uid);
@@ -570,6 +642,47 @@ export default function AuthScreen({ navigation, route }) {
           />
 
           <View style={styles.card}>
+            <View style={styles.accountSwitchContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.accountSwitchButton,
+                  !businessMode && styles.accountSwitchButtonActive,
+                ]}
+                onPress={() => handleAccountModeChange(false)}
+              >
+                <Text
+                  style={[
+                    styles.accountSwitchText,
+                    !businessMode && styles.accountSwitchTextActive,
+                  ]}
+                >
+                  I&apos;m here to attend
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.accountSwitchButton,
+                  businessMode && styles.accountSwitchButtonActive,
+                ]}
+                onPress={() => handleAccountModeChange(true)}
+              >
+                <Text
+                  style={[
+                    styles.accountSwitchText,
+                    businessMode && styles.accountSwitchTextActive,
+                  ]}
+                >
+                  I manage a business
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.accountSwitchHelper}>
+              {businessMode
+                ? 'Log in to manage your company profile, events, and team.'
+                : 'Discover and join events happening around you.'}
+            </Text>
+
             {businessMode ? (
               <Text style={styles.businessLabel}>business login</Text>
             ) : null}
@@ -658,29 +771,6 @@ export default function AuthScreen({ navigation, route }) {
               <Text style={styles.linkText}>Forgot Password?</Text>
             </TouchableOpacity>
           </View>
-
-          {/* Business login toggle - only available in development */}
-          {__DEV__ && (
-            <TouchableOpacity
-              style={styles.businessFab}
-              accessibilityRole='button'
-              accessibilityLabel={
-                businessMode ? 'User login' : 'Business login'
-              }
-              onPress={() => {
-                const next = !businessMode;
-                try {
-                  navigation.setParams &&
-                    navigation.setParams({ business: next });
-                } catch {}
-                setBusinessMode(next);
-              }}
-            >
-              <Text style={styles.businessFabText}>
-                {businessMode ? 'User login' : 'Business login'}
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
     </AnimatedGradientBackground>
