@@ -14,7 +14,7 @@ import {
   DarkTheme,
 } from '@react-navigation/native';
 import { navigationRef, navigate } from './src/navigation/RootNavigation';
-import { useUserStore } from './src/features/profile';
+import { useUserStore, useSessionRole } from './src/features/profile';
 import { db, serverTimestamp } from './src/firebase/config';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
@@ -35,6 +35,7 @@ import {
   event as analyticsEvent,
   deriveUserAnalyticsProps,
 } from './src/services/analytics';
+import { AuthProvider } from './src/features/auth/context/AuthContext';
 
 // Initialize error reporting once at module load to capture early errors
 // Sentry temporarily disabled until __extends error is resolved
@@ -54,6 +55,8 @@ function AppContent() {
   const user = useUserStore((state) => state.user);
   const storeLoading = useUserStore((state) => state.loading);
   const setUser = useUserStore((state) => state.setUser);
+  const sessionRole = useSessionRole((state) => state.role);
+  const isBusinessSession = sessionRole === 'business';
   const [profileComplete, setProfileComplete] = useState(false);
   const [checking, setChecking] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(null);
@@ -238,7 +241,7 @@ function AppContent() {
   }, [user]);
 
   useEffect(() => {
-    if (!user?.uid) {
+    if (!user?.uid || isBusinessSession) {
       setShowAnalyticsPrompt(false);
       return;
     }
@@ -249,7 +252,7 @@ function AppContent() {
     } else {
       setShowAnalyticsPrompt(false);
     }
-  }, [user?.uid, user?.analyticsOptIn, user?.analyticsPromptedAt]);
+  }, [user?.uid, user?.analyticsOptIn, user?.analyticsPromptedAt, isBusinessSession]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -266,7 +269,7 @@ function AppContent() {
 
   const persistAnalyticsChoice = useCallback(
     async (accepted) => {
-      if (!user?.uid) return;
+      if (!user?.uid || isBusinessSession) return;
       setConsentBusy(true);
       const userDocRef = db.collection('users').doc(user.uid);
       const timestamp = serverTimestamp();
@@ -448,7 +451,9 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider mode={themeMode}>
-        <AppContent />
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

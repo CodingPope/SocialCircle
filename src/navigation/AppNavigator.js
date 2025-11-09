@@ -1,6 +1,6 @@
 // src/navigation/AppNavigator.js
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -45,16 +45,9 @@ import {
   BusinessDiscoverScreen,
   BusinessMapScreen,
   BusinessProfileScreen,
-  Step0ChooseType,
-  Step1Basics,
-  Step2Brand,
-  Step3Location,
-  Step4Audience,
-  Step5Verify,
-  Step6Team,
-  Step7Privacy,
-  Step8Review,
+  useBizOnboarding,
 } from '../features/business';
+import { useAuth } from '../features/auth/context/AuthContext';
 
 // --- Auth Stack ---
 const AuthStack = createNativeStackNavigator();
@@ -189,7 +182,7 @@ function BusinessTabs() {
 
   return (
     <BizTab.Navigator
-      initialRouteName='BizMap'
+      initialRouteName='BizProfile'
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -247,11 +240,29 @@ function BusinessRootScreen() {
   // Peek so we don't clear before navigator mounts
   const peek = useSessionRole((s) => s.peekNextBusinessRoute);
   const consume = useSessionRole((s) => s.consumeNextBusinessRoute);
+  const { user, loading: authLoading } = useAuth();
+  const resumeLatestDraft = useBizOnboarding((s) => s.resumeLatestDraft);
+  const bizId = useBizOnboarding((s) => s.bizId);
+  const draftStatus = useBizOnboarding((s) => s.draft?.status);
+
+  useEffect(() => {
+    if (!authLoading && user?.uid) {
+      resumeLatestDraft(user.uid).catch(() => {});
+    }
+  }, [authLoading, resumeLatestDraft, user?.uid]);
+
   const next = peek();
-  const initial =
-    next === 'BusinessOnboarding' ? 'BusinessOnboarding' : 'BusinessTabs';
+  const status = (draftStatus || 'draft').toLowerCase();
+  let initial = 'BusinessOnboarding';
+  if (next) {
+    initial = next;
+  } else if (bizId && status !== 'draft') {
+    initial = 'BusinessTabs';
+  }
+
   return (
     <BusinessRoot.Navigator
+      key={initial}
       screenOptions={{ headerShown: false }}
       initialRouteName={initial}
     >

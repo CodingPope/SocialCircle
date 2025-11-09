@@ -65,6 +65,7 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { shareEventDetails } from '../../events/utils/shareUtils';
+import { addSocialCircleEventToCalendar } from '../../../services/calendarService';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 
@@ -74,7 +75,7 @@ const EventChatScreen = () => {
   const insets = useSafeAreaInsets();
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const styles = useMemo(() => createStyles(theme, insets), [theme, insets]);
   // Make route params defensive & provide default
   const {
     eventId,
@@ -112,6 +113,14 @@ const EventChatScreen = () => {
   const [leaveInProgress, setLeaveInProgress] = useState(false);
   const [hasShownAccessAlert, setHasShownAccessAlert] = useState(false);
   const [joinGraceActive, setJoinGraceActive] = useState(() => !!joinIntent);
+  const sidebarScrollRef = useRef(null);
+  const [sidebarScrollOffset, setSidebarScrollOffset] = useState(0);
+  const [sidebarContentHeight, setSidebarContentHeight] = useState(0);
+  const [sidebarContainerHeight, setSidebarContainerHeight] = useState(0);
+  const sidebarScrollOffsetMax = useMemo(() => {
+    if (sidebarContentHeight <= sidebarContainerHeight) return 0;
+    return Math.max(sidebarContentHeight - sidebarContainerHeight, 0);
+  }, [sidebarContentHeight, sidebarContainerHeight]);
 
   // Track listener unsubscribes so we can stop them immediately on leave
   const eventUnsubRef = useRef(null);
@@ -186,6 +195,29 @@ const EventChatScreen = () => {
   const pinnedActionLabel =
     pinnedDraftTrimmed.length > 0 ? 'Save' : pinned?.text ? 'Clear' : 'Save';
   const canSubmitPinned = pinnedDraftTrimmed.length > 0 || !!pinned?.text;
+
+  const handleSidebarScrollTo = useCallback((params) => {
+    if (!sidebarScrollRef.current) return;
+    sidebarScrollRef.current.scrollTo(params);
+  }, []);
+
+  const handleSidebarScroll = useCallback((event) => {
+    const nextOffset = event?.nativeEvent?.contentOffset?.y ?? 0;
+    setSidebarScrollOffset(nextOffset);
+  }, []);
+
+  const handleSidebarLayout = useCallback(({ nativeEvent }) => {
+    const nextHeight = nativeEvent?.layout?.height ?? 0;
+    setSidebarContainerHeight((prev) =>
+      Math.abs(prev - nextHeight) > 0.5 ? nextHeight : prev
+    );
+  }, []);
+
+  const handleSidebarContentSizeChange = useCallback((_, height) => {
+    setSidebarContentHeight((prev) =>
+      Math.abs(prev - height) > 0.5 ? height : prev
+    );
+  }, []);
 
   useEffect(() => {
     if (!joinGraceActive) return;
@@ -1568,29 +1600,43 @@ const EventChatScreen = () => {
           isVisible={isModalVisible}
           onBackdropPress={() => setIsModalVisible(false)}
           onSwipeComplete={() => setIsModalVisible(false)}
-          swipeDirection='down'
-          style={styles.modal}
+          swipeDirection='right'
+          style={styles.sidebarModal}
           backdropOpacity={0.4}
-          propagateSwipe
-          swipeThreshold={80}
+          animationIn='slideInRight'
+          animationOut='slideOutRight'
+          propagateSwipe={true}
+          hideModalContentWhileAnimating={true}
+          scrollTo={handleSidebarScrollTo}
+          scrollOffset={sidebarScrollOffset}
+          scrollOffsetMax={sidebarScrollOffsetMax}
         >
-          <View style={styles.modalWrapper}>
-            <View style={styles.dragHandleContainer}>
-              <View style={styles.dragHandle} />
-            </View>
+          <View style={styles.sidebarWrapper} onLayout={handleSidebarLayout}>
+            {/* Floating close button */}
+            <TouchableOpacity
+              style={styles.floatingCloseButton}
+              onPress={() => setIsModalVisible(false)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name='close' size={28} color='#fff' />
+            </TouchableOpacity>
+
             <ScrollView
-              style={styles.modalContent}
+              ref={sidebarScrollRef}
+              style={{ flex: 1 }}
               contentContainerStyle={{
+                paddingHorizontal: 16,
+                paddingTop: 60, // Space for close button
                 paddingBottom: (insets.bottom || 0) + 32,
-                paddingTop: 12,
               }}
               showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps='handled'
-              nestedScrollEnabled={true}
               bounces={true}
-              alwaysBounceVertical={true}
               scrollEventThrottle={16}
-              directionalLockEnabled={true}
+              nestedScrollEnabled={true}
+              scrollEnabled={true}
+              onScroll={handleSidebarScroll}
+              onContentSizeChange={handleSidebarContentSizeChange}
             >
               {/* Event Title + Host Info */}
               <TouchableOpacity
@@ -2167,7 +2213,10 @@ const EventChatScreen = () => {
 };
 
 // Description: Create theme-aware styles for EventChatScreen
-const createStyles = (theme) =>
+const createStyles = (
+  theme,
+  insets = { top: 0, bottom: 0, left: 0, right: 0 }
+) =>
   StyleSheet.create({
     messageAvatar: {
       width: 45,
@@ -2239,33 +2288,41 @@ const createStyles = (theme) =>
     sendButton: { marginLeft: 8, justifyContent: 'center' },
     sendText: { color: theme.colors.primary, fontWeight: 'bold', fontSize: 16 },
 
-    // Modal
-    modal: { justifyContent: 'flex-end', margin: 0 },
-    modalWrapper: {
-      backgroundColor: theme.colors.background,
-      borderTopLeftRadius: 16,
-      borderTopRightRadius: 16,
-      maxHeight: '90%', // Description: Max height to leave room for scrolling
-      height: '90%', // Description: Fixed height so ScrollView can calculate scroll area
-      overflow: 'hidden',
+    // Sidebar Modal
+    sidebarModal: {
+      justifyContent: 'center',
+      margin: 0,
+      alignItems: 'flex-end',
     },
-    dragHandleContainer: {
-      paddingTop: 12,
-      paddingBottom: 8,
-      alignItems: 'center',
+    sidebarWrapper: {
+      flex: 1,
       backgroundColor: theme.colors.background,
+      width: '100%', // Full width
+      height: '100%',
+      paddingLeft: insets.left, // Respect safe area on left
+      paddingRight: insets.right, // Respect safe area on right
+      shadowColor: '#000',
+      shadowOpacity: 0.3,
+      shadowRadius: 10,
+      shadowOffset: { width: -2, height: 0 },
+      elevation: 5,
     },
-    modalContent: {
-      backgroundColor: theme.colors.background,
-      padding: 16,
-      paddingTop: 4,
-      flex: 1, // Description: Take up remaining space after drag handle
-    },
-    dragHandle: {
+    floatingCloseButton: {
+      position: 'absolute',
+      top: insets.top + 12,
+      right: 16,
       width: 40,
-      height: 5,
-      backgroundColor: theme.isDark ? '#64748B' : '#ccc',
-      borderRadius: 3,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      shadowColor: '#000',
+      shadowOpacity: 0.3,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 5,
     },
     card: {
       backgroundColor: theme.colors.card,

@@ -6,13 +6,14 @@ import nativeAuth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import storage from '@react-native-firebase/storage';
+import logger from '../utils/logger';
 
 let authInstance = null;
 
 const initializeAuthSingleton = () => {
   if (authInstance) return authInstance;
   if (typeof nativeAuth !== 'function') {
-    console.warn(
+    logger.error(
       '[Firebase Auth] Native module not linked. @react-native-firebase/auth is required.'
     );
     return null;
@@ -20,7 +21,7 @@ const initializeAuthSingleton = () => {
   try {
     authInstance = nativeAuth();
   } catch (error) {
-    console.warn(
+    logger.error(
       '[Firebase Auth] Failed to initialize default instance:',
       error?.message || error
     );
@@ -38,7 +39,7 @@ const resolveAuthInstance = (...args) => {
         return instance;
       }
     } catch (error) {
-      console.warn(
+      logger.warn(
         '[Firebase Auth] auth() call failed, using singleton:',
         error?.message || error
       );
@@ -101,6 +102,242 @@ if (__DEV__ && USE_FIREBASE_EMULATORS === '1') {
 const firestoreInstance = firestore();
 const functionsInstance = functions();
 const storageInstance = storage();
+const DEFAULT_FUNCTION_REGION = 'us-central1';
+
+const getProjectId = () => {
+  try {
+    const fromFunctions = functions()?.app?.options?.projectId;
+    if (fromFunctions) return fromFunctions;
+  } catch {}
+  try {
+    const fromAuth = authInstance?.app?.options?.projectId;
+    if (fromAuth) return fromAuth;
+  } catch {}
+  return 'social-scene1';
+};
+
+const getCurrentFirebaseUser = () => {
+  try {
+    // Description: Try auth() function first (preferred for React Native Firebase)
+    const live = auth()?.currentUser;
+    if (live) {
+      logger.debug(`[Firebase] getCurrentFirebaseUser: found user ${live.uid}`);
+      return live;
+    }
+  } catch (err) {
+    logger.warn('[Firebase] auth() failed:', err?.message || err);
+  }
+  try {
+    // Description: Fallback to authInstance (singleton)
+    if (authInstance?.currentUser) {
+      logger.debug(
+        `[Firebase] getCurrentFirebaseUser: found user via authInstance ${authInstance.currentUser.uid}`
+      );
+      return authInstance.currentUser;
+    }
+  } catch (err) {
+    logger.warn('[Firebase] authInstance failed:', err?.message || err);
+  }
+  logger.debug('[Firebase] No authenticated user found');
+  return null;
+};
+
+// Description: Wait for auth to be initialized with a user
+const waitForAuthUser = async (maxWaitMs = 3000) => {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const user = getCurrentFirebaseUser();
+    if (user?.uid) {
+      logger.debug(`[Firebase] Auth user ready: ${user.uid}`);
+      return user;
+    }
+    // Wait 100ms before checking again
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  logger.warn('[Firebase] Timeout waiting for auth user');
+  return null;
+};
+
+const isUnauthenticatedError = (error) => {
+  if (!error) return false;
+  const code = String(error.code || '').toLowerCase();
+  if (code.includes('unauthenticated')) return true;
+  const message = String(error.message || '').toLowerCase();
+  return message.includes('unauthenticated');
+};
+
+const callCallableWithManualFetch = async (name, payload, originalError) => {
+  if (typeof fetch !== 'function') {
+    logger.warn('[Firebase] fetch not available for manual retry');
+    throw originalError;
+  }
+
+  const user = getCurrentFirebaseUser();
+  if (!user) {
+    logger.warn('[Firebase] No user found for manual fetch retry');
+    throw originalError;
+  }
+
+  // Description: Validate user has uid before attempting token refresh
+  if (!user.uid) {
+    logger.warn('[Firebase] User object exists but has no uid');
+    throw new Error('UNAUTHENTICATED: User not properly authenticated');
+  }
+
+  let idToken;
+  try {
+    // Description: Force refresh token with forceRefresh=true
+    idToken = await user.getIdToken(true);
+
+    if (!idToken) {
+      logger.warn('[Firebase] Token refresh returned null/undefined');
+      throw new Error('UNAUTHENTICATED: Failed to get authentication token');
+    }
+
+    logger.debug(
+      `[Firebase] Token retrieved successfully for ${name} (length: ${idToken.length})`
+    );
+
+    // Description: Decode JWT to inspect claims (for debugging)
+    if (__DEV__) {
+      try {
+        const tokenParts = idToken.split('.');
+        if (tokenParts.length === 3) {
+          const payload = JSON.parse(atob(tokenParts[1]));
+          logger.debug(
+            `[Firebase] Token payload - aud: ${payload.aud}, user_id: ${
+              payload.user_id
+            }, exp: ${new Date(payload.exp * 1000).toISOString()}`
+          );
+        }
+      } catch (decodeErr) {
+        logger.warn(
+          '[Firebase] Could not decode token for inspection:',
+          decodeErr
+        );
+      }
+    }
+  } catch (tokenError) {
+    logger.warn(
+      `[Firebase] Failed to refresh ID token before retrying callable ${name}:`,
+      tokenError?.message || tokenError
+    );
+    throw new Error('UNAUTHENTICATED: Authentication token refresh failed');
+  }
+
+  const projectId = getProjectId();
+  const url = `https://${DEFAULT_FUNCTION_REGION}-${projectId}.cloudfunctions.net/${name}`;
+
+  logger.debug(`[Firebase] Manual fetch to: ${url}`);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ data: payload ?? null }),
+    });
+
+    const rawText = await response.text();
+    logger.debug(
+      `[Firebase] Response status: ${response.status}, body length: ${rawText.length}`
+    );
+
+    let parsed = {};
+    if (rawText) {
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (parseError) {
+        logger.warn(
+          `[Firebase] Callable ${name} retry returned non-JSON payload`,
+          parseError?.message || parseError
+        );
+        // Don't expose HTML error pages - throw original error instead
+        if (rawText.includes('<html>') || rawText.includes('<!DOCTYPE')) {
+          throw new Error(
+            `HTTP ${response.status}: ${response.statusText || 'Server error'}`
+          );
+        }
+        parsed = { result: rawText };
+      }
+    }
+
+    if (!response.ok) {
+      const details =
+        parsed?.error?.message || parsed?.error || `HTTP ${response.status}`;
+      throw new Error(details);
+    }
+
+    return parsed?.result ?? parsed?.data ?? parsed;
+  } catch (fetchError) {
+    logger.warn(
+      `[Firebase] Callable retry failed for ${name}:`,
+      fetchError?.message || fetchError
+    );
+    throw originalError;
+  }
+};
+
+const callCallable = async (name, payload) => {
+  try {
+    // Description: Wait for auth to be ready with a valid user (important for app startup)
+    let user = getCurrentFirebaseUser();
+
+    // If no user immediately, wait a bit in case auth is still initializing
+    if (!user) {
+      logger.debug(
+        `[Firebase] No immediate user for ${name}, waiting for auth...`
+      );
+      user = await waitForAuthUser(2000);
+    }
+
+    if (!user) {
+      logger.warn(
+        `[Firebase] No user found for callable ${name} after waiting`
+      );
+      throw new Error('UNAUTHENTICATED: Please sign in to continue');
+    }
+
+    if (!user.uid) {
+      logger.warn(
+        `[Firebase] User exists but has no uid for callable ${name}`
+      );
+      throw new Error('UNAUTHENTICATED: User authentication incomplete');
+    }
+
+    logger.debug(`[Firebase] Calling ${name} with user ${user.uid}`);
+
+    // Description: Get fresh callable instance to ensure current auth context
+    // Using functions() directly instead of cached functionsInstance
+    const fn = functions().httpsCallable(name);
+
+    // Description: Attempt the callable - SDK handles auth automatically
+    const res = await fn(payload);
+    logger.debug(`[Firebase] ${name} succeeded`);
+    return res?.data;
+  } catch (error) {
+    logger.error(
+      `[Firebase] Callable ${name} error:`,
+      error?.code,
+      error?.message || error
+    );
+
+    // Description: If UNAUTHENTICATED, it might be a token issue - try manual retry
+    if (!isUnauthenticatedError(error)) {
+      throw error;
+    }
+
+    // Description: Retry with manual fetch and explicit token
+    logger.debug(
+      `[Firebase] Retrying ${name} with manual fetch and fresh token...`
+    );
+    return callCallableWithManualFetch(name, payload, error);
+  }
+};
 
 // Description: Disable App Verification for development (fixes auth/internal-error)
 // This is required for iOS simulator and development builds
@@ -110,12 +347,12 @@ if (__DEV__) {
   try {
     if (instanceForDev?.settings) {
       instanceForDev.settings.appVerificationDisabledForTesting = true;
-      console.log(
+      logger.info(
         '🔧 [Firebase Auth] App verification disabled for development'
       );
     }
   } catch (error) {
-    console.warn('[Firebase Auth] Could not disable app verification:', error);
+    logger.warn('[Firebase Auth] Could not disable app verification:', error);
   }
 }
 
@@ -129,7 +366,7 @@ try {
 } catch (error) {
   // Settings can only be called once, so ignore if already set
   if (error.code !== 'failed-precondition') {
-    console.warn('[Firebase] Firestore settings error:', error);
+    logger.warn('[Firebase] Firestore settings error:', error);
   }
 }
 
@@ -149,11 +386,11 @@ export const arrayRemove = (...values) =>
   firestore.FieldValue.arrayRemove(...values);
 export const deleteField = () => firestore.FieldValue.delete();
 
-// Export Functions instance
-export { functionsInstance as functions };
-
-// Export Storage instance
+// Export Storage instance (not the function, the initialized instance)
 export { storageInstance as storage };
+
+// Export Functions instance (not the function, the initialized instance)
+export { functionsInstance as functions };
 
 // Description: Fetch user data from Firestore
 export const getUserData = async (uid) => {
@@ -174,6 +411,9 @@ export const uploadProfileImage = async (uid, imageFile) => {
   const fileName = `${Date.now()}.jpg`;
   const imageRef = storageInstance.ref(`profileImages/${uid}/${fileName}`);
 
+  logger.debug('[uploadProfileImage] Starting upload for uid:', uid);
+  logger.debug('[uploadProfileImage] Image file type:', typeof imageFile);
+
   // Metadata for the upload
   const metadata = {
     contentType:
@@ -182,16 +422,23 @@ export const uploadProfileImage = async (uid, imageFile) => {
         : 'image/jpeg',
   };
 
-  // Handle both URI strings and blobs
-  if (typeof imageFile === 'string') {
-    // Local URI - use putFile
-    await imageRef.putFile(imageFile, metadata);
-  } else {
-    // Blob or other object - use put
-    await imageRef.put(imageFile, metadata);
-  }
+  try {
+    // Handle both URI strings and blobs
+    if (typeof imageFile === 'string') {
+      // Local URI - use putFile
+      await imageRef.putFile(imageFile, metadata);
+    } else {
+      // Blob or other object - use put
+      await imageRef.put(imageFile, metadata);
+    }
 
-  return await imageRef.getDownloadURL();
+    const downloadURL = await imageRef.getDownloadURL();
+    logger.debug('[uploadProfileImage] Upload complete');
+    return downloadURL;
+  } catch (error) {
+    logger.error('[uploadProfileImage] Upload failed:', error?.message || error);
+    throw error;
+  }
 };
 
 // Description: Update event count for the user
@@ -350,7 +597,7 @@ export const sendNotification = async (type, recipientId, data = {}) => {
   const currentUser = auth().currentUser;
   const hasCurrentUser = Boolean(currentUser);
   if (!hasCurrentUser) {
-    console.warn('sendNotification skipped: no authenticated user');
+    logger.warn('sendNotification skipped: no authenticated user');
     return { ok: false, skipped: true };
   }
 
@@ -365,7 +612,7 @@ export const sendNotification = async (type, recipientId, data = {}) => {
   } catch (callableError) {
     const code = callableError?.code || 'unknown';
     const message = callableError?.message || String(callableError);
-    console.warn('sendNotification callable error', { code, message });
+    logger.warn('sendNotification callable error', { code, message });
 
     // Retry logic for unauthenticated errors
     if (code === 'functions/unauthenticated') {
@@ -380,7 +627,7 @@ export const sendNotification = async (type, recipientId, data = {}) => {
       } catch (retryError) {
         const retryCode = retryError?.code || 'unknown';
         const retryMessage = retryError?.message || String(retryError);
-        console.warn('sendNotification callable retry failed', {
+        logger.warn('sendNotification callable retry failed', {
           code: retryCode,
           message: retryMessage,
         });
@@ -436,7 +683,7 @@ export const deleteEvent = async (eventId, userId) => {
     if (res && res.data) return res.data;
     return { ok: true };
   } catch (error) {
-    console.error(
+    logger.error(
       'Callable deleteEvent failed, falling back to client update if allowed:',
       error.message || error
     );
@@ -471,7 +718,7 @@ export const deleteEvent = async (eventId, userId) => {
       await updateEventCount(userId).catch(() => {});
       return { ok: true, fallback: true };
     } catch (err) {
-      console.error('Fallback client delete failed:', err.message || err);
+      logger.error('Fallback client delete failed:', err.message || err);
       throw err;
     }
   }
@@ -499,7 +746,7 @@ export const reportContent = async (
     const res = await createReport(payload);
     return res?.data || { ok: true };
   } catch (error) {
-    console.error('Error reporting content:', error);
+    logger.error('Error reporting content:', error);
     throw error;
   }
 };
@@ -516,7 +763,7 @@ export async function softDeleteEvent(eventId) {
       deletedAt: new Date(),
     });
   } catch (error) {
-    console.error('Error soft-deleting event:', error);
+    logger.error('Error soft-deleting event:', error);
     throw error;
   }
 }
@@ -550,65 +797,35 @@ export const rateUserCallable = async (targetUid, raterUid, rating) => {
 };
 
 // Description: Business Onboarding Callables
-export const createBusinessDraft = async (type = 'single') => {
-  const fn = functionsInstance.httpsCallable('createBusinessDraft');
-  const res = await fn({ type });
-  return res?.data; // { ok, bizId }
-};
+export const createBusinessDraft = async (type = 'single') =>
+  callCallable('createBusinessDraft', { type });
 
-export const updateBusinessBasics = async (payload) => {
-  const fn = functionsInstance.httpsCallable('updateBusinessBasics');
-  const res = await fn(payload);
-  return res?.data; // { ok }
-};
+export const updateBusinessBasics = async (payload) =>
+  callCallable('updateBusinessBasics', payload); // { ok }
 
-export const updateBrandAssets = async (payload) => {
-  const fn = functionsInstance.httpsCallable('updateBrandAssets');
-  const res = await fn(payload);
-  return res?.data;
-};
+export const updateBrandAssets = async (payload) =>
+  callCallable('updateBrandAssets', payload);
 
-export const addBusinessLocation = async (payload) => {
-  const fn = functionsInstance.httpsCallable('addBusinessLocation');
-  const res = await fn(payload);
-  return res?.data; // { ok, locId }
-};
+export const addBusinessLocation = async (payload) =>
+  callCallable('addBusinessLocation', payload); // { ok, locId }
 
-export const updateAudiencePolicies = async (payload) => {
-  const fn = functionsInstance.httpsCallable('updateAudiencePolicies');
-  const res = await fn(payload);
-  return res?.data;
-};
+export const updateAudiencePolicies = async (payload) =>
+  callCallable('updateAudiencePolicies', payload);
 
-export const startBusinessVerification = async (payload) => {
-  const fn = functionsInstance.httpsCallable('startBusinessVerification');
-  const res = await fn(payload);
-  return res?.data; // { ok, devCode }
-};
+export const startBusinessVerification = async (payload) =>
+  callCallable('startBusinessVerification', payload); // { ok, devCode }
 
-export const verifyBusinessCode = async (payload) => {
-  const fn = functionsInstance.httpsCallable('verifyBusinessCode');
-  const res = await fn(payload);
-  return res?.data;
-};
+export const verifyBusinessCode = async (payload) =>
+  callCallable('verifyBusinessCode', payload);
 
-export const addBusinessMember = async (payload) => {
-  const fn = functionsInstance.httpsCallable('addBusinessMember');
-  const res = await fn(payload);
-  return res?.data;
-};
+export const addBusinessMember = async (payload) =>
+  callCallable('addBusinessMember', payload);
 
-export const setBusinessPrivacy = async (payload) => {
-  const fn = functionsInstance.httpsCallable('setBusinessPrivacy');
-  const res = await fn(payload);
-  return res?.data;
-};
+export const setBusinessPrivacy = async (payload) =>
+  callCallable('setBusinessPrivacy', payload);
 
-export const submitBusiness = async (payload) => {
-  const fn = functionsInstance.httpsCallable('submitBusiness');
-  const res = await fn(payload);
-  return res?.data; // { ok, status }
-};
+export const submitBusiness = async (payload) =>
+  callCallable('submitBusiness', payload); // { ok, status }
 
 // -------------------- USER VERIFICATION --------------------
 

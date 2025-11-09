@@ -2609,6 +2609,14 @@ exports.sendEventReminders = onSchedule(
 );
 
 // -------------------- BUSINESSES: CALLABLE API --------------------
+const BUSINESS_CALLABLE_OPTIONS = Object.freeze({
+  region: 'us-central1',
+  memory: '256MiB',
+  timeoutSeconds: 60,
+  invoker: 'public',
+  enforceAppCheck: false,
+});
+
 function assertAuth(req) {
   const uid = req.auth?.uid || null;
   if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
@@ -2723,7 +2731,7 @@ async function mirrorMembership(uid, bizId, role) {
   }
 }
 
-exports.createBusinessDraft = onCall(async (req) => {
+exports.createBusinessDraft = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
   const type = normalizeType(req.data?.type);
   const now = admin.firestore.FieldValue.serverTimestamp();
@@ -2731,6 +2739,7 @@ exports.createBusinessDraft = onCall(async (req) => {
   const ref = db.collection('businesses').doc();
   const doc = {
     createdBy: uid,
+    ownerId: uid, // FIX: Add ownerId for queries
     status: 'draft',
     type,
     displayName: null,
@@ -2761,49 +2770,52 @@ exports.createBusinessDraft = onCall(async (req) => {
   return { ok: true, bizId: ref.id };
 });
 
-exports.updateBusinessBasics = onCall(async (req) => {
-  const uid = assertAuth(req);
-  const {
-    bizId,
-    displayName,
-    category,
-    description,
-    website,
-    supportEmail,
-    phone,
-  } = req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
+exports.updateBusinessBasics = onCall(
+  BUSINESS_CALLABLE_OPTIONS,
+  async (req) => {
+    const uid = assertAuth(req);
+    const {
+      bizId,
+      displayName,
+      category,
+      description,
+      website,
+      supportEmail,
+      phone,
+    } = req.data || {};
+    if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
 
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager'])) {
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
+    const { ref, biz } = await getBusinessIfMember(bizId, uid);
+    if (!hasRole(biz, uid, ['owner', 'manager'])) {
+      throw new HttpsError('permission-denied', 'Owner/Manager only');
+    }
+
+    const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (displayName != null)
+      updates.displayName = String(displayName).slice(0, 80);
+    if (category != null) updates.category = String(category).slice(0, 40);
+    if (description != null)
+      updates.description = String(description).slice(0, 200);
+    if (website != null) updates.website = String(website).slice(0, 180);
+    if (supportEmail != null)
+      updates.supportEmail = String(supportEmail).slice(0, 120);
+    if (phone != null) updates.phone = String(phone).slice(0, 40);
+
+    // Slug + search tokens when displayName present
+    if (updates.displayName) {
+      const base = slugify(updates.displayName);
+      const unique = await ensureUniqueSlug(base);
+      updates.slug = unique;
+      updates.searchTokens = buildSearchTokens(updates.displayName);
+    }
+
+    await ref.set(updates, { merge: true });
+    logger.log('[business] basics updated', bizId);
+    return { ok: true };
   }
+);
 
-  const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-  if (displayName != null)
-    updates.displayName = String(displayName).slice(0, 80);
-  if (category != null) updates.category = String(category).slice(0, 40);
-  if (description != null)
-    updates.description = String(description).slice(0, 200);
-  if (website != null) updates.website = String(website).slice(0, 180);
-  if (supportEmail != null)
-    updates.supportEmail = String(supportEmail).slice(0, 120);
-  if (phone != null) updates.phone = String(phone).slice(0, 40);
-
-  // Slug + search tokens when displayName present
-  if (updates.displayName) {
-    const base = slugify(updates.displayName);
-    const unique = await ensureUniqueSlug(base);
-    updates.slug = unique;
-    updates.searchTokens = buildSearchTokens(updates.displayName);
-  }
-
-  await ref.set(updates, { merge: true });
-  logger.log('[business] basics updated', bizId);
-  return { ok: true };
-});
-
-exports.updateBrandAssets = onCall(async (req) => {
+exports.updateBrandAssets = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
   const { bizId, logoUrl, coverUrl, brandColor } = req.data || {};
   if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
@@ -2818,7 +2830,7 @@ exports.updateBrandAssets = onCall(async (req) => {
   return { ok: true };
 });
 
-exports.addBusinessLocation = onCall(async (req) => {
+exports.addBusinessLocation = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
   const {
     bizId,
@@ -2831,6 +2843,7 @@ exports.addBusinessLocation = onCall(async (req) => {
     longitude,
     hours,
     serviceRadiusKm,
+    locId,
   } = req.data || {};
   if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
   if (typeof latitude !== 'number' || typeof longitude !== 'number')
@@ -2844,13 +2857,13 @@ exports.addBusinessLocation = onCall(async (req) => {
   const geohash5 = typeof gh === 'string' ? gh.substring(0, 5) : null;
   const geohash7 = typeof gh === 'string' ? gh.substring(0, 7) : null;
   const now = admin.firestore.FieldValue.serverTimestamp();
-  const locRef = db
+  const locationRef = db
     .collection('businesses')
     .doc(bizId)
     .collection('locations')
-    .doc();
+    .doc(locId ? String(locId) : undefined);
 
-  await locRef.set({
+  const data = {
     label: String(label || '').slice(0, 60) || null,
     address: String(address || '').slice(0, 200) || null,
     city: String(city || '').slice(0, 60) || null,
@@ -2863,72 +2876,85 @@ exports.addBusinessLocation = onCall(async (req) => {
     hours: hours && typeof hours === 'object' ? hours : null,
     serviceRadiusKm:
       typeof serviceRadiusKm === 'number' ? serviceRadiusKm : null,
-    createdAt: now,
     updatedAt: now,
-  });
-  logger.log('[business] location added', bizId, locRef.id);
-  return { ok: true, locId: locRef.id };
+  };
+
+  if (!locId) {
+    data.createdAt = now;
+  }
+
+  await locationRef.set(data, { merge: Boolean(locId) });
+  logger.log('[business] location saved', bizId, locationRef.id);
+  return { ok: true, locId: locationRef.id };
 });
 
-exports.updateAudiencePolicies = onCall(async (req) => {
-  const uid = assertAuth(req);
-  const { bizId, ageRestriction, genderRestriction, interests, houseRules } =
-    req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
-  const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-  const age = String(ageRestriction || 'none').toLowerCase();
-  const gender = String(genderRestriction || 'none').toLowerCase();
-  updates.ageRestriction = ['none', '18+', '21+'].includes(age) ? age : 'none';
-  updates.genderRestriction = [
-    'none',
-    'women_only',
-    'men_only',
-    'other',
-  ].includes(gender)
-    ? gender
-    : 'none';
-  updates.interests = Array.isArray(interests)
-    ? interests.map((i) => String(i).slice(0, 40)).slice(0, 20)
-    : [];
-  updates.houseRules = houseRules ? String(houseRules).slice(0, 500) : null;
-  await ref.set(updates, { merge: true });
-  return { ok: true };
-});
+exports.updateAudiencePolicies = onCall(
+  BUSINESS_CALLABLE_OPTIONS,
+  async (req) => {
+    const uid = assertAuth(req);
+    const { bizId, ageRestriction, genderRestriction, interests, houseRules } =
+      req.data || {};
+    if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
+    const { ref, biz } = await getBusinessIfMember(bizId, uid);
+    if (!hasRole(biz, uid, ['owner', 'manager']))
+      throw new HttpsError('permission-denied', 'Owner/Manager only');
+    const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    const age = String(ageRestriction || 'none').toLowerCase();
+    const gender = String(genderRestriction || 'none').toLowerCase();
+    updates.ageRestriction = ['none', '18+', '21+'].includes(age)
+      ? age
+      : 'none';
+    updates.genderRestriction = [
+      'none',
+      'women_only',
+      'men_only',
+      'other',
+    ].includes(gender)
+      ? gender
+      : 'none';
+    updates.interests = Array.isArray(interests)
+      ? interests.map((i) => String(i).slice(0, 40)).slice(0, 20)
+      : [];
+    updates.houseRules = houseRules ? String(houseRules).slice(0, 500) : null;
+    await ref.set(updates, { merge: true });
+    return { ok: true };
+  }
+);
 
-exports.startBusinessVerification = onCall(async (req) => {
-  const uid = assertAuth(req);
-  const { bizId, method } = req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-  const m = String(method || '').toLowerCase();
-  if (!['domain_email', 'sms'].includes(m))
-    throw new HttpsError('invalid-argument', 'Invalid method');
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
+exports.startBusinessVerification = onCall(
+  BUSINESS_CALLABLE_OPTIONS,
+  async (req) => {
+    const uid = assertAuth(req);
+    const { bizId, method } = req.data || {};
+    if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
+    const m = String(method || '').toLowerCase();
+    if (!['domain_email', 'sms'].includes(m))
+      throw new HttpsError('invalid-argument', 'Invalid method');
+    const { ref, biz } = await getBusinessIfMember(bizId, uid);
+    if (!hasRole(biz, uid, ['owner', 'manager']))
+      throw new HttpsError('permission-denied', 'Owner/Manager only');
 
-  // For MVP: generate a 6-digit code and store a hash in a subdoc
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-  const codeRef = ref.collection('verificationCodes').doc();
-  await codeRef.set({
-    method: m,
-    code, // NOTE: For beta only; remove plain code later and store hash
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    createdBy: uid,
-    consumed: false,
-  });
-  await ref.set(
-    { verification: { status: 'pending', method: m, verifiedAt: null } },
-    { merge: true }
-  );
-  logger.log('[business] verification started', bizId, m);
-  // Return the code only in beta/dev to unblock flow
-  return { ok: true, devCode: code };
-});
+    // For MVP: generate a 6-digit code and store a hash in a subdoc
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeRef = ref.collection('verificationCodes').doc();
+    await codeRef.set({
+      method: m,
+      code, // NOTE: For beta only; remove plain code later and store hash
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdBy: uid,
+      consumed: false,
+    });
+    await ref.set(
+      { verification: { status: 'pending', method: m, verifiedAt: null } },
+      { merge: true }
+    );
+    logger.log('[business] verification started', bizId, m);
+    // Return the code only in beta/dev to unblock flow
+    return { ok: true, devCode: code };
+  }
+);
 
-exports.verifyBusinessCode = onCall(async (req) => {
+exports.verifyBusinessCode = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
   const { bizId, code } = req.data || {};
   if (!bizId || !code)
@@ -2962,7 +2988,7 @@ exports.verifyBusinessCode = onCall(async (req) => {
   return { ok: true };
 });
 
-exports.addBusinessMember = onCall(async (req) => {
+exports.addBusinessMember = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
   const { bizId, targetUid, email, role } = req.data || {};
   if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
@@ -3006,7 +3032,7 @@ exports.addBusinessMember = onCall(async (req) => {
   return { ok: true };
 });
 
-exports.setBusinessPrivacy = onCall(async (req) => {
+exports.setBusinessPrivacy = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
   const { bizId, analyticsShare } = req.data || {};
   if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
@@ -3023,7 +3049,7 @@ exports.setBusinessPrivacy = onCall(async (req) => {
   return { ok: true };
 });
 
-exports.submitBusiness = onCall(async (req) => {
+exports.submitBusiness = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
   const { bizId, review } = req.data || {};
   if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');

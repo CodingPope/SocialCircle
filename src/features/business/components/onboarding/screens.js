@@ -1,5 +1,5 @@
-// Description: Redesigned business onboarding screens with improved UX and auth handling.
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// Description: Streamlined business onboarding screens (Intro -> Basics -> Location -> Review)
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,611 +8,538 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Image,
-  Platform,
   KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { useBizOnboarding } from '../../stores/businessOnboardingStore';
-import { db, storage, auth } from '../../../../firebase/config';
-import { useAuth } from '../../../auth/context/AuthContext';
-import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  useBizOnboarding,
+  BUSINESS_ONBOARDING_STAGES,
+} from '../../stores/businessOnboardingStore';
+import { useAuth } from '../../../auth/context/AuthContext';
 
-// Description: Progress bar component for onboarding
-function ProgressBar({ currentStep, totalSteps }) {
-  const progress = (currentStep / totalSteps) * 100;
+const STAGE_SEQUENCE = [
+  BUSINESS_ONBOARDING_STAGES.BASICS,
+  BUSINESS_ONBOARDING_STAGES.LOCATION,
+  BUSINESS_ONBOARDING_STAGES.REVIEW,
+];
+
+const STAGE_LABELS = {
+  [BUSINESS_ONBOARDING_STAGES.INTRO]: 'Get started',
+  [BUSINESS_ONBOARDING_STAGES.BASICS]: 'Basics',
+  [BUSINESS_ONBOARDING_STAGES.LOCATION]: 'Location',
+  [BUSINESS_ONBOARDING_STAGES.REVIEW]: 'Review & submit',
+  [BUSINESS_ONBOARDING_STAGES.DONE]: 'Live',
+};
+
+export const stageToScreen = (stage) => {
+  switch (stage) {
+    case BUSINESS_ONBOARDING_STAGES.BASICS:
+      return 'Basics';
+    case BUSINESS_ONBOARDING_STAGES.LOCATION:
+      return 'Location';
+    case BUSINESS_ONBOARDING_STAGES.REVIEW:
+    case BUSINESS_ONBOARDING_STAGES.DONE:
+      return 'Review';
+    default:
+      return 'Intro';
+  }
+};
+
+const ProgressHeader = ({ stage }) => {
+  const index = STAGE_SEQUENCE.findIndex((value) => value === stage);
+  const total = STAGE_SEQUENCE.length;
+  const progress =
+    stage === BUSINESS_ONBOARDING_STAGES.DONE
+      ? 100
+      : Math.max(0, index) >= 0
+      ? ((index + 1) / total) * 100
+      : 0;
+
+  const activeIndex =
+    stage === BUSINESS_ONBOARDING_STAGES.DONE ? total - 1 : Math.max(index, 0);
+
   return (
-    <View style={{ marginBottom: 20 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+    <View style={{ marginBottom: 24 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          marginBottom: 8,
+        }}
+      >
         <Text style={{ fontSize: 12, color: '#666' }}>
-          Step {currentStep} of {totalSteps}
+          {STAGE_LABELS[stage] || 'Get started'}
         </Text>
         <Text style={{ fontSize: 12, color: '#666', fontWeight: '600' }}>
-          {Math.round(progress)}% Complete
+          {Math.round(progress)}% complete
         </Text>
       </View>
-      <View style={{ height: 6, backgroundColor: '#E0E0E0', borderRadius: 3, overflow: 'hidden' }}>
+      <View
+        style={{
+          height: 6,
+          borderRadius: 3,
+          backgroundColor: '#E0E0E0',
+          overflow: 'hidden',
+        }}
+      >
         <View
           style={{
-            height: '100%',
             width: `${progress}%`,
-            backgroundColor: '#2F80ED',
+            height: '100%',
             borderRadius: 3,
+            backgroundColor: '#2F80ED',
           }}
         />
       </View>
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          marginTop: 10,
+        }}
+      >
+        {STAGE_SEQUENCE.map((value, idx) => (
+          <View key={value} style={{ alignItems: 'center', flex: 1 }}>
+            <View
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 5,
+                backgroundColor: idx <= activeIndex ? '#2F80ED' : '#D5DBE4',
+              }}
+            />
+            <Text
+              numberOfLines={1}
+              style={{ fontSize: 10, color: '#888', marginTop: 6 }}
+            >
+              {STAGE_LABELS[value]}
+            </Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
-}
+};
 
-export function Step0ChooseType({ navigation: navProp }) {
+const InfoPill = ({ icon = 'information-circle-outline', text }) => (
+  <View
+    style={{
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: '#EBF2FF',
+      marginBottom: 12,
+    }}
+  >
+    <Ionicons
+      name={icon}
+      size={20}
+      color='#2F80ED'
+      style={{ marginRight: 10 }}
+    />
+    <Text style={{ color: '#1A1A1A', flex: 1 }}>{text}</Text>
+  </View>
+);
+
+const MissingDraftNotice = ({ navigation, message }) => (
+  <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+    <View
+      style={{
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <Ionicons
+        name='alert-circle-outline'
+        size={56}
+        color='#2F80ED'
+        style={{ marginBottom: 16 }}
+      />
+      <Text
+        style={{
+          fontSize: 18,
+          fontWeight: '700',
+          color: '#1A1A1A',
+          marginBottom: 8,
+        }}
+      >
+        Finish business setup
+      </Text>
+      <Text
+        style={{
+          fontSize: 14,
+          color: '#666',
+          textAlign: 'center',
+          lineHeight: 20,
+          marginBottom: 20,
+        }}
+      >
+        {message ||
+          'We could not find your business draft. Start again to continue.'}
+      </Text>
+      <TouchableOpacity
+        onPress={() => navigation.replace('Intro')}
+        style={{
+          backgroundColor: '#2F80ED',
+          paddingVertical: 12,
+          paddingHorizontal: 24,
+          borderRadius: 8,
+        }}
+      >
+        <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 15 }}>
+          Return to start
+        </Text>
+      </TouchableOpacity>
+    </View>
+  </SafeAreaView>
+);
+
+export function IntroScreen() {
   const navigation = useNavigation();
-  const { start, loading, error } = useBizOnboarding();
   const { user } = useAuth();
-  const [type, setType] = useState('single');
+  const {
+    start,
+    stage,
+    loading,
+    error,
+    draft,
+    bizId,
+    resumeLatestDraft,
+    hydrated,
+  } = useBizOnboarding();
+  const [refreshing, setRefreshing] = useState(false);
+  const hasDraft = Boolean(bizId);
+  const resumeRoute = stageToScreen(stage);
 
-  // Description: Check auth before proceeding
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const currentUser = auth().currentUser;
-        if (!currentUser) {
-          Alert.alert(
-            'Authentication Required',
-            'Please sign in to create a business account.',
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
-        } else {
-          console.log('✅ Business onboarding: User authenticated', currentUser.uid);
-        }
-      } catch (err) {
-        console.error('Auth check error:', err);
+  const handleStart = async () => {
+    if (!user?.uid) {
+      Alert.alert('Sign in required', 'Please sign in to continue.');
+      return;
+    }
+    // Description: Pass user.uid to start() to ensure proper auth context
+    const id = await start(user.uid);
+    if (id) {
+      navigation.navigate('Basics');
+    } else if (error) {
+      // Description: Show alert for auth-specific errors
+      const isAuthError =
+        error?.toLowerCase().includes('unauthenticated') ||
+        error?.toLowerCase().includes('sign in') ||
+        error?.toLowerCase().includes('authentication');
+      if (isAuthError) {
+        Alert.alert(
+          'Authentication Error',
+          'Your session may have expired. Please sign out and sign back in.',
+          [{ text: 'OK' }]
+        );
       }
-    };
-    checkAuth();
-  }, [navigation]);
+    }
+  };
+
+  const handleResume = () => {
+    navigation.navigate(resumeRoute);
+  };
+
+  const handleRefresh = async () => {
+    if (!user?.uid) return;
+    setRefreshing(true);
+    await resumeLatestDraft(user.uid, { force: true });
+    setRefreshing(false);
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <ScrollView contentContainerStyle={{ padding: 20 }}>
-        <ProgressBar currentStep={0} totalSteps={6} />
-        
+      <ScrollView contentContainerStyle={{ padding: 24 }}>
         <View style={{ alignItems: 'center', marginBottom: 24 }}>
-          <Ionicons name="business" size={64} color="#2F80ED" />
-        </View>
-
-        <Text style={{ fontSize: 28, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 }}>
-          Welcome to Social Circle for Business
-        </Text>
-        <Text style={{ fontSize: 16, color: '#666', marginBottom: 32, lineHeight: 24 }}>
-          Connect with your community through events and build lasting relationships.
-        </Text>
-
-        <Text style={{ fontSize: 18, fontWeight: '600', color: '#1A1A1A', marginBottom: 16 }}>
-          Choose your business type
-        </Text>
-
-        <View style={{ marginBottom: 24 }}>
-          <TouchableOpacity
-            onPress={() => setType('single')}
+          <Ionicons name='briefcase' size={64} color='#2F80ED' />
+          <Text
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              padding: 16,
-              borderWidth: 2,
-              borderColor: type === 'single' ? '#2F80ED' : '#E0E0E0',
-              backgroundColor: type === 'single' ? '#EBF5FF' : '#FFF',
-              borderRadius: 12,
-              marginBottom: 12,
+              fontSize: 26,
+              fontWeight: '700',
+              color: '#1A1A1A',
+              marginTop: 16,
             }}
           >
-            <View
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 12,
-                borderWidth: 2,
-                borderColor: type === 'single' ? '#2F80ED' : '#CCC',
-                marginRight: 12,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {type === 'single' && (
-                <View
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: 6,
-                    backgroundColor: '#2F80ED',
-                  }}
-                />
-              )}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 4 }}>
-                Single Location
-              </Text>
-              <Text style={{ fontSize: 14, color: '#666' }}>
-                Perfect for cafes, studios, or local venues
-              </Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setType('multi')}
+            Set up your business
+          </Text>
+          <Text
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              padding: 16,
-              borderWidth: 2,
-              borderColor: type === 'multi' ? '#2F80ED' : '#E0E0E0',
-              backgroundColor: type === 'multi' ? '#EBF5FF' : '#FFF',
-              borderRadius: 12,
+              fontSize: 15,
+              color: '#666',
+              textAlign: 'center',
+              marginTop: 8,
+              lineHeight: 22,
             }}
           >
-            <View
+            Create a Social Circle business profile in just a few minutes. You
+            can finish advanced settings later.
+          </Text>
+        </View>
+
+        <InfoPill text='Step 1: Add basics → Step 2: Pin your location → Step 3: Review & submit.' />
+
+        {hasDraft && (
+          <View
+            style={{
+              borderWidth: 1,
+              borderColor: '#D5DBE4',
+              backgroundColor: '#FFF',
+              borderRadius: 16,
+              padding: 16,
+              marginBottom: 24,
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A1A' }}>
+              {draft?.displayName || 'Untitled business'}
+            </Text>
+            <Text
               style={{
-                width: 24,
-                height: 24,
-                borderRadius: 12,
-                borderWidth: 2,
-                borderColor: type === 'multi' ? '#2F80ED' : '#CCC',
-                marginRight: 12,
-                alignItems: 'center',
-                justifyContent: 'center',
+                fontSize: 13,
+                color: '#2F80ED',
+                fontWeight: '600',
+                marginTop: 4,
               }}
             >
-              {type === 'multi' && (
-                <View
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: 6,
-                    backgroundColor: '#2F80ED',
-                  }}
-                />
+              {STAGE_LABELS[stage]}
+            </Text>
+            <TouchableOpacity
+              onPress={handleResume}
+              style={{
+                marginTop: 16,
+                backgroundColor: '#2F80ED',
+                paddingVertical: 12,
+                borderRadius: 10,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#FFF', fontWeight: '600' }}>
+                Resume setup
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleRefresh}
+              disabled={refreshing}
+              style={{
+                marginTop: 12,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: '#2F80ED',
+                paddingVertical: 12,
+                alignItems: 'center',
+              }}
+            >
+              {refreshing ? (
+                <ActivityIndicator color='#2F80ED' />
+              ) : (
+                <Text style={{ color: '#2F80ED', fontWeight: '600' }}>
+                  Refresh status
+                </Text>
               )}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 4 }}>
-                Multiple Locations
-              </Text>
-              <Text style={{ fontSize: 14, color: '#666' }}>
-                For chains, franchises, or businesses with multiple venues
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {error && (
           <View
             style={{
               backgroundColor: '#FEE',
+              borderRadius: 10,
               padding: 12,
-              borderRadius: 8,
               marginBottom: 16,
               borderLeftWidth: 4,
               borderLeftColor: '#E53E3E',
             }}
           >
-            <Text style={{ color: '#C53030', fontSize: 14 }}>
-              {error}
-            </Text>
+            <Text style={{ color: '#C53030' }}>{error}</Text>
           </View>
         )}
 
         <TouchableOpacity
           disabled={loading}
-          onPress={async () => {
-            try {
-              const currentUser = auth().currentUser;
-              if (!currentUser) {
-                Alert.alert('Error', 'Please sign in again to continue.');
-                return;
-              }
-              await start(type);
-              navigation.navigate('Step1');
-            } catch (err) {
-              console.error('Start error:', err);
-              Alert.alert('Error', err.message || 'Failed to start onboarding');
-            }
-          }}
+          onPress={handleStart}
           style={{
-            backgroundColor: loading ? '#CCC' : '#2F80ED',
-            padding: 16,
+            backgroundColor: loading ? '#A0AEC0' : '#2F80ED',
+            paddingVertical: 16,
             borderRadius: 12,
             alignItems: 'center',
             shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
             shadowOpacity: 0.1,
-            shadowRadius: 4,
+            shadowRadius: 6,
             elevation: 3,
           }}
         >
           {loading ? (
-            <ActivityIndicator color="#FFF" />
+            <ActivityIndicator color='#FFF' />
           ) : (
-            <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-              Get Started
+            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 16 }}>
+              {hasDraft ? 'Start a new business' : 'Start business setup'}
             </Text>
           )}
         </TouchableOpacity>
 
-        <Text style={{ fontSize: 12, color: '#999', textAlign: 'center', marginTop: 24, lineHeight: 18 }}>
-          By continuing, you agree to host events in accordance with Social Circle's community guidelines.
-        </Text>
+        {!hydrated && (
+          <Text
+            style={{
+              fontSize: 12,
+              color: '#999',
+              textAlign: 'center',
+              marginTop: 16,
+            }}
+          >
+            Checking for an existing business draft…
+          </Text>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-export function Step1Basics() {
+export function BasicsScreen() {
   const navigation = useNavigation();
-  const { saveBasics, saveAudience, loading, error } = useBizOnboarding();
+  const { bizId, draft, loading, error, saveBasics, stage } =
+    useBizOnboarding();
   const [displayName, setDisplayName] = useState('');
+  const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
   const [website, setWebsite] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [phone, setPhone] = useState('');
 
-  const [categories, setCategories] = useState([]);
-  const [catFilter, setCatFilter] = useState('');
-  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
-  const [selectedInterests, setSelectedInterests] = useState([]);
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const snap = await db.collection('categories').get();
-        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-        if (mounted) setCategories(list);
-      } catch (err) {
-        console.error('Failed to load categories:', err);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    if (!draft) return;
+    setDisplayName(draft.displayName || '');
+    setCategory(draft.category || '');
+    setDescription(draft.description || '');
+    setWebsite(draft.website || '');
+    setSupportEmail(draft.supportEmail || '');
+    setPhone(draft.phone || '');
+  }, [draft]);
 
-  const toggleInterest = (name) => {
-    setSelectedInterests((prev) =>
-      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+  if (!bizId) {
+    return (
+      <MissingDraftNotice
+        navigation={navigation}
+        message='Start a business draft to add your basics.'
+      />
     );
+  }
+
+  const handleContinue = async () => {
+    const ok = await saveBasics({
+      displayName,
+      category,
+      description,
+      website,
+      supportEmail,
+      phone,
+    });
+    if (ok) navigation.navigate('Location');
   };
 
-  const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
-  const interestsForCategory = Array.isArray(selectedCategory?.interests)
-    ? selectedCategory.interests
-        .map((i) => (typeof i === 'string' ? i : i?.name || ''))
-        .filter(Boolean)
-    : [];
-
-  const charCount = description.length;
-  const maxChars = 160;
-  const canProceed = displayName.trim() && selectedCategoryId;
+  const disabled = !displayName.trim() || !category.trim() || loading;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <ProgressBar currentStep={1} totalSteps={6} />
-
-          <Text style={{ fontSize: 24, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 }}>
+        <ScrollView contentContainerStyle={{ padding: 24 }}>
+          <ProgressHeader stage={stage} />
+          <Text
+            style={{
+              fontSize: 24,
+              fontWeight: '700',
+              color: '#1A1A1A',
+              marginBottom: 6,
+            }}
+          >
             Tell us about your business
           </Text>
-          <Text style={{ fontSize: 15, color: '#666', marginBottom: 24, lineHeight: 22 }}>
-            This information will help people discover your events.
+          <Text style={{ fontSize: 15, color: '#666', marginBottom: 20 }}>
+            This info helps people discover and trust your events.
           </Text>
 
-          {/* Business Name */}
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Business Name *
-            </Text>
-            <TextInput
-              placeholder='e.g., "The Coffee House" or "Yoga Studio SF"'
-              value={displayName}
-              onChangeText={setDisplayName}
-              style={{
-                borderWidth: 1,
-                borderColor: displayName ? '#2F80ED' : '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-              }}
-              maxLength={80}
-            />
-          </View>
-
-          {/* Category Selector */}
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Category *
-            </Text>
-            <TouchableOpacity
-              onPress={() => setShowCategoryPicker(!showCategoryPicker)}
-              style={{
-                borderWidth: 1,
-                borderColor: selectedCategoryId ? '#2F80ED' : '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ fontSize: 15, color: selectedCategory ? '#1A1A1A' : '#999' }}>
-                {selectedCategory?.name || 'Select a category'}
-              </Text>
-              <Ionicons
-                name={showCategoryPicker ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color="#666"
-              />
-            </TouchableOpacity>
-
-            {showCategoryPicker && (
-              <View
-                style={{
-                  maxHeight: 300,
-                  borderWidth: 1,
-                  borderColor: '#E0E0E0',
-                  borderRadius: 10,
-                  marginTop: 8,
-                  backgroundColor: '#FFF',
-                }}
-              >
-                <TextInput
-                  placeholder='Search categories...'
-                  value={catFilter}
-                  onChangeText={setCatFilter}
-                  style={{
-                    borderBottomWidth: 1,
-                    borderBottomColor: '#E0E0E0',
-                    padding: 12,
-                    fontSize: 15,
-                  }}
-                />
-                <ScrollView style={{ maxHeight: 250 }}>
-                  {(categories || [])
-                    .filter((c) =>
-                      String(c.name || '')
-                        .toLowerCase()
-                        .includes(catFilter.toLowerCase())
-                    )
-                    .slice(0, 30)
-                    .map((c) => (
-                      <TouchableOpacity
-                        key={c.id}
-                        onPress={() => {
-                          setSelectedCategoryId(c.id);
-                          setSelectedInterests([]);
-                          setShowCategoryPicker(false);
-                        }}
-                        style={{
-                          padding: 14,
-                          borderBottomWidth: 1,
-                          borderBottomColor: '#F0F0F0',
-                          backgroundColor: selectedCategoryId === c.id ? '#EBF5FF' : '#FFF',
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: selectedCategoryId === c.id ? '#2F80ED' : '#333',
-                            fontWeight: selectedCategoryId === c.id ? '600' : '400',
-                            fontSize: 15,
-                          }}
-                        >
-                          {c.emoji ? `${c.emoji} ` : ''}{c.name || c.id}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                </ScrollView>
-              </View>
-            )}
-          </View>
-
-          {/* Interests */}
-          {selectedCategoryId && interestsForCategory.length > 0 && (
-            <View style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-                Select Interests (Optional)
-              </Text>
-              <Text style={{ fontSize: 13, color: '#666', marginBottom: 12 }}>
-                Choose what your business specializes in
-              </Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                {interestsForCategory.slice(0, 15).map((name) => (
-                  <TouchableOpacity
-                    key={name}
-                    onPress={() => toggleInterest(name)}
-                    style={{
-                      paddingHorizontal: 12,
-                      paddingVertical: 8,
-                      borderWidth: 1,
-                      borderColor: selectedInterests.includes(name) ? '#2F80ED' : '#E0E0E0',
-                      backgroundColor: selectedInterests.includes(name) ? '#EBF5FF' : '#FFF',
-                      borderRadius: 20,
-                      marginRight: 8,
-                      marginBottom: 8,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: selectedInterests.includes(name) ? '#2F80ED' : '#666',
-                        fontSize: 14,
-                      }}
-                    >
-                      {selectedInterests.includes(name) ? '✓ ' : ''}
-                      {name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Description */}
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Description
-            </Text>
-            <TextInput
-              placeholder='Describe what makes your business special...'
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={4}
-              maxLength={maxChars}
-              style={{
-                borderWidth: 1,
-                borderColor: '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-                height: 100,
-                textAlignVertical: 'top',
-              }}
-            />
-            <Text style={{ fontSize: 12, color: charCount > maxChars - 20 ? '#E53E3E' : '#999', marginTop: 4 }}>
-              {charCount}/{maxChars} characters
-            </Text>
-          </View>
-
-          {/* Optional Fields */}
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Website
-            </Text>
-            <TextInput
-              placeholder='https://yourwebsite.com'
-              value={website}
-              onChangeText={setWebsite}
-              keyboardType='url'
-              autoCapitalize='none'
-              style={{
-                borderWidth: 1,
-                borderColor: '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-              }}
-            />
-          </View>
-
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Support Email
-            </Text>
-            <TextInput
-              placeholder='support@yourbus iness.com'
-              value={supportEmail}
-              onChangeText={setSupportEmail}
-              keyboardType='email-address'
-              autoCapitalize='none'
-              style={{
-                borderWidth: 1,
-                borderColor: '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-              }}
-            />
-          </View>
-
-          <View style={{ marginBottom: 24 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Phone Number
-            </Text>
-            <TextInput
-              placeholder='+1 (555) 123-4567'
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType='phone-pad'
-              style={{
-                borderWidth: 1,
-                borderColor: '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-              }}
-            />
-          </View>
+          <InputBlock
+            label='Business name'
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder='e.g., The Coffee House'
+            required
+          />
+          <InputBlock
+            label='Category'
+            value={category}
+            onChangeText={setCategory}
+            placeholder='e.g., Cafe, Fitness Studio, Coworking'
+            required
+          />
+          <TextBlock
+            label='Short description'
+            value={description}
+            onChangeText={setDescription}
+            placeholder='What makes your business special?'
+            maxLength={200}
+          />
+          <InputBlock
+            label='Website'
+            value={website}
+            onChangeText={setWebsite}
+            placeholder='https://...'
+          />
+          <InputBlock
+            label='Support email'
+            value={supportEmail}
+            onChangeText={setSupportEmail}
+            placeholder='hello@business.com'
+          />
+          <InputBlock
+            label='Phone'
+            value={phone}
+            onChangeText={setPhone}
+            placeholder='(555) 555-5555'
+          />
 
           {error && (
             <View
               style={{
                 backgroundColor: '#FEE',
-                padding: 12,
                 borderRadius: 8,
+                padding: 12,
                 marginBottom: 16,
                 borderLeftWidth: 4,
                 borderLeftColor: '#E53E3E',
               }}
             >
-              <Text style={{ color: '#C53030', fontSize: 14 }}>{error}</Text>
+              <Text style={{ color: '#C53030' }}>{error}</Text>
             </View>
           )}
 
           <TouchableOpacity
-            disabled={!canProceed || loading}
-            onPress={async () => {
-              if (!displayName || !selectedCategoryId) return;
-              await saveBasics({
-                displayName: displayName.trim(),
-                category: selectedCategory?.name || selectedCategoryId,
-                description: description.trim(),
-                website: website.trim(),
-                supportEmail: supportEmail.trim(),
-                phone: phone.trim(),
-              });
-              if (selectedInterests.length) {
-                await saveAudience({ interests: selectedInterests });
-              }
-              navigation.navigate('Step2');
-            }}
+            disabled={disabled}
+            onPress={handleContinue}
             style={{
-              backgroundColor: !canProceed || loading ? '#CCC' : '#2F80ED',
-              padding: 16,
+              backgroundColor: disabled ? '#A0AEC0' : '#2F80ED',
+              paddingVertical: 16,
               borderRadius: 12,
               alignItems: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-              elevation: 3,
+              marginTop: 12,
             }}
           >
             {loading ? (
-              <ActivityIndicator color="#FFF" />
+              <ActivityIndicator color='#FFF' />
             ) : (
               <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                Continue
+                Save & continue
               </Text>
             )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={{ alignItems: 'center', marginTop: 16 }}
-          >
-            <Text style={{ color: '#666', fontSize: 15 }}>← Back</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -620,345 +547,97 @@ export function Step1Basics() {
   );
 }
 
-export function Step2Brand() {
+export function LocationScreen() {
   const navigation = useNavigation();
-  const { saveBrand, loading, error, draft } = useBizOnboarding();
-  const { user } = useAuth();
-  const [logoUrl, setLogoUrl] = useState(draft?.logoUrl || '');
-  const [coverUrl, setCoverUrl] = useState(draft?.coverUrl || '');
-  const [uploading, setUploading] = useState(false);
-  const [uploadType, setUploadType] = useState(null);
-
-  // Description: Pick from gallery and upload to Firebase Storage
-  const pickAndUpload = async (kind) => {
-    if (!user?.uid) {
-      Alert.alert(
-        'Sign in required',
-        'You need an account to upload brand assets.'
-      );
-      return;
-    }
-
-    try {
-      setUploading(true);
-      setUploadType(kind);
-
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
-        allowsEditing: true,
-        aspect: kind === 'logo' ? [1, 1] : [16, 9],
-      });
-
-      if (res.canceled || !res.assets?.length) {
-        setUploading(false);
-        setUploadType(null);
-        return;
-      }
-
-      const uri = res.assets[0].uri;
-      const contentType = res.assets[0]?.mimeType || 'image/jpeg';
-      const path = `businesses/${user.uid}/${Date.now()}_${kind}.jpg`;
-      const reference = storage.ref(path);
-
-      if (uri.startsWith('http')) {
-        const response = await fetch(uri);
-        const blob = await response.blob();
-        await reference.put(blob, { contentType });
-      } else {
-        await reference.putFile(uri, { contentType });
-      }
-
-      const url = await reference.getDownloadURL();
-      if (kind === 'logo') {
-        setLogoUrl(url);
-      } else {
-        setCoverUrl(url);
-      }
-    } catch (uploadError) {
-      console.warn('Business asset upload failed', uploadError);
-      Alert.alert(
-        'Upload failed',
-        'Unable to upload that image. Please try again.'
-      );
-    } finally {
-      setUploading(false);
-      setUploadType(null);
-    }
-  };
-
-  const canProceed = true; // Logo/cover are optional
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <ProgressBar currentStep={2} totalSteps={6} />
-
-          <Text style={{ fontSize: 24, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 }}>
-            Brand your profile
-          </Text>
-          <Text style={{ fontSize: 15, color: '#666', marginBottom: 24, lineHeight: 22 }}>
-            Add your logo and cover image to make your profile stand out. You can skip this for now and add them later.
-          </Text>
-
-          {/* Logo Upload */}
-          <View style={{ marginBottom: 24 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 12 }}>
-              Logo (Optional)
-            </Text>
-            <View style={{ alignItems: 'center' }}>
-              {logoUrl ? (
-                <View style={{ alignItems: 'center' }}>
-                  <Image
-                    source={{ uri: logoUrl }}
-                    style={{
-                      width: 120,
-                      height: 120,
-                      borderRadius: 60,
-                      borderWidth: 3,
-                      borderColor: '#2F80ED',
-                      marginBottom: 12,
-                    }}
-                    resizeMode='cover'
-                  />
-                  <TouchableOpacity
-                    onPress={() => setLogoUrl('')}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      padding: 8,
-                    }}
-                  >
-                    <Ionicons name="trash-outline" size={16} color="#E53E3E" />
-                    <Text style={{ color: '#E53E3E', marginLeft: 4, fontSize: 14 }}>
-                      Remove Logo
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  onPress={() => pickAndUpload('logo')}
-                  disabled={uploading}
-                  style={{
-                    width: 120,
-                    height: 120,
-                    borderRadius: 60,
-                    borderWidth: 2,
-                    borderColor: '#E0E0E0',
-                    borderStyle: 'dashed',
-                    backgroundColor: '#F8F9FA',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                  }}
-                >
-                  {uploading && uploadType === 'logo' ? (
-                    <ActivityIndicator color="#2F80ED" />
-                  ) : (
-                    <>
-                      <Ionicons name="camera" size={32} color="#2F80ED" />
-                      <Text style={{ color: '#2F80ED', fontSize: 12, marginTop: 8 }}>
-                        Add Logo
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              )}
-            </View>
-            <Text style={{ fontSize: 12, color: '#999', textAlign: 'center', marginTop: 8 }}>
-              Square image recommended (e.g., 500×500px)
-            </Text>
-          </View>
-
-          {/* Cover Upload */}
-          <View style={{ marginBottom: 24 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 12 }}>
-              Cover Image (Optional)
-            </Text>
-            {coverUrl ? (
-              <View>
-                <Image
-                  source={{ uri: coverUrl }}
-                  style={{
-                    width: '100%',
-                    height: 180,
-                    borderRadius: 12,
-                    borderWidth: 2,
-                    borderColor: '#2F80ED',
-                    marginBottom: 12,
-                  }}
-                  resizeMode='cover'
-                />
-                <TouchableOpacity
-                  onPress={() => setCoverUrl('')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 8,
-                  }}
-                >
-                  <Ionicons name="trash-outline" size={16} color="#E53E3E" />
-                  <Text style={{ color: '#E53E3E', marginLeft: 4, fontSize: 14 }}>
-                    Remove Cover
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity
-                onPress={() => pickAndUpload('cover')}
-                disabled={uploading}
-                style={{
-                  width: '100%',
-                  height: 180,
-                  borderRadius: 12,
-                  borderWidth: 2,
-                  borderColor: '#E0E0E0',
-                  borderStyle: 'dashed',
-                  backgroundColor: '#F8F9FA',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}
-              >
-                {uploading && uploadType === 'cover' ? (
-                  <ActivityIndicator color="#2F80ED" />
-                ) : (
-                  <>
-                    <Ionicons name="image" size={40} color="#2F80ED" />
-                    <Text style={{ color: '#2F80ED', fontSize: 14, marginTop: 8 }}>
-                      Add Cover Image
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-            <Text style={{ fontSize: 12, color: '#999', textAlign: 'center', marginTop: 8 }}>
-              Landscape image recommended (e.g., 1200×675px)
-            </Text>
-          </View>
-
-          {error && (
-            <View
-              style={{
-                backgroundColor: '#FEE',
-                padding: 12,
-                borderRadius: 8,
-                marginBottom: 16,
-                borderLeftWidth: 4,
-                borderLeftColor: '#E53E3E',
-              }}
-            >
-              <Text style={{ color: '#C53030', fontSize: 14 }}>{error}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            disabled={loading || uploading}
-            onPress={async () => {
-              await saveBrand({ logoUrl, coverUrl });
-              navigation.navigate('Step3');
-            }}
-            style={{
-              backgroundColor: loading || uploading ? '#CCC' : '#2F80ED',
-              padding: 16,
-              borderRadius: 12,
-              alignItems: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-              elevation: 3,
-            }}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                {logoUrl || coverUrl ? 'Continue' : 'Skip for Now'}
-              </Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={{ alignItems: 'center', marginTop: 16 }}
-          >
-            <Text style={{ color: '#666', fontSize: 15 }}>← Back</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+  const { bizId, locations, loading, error, saveLocation, stage } =
+    useBizOnboarding();
+  const primary = useMemo(
+    () => (Array.isArray(locations) ? locations[0] : null),
+    [locations]
   );
-}
-
-export function Step3Location() {
-  const navigation = useNavigation();
-  const { addLocation, loading, error } = useBizOnboarding();
   const [label, setLabel] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [country, setCountry] = useState('US');
-  const [gettingLocation, setGettingLocation] = useState(false);
   const [coordinates, setCoordinates] = useState(null);
+  const [verifying, setVerifying] = useState(false);
 
-  // Description: Geocode address to get coordinates
-  const geocodeAddress = async () => {
+  useEffect(() => {
+    if (!primary) return;
+    setLabel(primary.label || '');
+    setAddress(primary.address || '');
+    setCity(primary.city || '');
+    setState(primary.state || '');
+    setCountry(primary.country || 'US');
+    if (
+      typeof primary.latitude === 'number' &&
+      typeof primary.longitude === 'number'
+    ) {
+      setCoordinates({
+        latitude: primary.latitude,
+        longitude: primary.longitude,
+      });
+    }
+  }, [primary]);
+
+  if (!bizId) {
+    return (
+      <MissingDraftNotice
+        navigation={navigation}
+        message='Start a draft before adding your location.'
+      />
+    );
+  }
+
+  const verifyAddress = async () => {
     if (!address || !city) {
-      Alert.alert('Missing Information', 'Please enter an address and city');
+      Alert.alert('Missing info', 'Enter your address and city first.');
       return;
     }
-
-    setGettingLocation(true);
+    setVerifying(true);
     try {
-      const fullAddress = `${address}, ${city}, ${state} ${country}`;
-      const results = await Location.geocodeAsync(fullAddress);
-      
+      const query = `${address}, ${city}, ${state || ''} ${
+        country || ''
+      }`.trim();
+      const results = await Location.geocodeAsync(query);
       if (results && results.length > 0) {
         const { latitude, longitude } = results[0];
         setCoordinates({ latitude, longitude });
         Alert.alert(
-          'Location Found',
-          `We found your location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-          [{ text: 'OK' }]
+          'Location found',
+          'We matched your address to a map point.'
         );
       } else {
-        Alert.alert(
-          'Location Not Found',
-          'We couldn\'t find this address. Please check the details and try again.'
-        );
+        Alert.alert('Not found', 'We could not locate that address.');
       }
     } catch (err) {
-      console.error('Geocoding error:', err);
-      Alert.alert(
-        'Geocoding Error',
-        'Unable to find this address. Please verify the address is correct.'
-      );
+      console.warn('Geocode error', err);
+      Alert.alert('Error', 'Unable to verify that address.');
     } finally {
-      setGettingLocation(false);
+      setVerifying(false);
     }
   };
 
-  // Description: Use device location (for single-location businesses)
   const useCurrentLocation = async () => {
-    setGettingLocation(true);
+    setVerifying(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'We need location permission to use your current location.');
-        setGettingLocation(false);
+        Alert.alert(
+          'Permission denied',
+          'Allow location access to use this feature.'
+        );
+        setVerifying(false);
         return;
       }
-
-      const location = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = location.coords;
+      const result = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = result.coords;
       setCoordinates({ latitude, longitude });
-
-      // Reverse geocode to get address
-      const addresses = await Location.reverseGeocodeAsync({ latitude, longitude });
+      const addresses = await Location.reverseGeocodeAsync({
+        latitude,
+        longitude,
+      });
       if (addresses && addresses.length > 0) {
         const addr = addresses[0];
         setAddress(`${addr.streetNumber || ''} ${addr.street || ''}`.trim());
@@ -966,181 +645,133 @@ export function Step3Location() {
         setState(addr.region || '');
         setCountry(addr.isoCountryCode?.toUpperCase() || 'US');
       }
-
-      Alert.alert('Location Set', 'We\'ve set your current location as the business address.');
+      Alert.alert(
+        'Location set',
+        'We used your current location as the business address.'
+      );
     } catch (err) {
-      console.error('Current location error:', err);
-      Alert.alert('Error', 'Unable to get your current location. Please enter address manually.');
+      console.warn('Location error', err);
+      Alert.alert('Error', 'Unable to fetch your current location.');
     } finally {
-      setGettingLocation(false);
+      setVerifying(false);
     }
   };
 
-  const canProceed = address && city && coordinates;
+  const handleContinue = async () => {
+    if (!coordinates) {
+      Alert.alert('Verify address', 'Please verify your address to continue.');
+      return;
+    }
+    const ok = await saveLocation({
+      label: label.trim() || `${city || 'Primary'} location`,
+      address,
+      city,
+      state,
+      country,
+      latitude: coordinates.latitude,
+      longitude: coordinates.longitude,
+    });
+    if (ok) {
+      navigation.navigate('Review');
+    }
+  };
+
+  const disabled = loading || !address.trim() || !city.trim() || !coordinates;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <ProgressBar currentStep={3} totalSteps={6} />
+        <ScrollView contentContainerStyle={{ padding: 24 }}>
+          <ProgressHeader stage={stage} />
+          <Text
+            style={{
+              fontSize: 24,
+              fontWeight: '700',
+              color: '#1A1A1A',
+              marginBottom: 6,
+            }}
+          >
+            Where do you host?
+          </Text>
+          <Text style={{ fontSize: 15, color: '#666', marginBottom: 20 }}>
+            Pin your primary location so nearby members can find you.
+          </Text>
 
-          <Text style={{ fontSize: 24, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 }}>
-            Where are you located?
-          </Text>
-          <Text style={{ fontSize: 15, color: '#666', marginBottom: 24, lineHeight: 22 }}>
-            Help customers find you by adding your business location.
-          </Text>
+          <InputBlock
+            label='Location label'
+            value={label}
+            onChangeText={setLabel}
+            placeholder='Main studio, Downtown cafe'
+          />
+          <InputBlock
+            label='Street address'
+            value={address}
+            onChangeText={setAddress}
+            placeholder='123 Market St'
+            required
+          />
+          <InputBlock
+            label='City'
+            value={city}
+            onChangeText={setCity}
+            placeholder='San Francisco'
+            required
+          />
+          <View style={{ flexDirection: 'row', marginBottom: 16 }}>
+            <InputInline
+              label='State / Region'
+              value={state}
+              onChangeText={setState}
+            />
+            <InputInline
+              label='Country'
+              value={country}
+              onChangeText={setCountry}
+              style={{ marginRight: 0 }}
+            />
+          </View>
 
           <TouchableOpacity
-            onPress={useCurrentLocation}
-            disabled={gettingLocation}
+            onPress={verifyAddress}
+            disabled={verifying || !address || !city}
             style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
               padding: 14,
-              backgroundColor: '#EBF5FF',
               borderRadius: 10,
               borderWidth: 1,
               borderColor: '#2F80ED',
-              marginBottom: 24,
+              backgroundColor: '#EBF5FF',
+              alignItems: 'center',
+              marginBottom: 12,
             }}
           >
-            {gettingLocation ? (
-              <ActivityIndicator color="#2F80ED" />
+            {verifying ? (
+              <ActivityIndicator color='#2F80ED' />
             ) : (
-              <>
-                <Ionicons name="locate" size={20} color="#2F80ED" style={{ marginRight: 8 }} />
-                <Text style={{ color: '#2F80ED', fontWeight: '600', fontSize: 15 }}>
-                  Use My Current Location
-                </Text>
-              </>
+              <Text style={{ color: '#2F80ED', fontWeight: '600' }}>
+                Verify address
+              </Text>
             )}
           </TouchableOpacity>
 
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Location Name (Optional)
+          <TouchableOpacity
+            onPress={useCurrentLocation}
+            disabled={verifying}
+            style={{
+              padding: 14,
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: '#27AE60',
+              alignItems: 'center',
+              marginBottom: 16,
+            }}
+          >
+            <Text style={{ color: '#27AE60', fontWeight: '600' }}>
+              Use current location
             </Text>
-            <TextInput
-              placeholder='e.g., "Downtown Cafe" or "Main Branch"'
-              value={label}
-              onChangeText={setLabel}
-              style={{
-                borderWidth: 1,
-                borderColor: '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-              }}
-            />
-          </View>
-
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              Street Address *
-            </Text>
-            <TextInput
-              placeholder='123 Main Street'
-              value={address}
-              onChangeText={setAddress}
-              style={{
-                borderWidth: 1,
-                borderColor: address ? '#2F80ED' : '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-              }}
-            />
-          </View>
-
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              City *
-            </Text>
-            <TextInput
-              placeholder='San Francisco'
-              value={city}
-              onChangeText={setCity}
-              style={{
-                borderWidth: 1,
-                borderColor: city ? '#2F80ED' : '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-              }}
-            />
-          </View>
-
-          <View style={{ flexDirection: 'row', marginBottom: 16 }}>
-            <View style={{ flex: 1, marginRight: 8 }}>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-                State/Province
-              </Text>
-              <TextInput
-                placeholder='CA'
-                value={state}
-                onChangeText={setState}
-                style={{
-                  borderWidth: 1,
-                  borderColor: '#E0E0E0',
-                  backgroundColor: '#FFF',
-                  borderRadius: 10,
-                  padding: 14,
-                  fontSize: 15,
-                }}
-              />
-            </View>
-            <View style={{ flex: 1, marginLeft: 8 }}>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-                Country
-              </Text>
-              <TextInput
-                placeholder='US'
-                value={country}
-                onChangeText={(text) => setCountry(text.toUpperCase())}
-                style={{
-                  borderWidth: 1,
-                  borderColor: '#E0E0E0',
-                  backgroundColor: '#FFF',
-                  borderRadius: 10,
-                  padding: 14,
-                  fontSize: 15,
-                }}
-                maxLength={2}
-              />
-            </View>
-          </View>
-
-          {!coordinates && (
-            <TouchableOpacity
-              onPress={geocodeAddress}
-              disabled={!address || !city || gettingLocation}
-              style={{
-                padding: 14,
-                backgroundColor: !address || !city ? '#F0F0F0' : '#EBF5FF',
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: '#2F80ED',
-                alignItems: 'center',
-                marginBottom: 16,
-              }}
-            >
-              {gettingLocation ? (
-                <ActivityIndicator color="#2F80ED" />
-              ) : (
-                <Text style={{ color: !address || !city ? '#999' : '#2F80ED', fontWeight: '600' }}>
-                  📍 Verify Address
-                </Text>
-              )}
-            </TouchableOpacity>
-          )}
+          </TouchableOpacity>
 
           {coordinates && (
             <View
@@ -1148,497 +779,56 @@ export function Step3Location() {
                 backgroundColor: '#E8F5E9',
                 padding: 12,
                 borderRadius: 10,
-                marginBottom: 16,
                 flexDirection: 'row',
                 alignItems: 'center',
-              }}
-            >
-              <Ionicons name="checkmark-circle" size={24} color="#27AE60" style={{ marginRight: 8 }} />
-              <Text style={{ color: '#27AE60', fontSize: 14, flex: 1 }}>
-                Location verified and ready to save!
-              </Text>
-            </View>
-          )}
-
-          {error && (
-            <View
-              style={{
-                backgroundColor: '#FEE',
-                padding: 12,
-                borderRadius: 8,
                 marginBottom: 16,
-                borderLeftWidth: 4,
-                borderLeftColor: '#E53E3E',
               }}
             >
-              <Text style={{ color: '#C53030', fontSize: 14 }}>{error}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            disabled={!canProceed || loading}
-            onPress={async () => {
-              await addLocation({
-                label: label || `${city} Location`,
-                address,
-                city,
-                state,
-                country,
-                latitude: coordinates.latitude,
-                longitude: coordinates.longitude,
-              });
-              navigation.navigate('Step4');
-            }}
-            style={{
-              backgroundColor: !canProceed || loading ? '#CCC' : '#2F80ED',
-              padding: 16,
-              borderRadius: 12,
-              alignItems: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-              elevation: 3,
-            }}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                Continue
-              </Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={{ alignItems: 'center', marginTop: 16 }}
-          >
-            <Text style={{ color: '#666', fontSize: 15 }}>← Back</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  );
-}
-
-export function Step4Audience() {
-  const navigation = useNavigation();
-  const { saveAudience, loading, error } = useBizOnboarding();
-  const [houseRules, setHouseRules] = useState('');
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <ProgressBar currentStep={4} totalSteps={6} />
-
-          <Text style={{ fontSize: 24, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 }}>
-            Set your house rules
-          </Text>
-          <Text style={{ fontSize: 15, color: '#666', marginBottom: 24, lineHeight: 22 }}>
-            Let event attendees know what to expect at your venue (optional).
-          </Text>
-
-          <View style={{ marginBottom: 24 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-              House Rules
-            </Text>
-            <TextInput
-              placeholder='e.g., "No outside food or drinks. Please arrive on time. Be respectful to staff."'
-              value={houseRules}
-              onChangeText={setHouseRules}
-              multiline
-              numberOfLines={6}
-              maxLength={500}
-              style={{
-                borderWidth: 1,
-                borderColor: '#E0E0E0',
-                backgroundColor: '#FFF',
-                borderRadius: 10,
-                padding: 14,
-                fontSize: 15,
-                height: 150,
-                textAlignVertical: 'top',
-              }}
-            />
-            <Text style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
-              {houseRules.length}/500 characters
-            </Text>
-          </View>
-
-          {error && (
-            <View
-              style={{
-                backgroundColor: '#FEE',
-                padding: 12,
-                borderRadius: 8,
-                marginBottom: 16,
-                borderLeftWidth: 4,
-                borderLeftColor: '#E53E3E',
-              }}
-            >
-              <Text style={{ color: '#C53030', fontSize: 14 }}>{error}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            disabled={loading}
-            onPress={async () => {
-              await saveAudience({
-                houseRules: houseRules.trim() || null,
-                ageRestriction: 'none',
-                genderRestriction: 'none',
-              });
-              navigation.navigate('Step5');
-            }}
-            style={{
-              backgroundColor: loading ? '#CCC' : '#2F80ED',
-              padding: 16,
-              borderRadius: 12,
-              alignItems: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-              elevation: 3,
-            }}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                {houseRules ? 'Continue' : 'Skip for Now'}
-              </Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={{ alignItems: 'center', marginTop: 16 }}
-          >
-            <Text style={{ color: '#666', fontSize: 15 }}>← Back</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  );
-}
-
-export function Step5Verify() {
-  const navigation = useNavigation();
-  const { startVerification, verifyCode, loading, error, draft } =
-    useBizOnboarding();
-  const [method, setMethod] = useState('domain_email');
-  const [code, setCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const codeInputRef = useRef(null);
-
-  const handleSendCode = async () => {
-    await startVerification(method);
-    setCodeSent(true);
-    // Focus on code input after a moment
-    setTimeout(() => {
-      codeInputRef.current?.focus();
-    }, 300);
-  };
-
-  const handleVerifyCode = async () => {
-    if (code.length < 6) {
-      Alert.alert('Invalid Code', 'Please enter the 6-digit verification code.');
-      return;
-    }
-    try {
-      await verifyCode(code);
-      navigation.navigate('Step8');
-    } catch (err) {
-      // Error is already set in store
-    }
-  };
-
-  // Auto-submit when code is 6 digits
-  useEffect(() => {
-    if (code.length === 6 && codeSent) {
-      handleVerifyCode();
-    }
-  }, [code]);
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
-        <ScrollView contentContainerStyle={{ padding: 20 }}>
-          <ProgressBar currentStep={5} totalSteps={6} />
-
-          <View style={{ alignItems: 'center', marginBottom: 24 }}>
-            <Ionicons name="shield-checkmark" size={64} color="#2F80ED" />
-          </View>
-
-          <Text style={{ fontSize: 24, fontWeight: '700', color: '#1A1A1A', marginBottom: 8 }}>
-            Verify your business
-          </Text>
-          <Text style={{ fontSize: 15, color: '#666', marginBottom: 24, lineHeight: 22 }}>
-            We'll send you a verification code to confirm your business details.
-          </Text>
-
-          {!codeSent ? (
-            <>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 12 }}>
-                Choose verification method
-              </Text>
-              <View style={{ marginBottom: 24 }}>
-                <TouchableOpacity
-                  onPress={() => setMethod('domain_email')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 16,
-                    borderWidth: 2,
-                    borderColor: method === 'domain_email' ? '#2F80ED' : '#E0E0E0',
-                    backgroundColor: method === 'domain_email' ? '#EBF5FF' : '#FFF',
-                    borderRadius: 12,
-                    marginBottom: 12,
-                  }}
-                >
-                  <Ionicons
-                    name="mail"
-                    size={24}
-                    color={method === 'domain_email' ? '#2F80ED' : '#666'}
-                    style={{ marginRight: 12 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#1A1A1A' }}>
-                      Email Verification
-                    </Text>
-                    <Text style={{ fontSize: 13, color: '#666', marginTop: 2 }}>
-                      Send code to your business email
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 12,
-                      borderWidth: 2,
-                      borderColor: method === 'domain_email' ? '#2F80ED' : '#CCC',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    {method === 'domain_email' && (
-                      <View
-                        style={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: 6,
-                          backgroundColor: '#2F80ED',
-                        }}
-                      />
-                    )}
-                  </View>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => setMethod('sms')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    padding: 16,
-                    borderWidth: 2,
-                    borderColor: method === 'sms' ? '#2F80ED' : '#E0E0E0',
-                    backgroundColor: method === 'sms' ? '#EBF5FF' : '#FFF',
-                    borderRadius: 12,
-                  }}
-                >
-                  <Ionicons
-                    name="phone-portrait"
-                    size={24}
-                    color={method === 'sms' ? '#2F80ED' : '#666'}
-                    style={{ marginRight: 12 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#1A1A1A' }}>
-                      SMS Verification
-                    </Text>
-                    <Text style={{ fontSize: 13, color: '#666', marginTop: 2 }}>
-                      Send code to your phone
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      width: 24,
-                      height: 24,
-                      borderRadius: 12,
-                      borderWidth: 2,
-                      borderColor: method === 'sms' ? '#2F80ED' : '#CCC',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    {method === 'sms' && (
-                      <View
-                        style={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: 6,
-                          backgroundColor: '#2F80ED',
-                        }}
-                      />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              </View>
-
-              <TouchableOpacity
-                disabled={loading}
-                onPress={handleSendCode}
-                style={{
-                  backgroundColor: loading ? '#CCC' : '#2F80ED',
-                  padding: 16,
-                  borderRadius: 12,
-                  alignItems: 'center',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 4,
-                  elevation: 3,
-                }}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                    Send Verification Code
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <View
-                style={{
-                  backgroundColor: '#E8F5E9',
-                  padding: 12,
-                  borderRadius: 10,
-                  marginBottom: 24,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                }}
-              >
-                <Ionicons name="checkmark-circle" size={24} color="#27AE60" style={{ marginRight: 8 }} />
-                <Text style={{ color: '#27AE60', fontSize: 14, flex: 1 }}>
-                  Code sent to {method === 'sms' ? 'your phone' : 'your email'}!
-                </Text>
-              </View>
-
-              {draft?.devCode && (
-                <View
-                  style={{
-                    backgroundColor: '#FFF9E6',
-                    padding: 12,
-                    borderRadius: 10,
-                    marginBottom: 16,
-                    borderLeftWidth: 4,
-                    borderLeftColor: '#F2994A',
-                  }}
-                >
-                  <Text style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
-                    🔧 DEV MODE - Your code:
-                  </Text>
-                  <Text style={{ fontSize: 24, fontWeight: '700', color: '#F2994A', letterSpacing: 4 }}>
-                    {draft.devCode}
-                  </Text>
-                </View>
-              )}
-
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 }}>
-                Enter Verification Code
-              </Text>
-              <TextInput
-                ref={codeInputRef}
-                placeholder='123456'
-                value={code}
-                onChangeText={(text) => setCode(text.replace(/[^0-9]/g, ''))}
-                keyboardType='number-pad'
-                maxLength={6}
-                style={{
-                  borderWidth: 2,
-                  borderColor: code.length === 6 ? '#27AE60' : '#E0E0E0',
-                  backgroundColor: '#FFF',
-                  borderRadius: 10,
-                  padding: 16,
-                  fontSize: 24,
-                  fontWeight: '600',
-                  letterSpacing: 8,
-                  textAlign: 'center',
-                  marginBottom: 16,
-                }}
+              <Ionicons
+                name='checkmark-circle'
+                size={22}
+                color='#27AE60'
+                style={{ marginRight: 10 }}
               />
-
-              <TouchableOpacity
-                disabled={code.length !== 6 || loading}
-                onPress={handleVerifyCode}
-                style={{
-                  backgroundColor: code.length !== 6 || loading ? '#CCC' : '#27AE60',
-                  padding: 16,
-                  borderRadius: 12,
-                  alignItems: 'center',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 4,
-                  elevation: 3,
-                  marginBottom: 12,
-                }}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                    Verify Code
-                  </Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => {
-                  setCodeSent(false);
-                  setCode('');
-                }}
-                style={{ alignItems: 'center' }}
-              >
-                <Text style={{ color: '#2F80ED', fontSize: 14 }}>
-                  ← Change verification method
-                </Text>
-              </TouchableOpacity>
-            </>
+              <Text style={{ color: '#1A1A1A', flex: 1 }}>
+                Ready to save: {coordinates.latitude.toFixed(4)},{' '}
+                {coordinates.longitude.toFixed(4)}
+              </Text>
+            </View>
           )}
 
           {error && (
             <View
               style={{
                 backgroundColor: '#FEE',
-                padding: 12,
                 borderRadius: 8,
-                marginTop: 16,
+                padding: 12,
+                marginBottom: 16,
                 borderLeftWidth: 4,
                 borderLeftColor: '#E53E3E',
               }}
             >
-              <Text style={{ color: '#C53030', fontSize: 14 }}>{error}</Text>
+              <Text style={{ color: '#C53030' }}>{error}</Text>
             </View>
           )}
 
           <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={{ alignItems: 'center', marginTop: 24 }}
+            disabled={disabled}
+            onPress={handleContinue}
+            style={{
+              backgroundColor: disabled ? '#A0AEC0' : '#2F80ED',
+              paddingVertical: 16,
+              borderRadius: 12,
+              alignItems: 'center',
+            }}
           >
-            <Text style={{ color: '#666', fontSize: 15 }}>← Back</Text>
+            {loading ? (
+              <ActivityIndicator color='#FFF' />
+            ) : (
+              <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
+                Save & review
+              </Text>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1646,177 +836,310 @@ export function Step5Verify() {
   );
 }
 
-export function Step6Team() {
+export function ReviewScreen() {
   const navigation = useNavigation();
-  const { addMember, loading, error } = useBizOnboarding();
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('Manager');
-  return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <View style={{ flex: 1, padding: 20 }}>
-        <Text style={{ fontSize: 18, fontWeight: '700' }}>Team members</Text>
-        <TextInput
-          placeholder='Member email'
-          value={email}
-          onChangeText={setEmail}
-          style={{
-            borderWidth: 1,
-            borderColor: '#ddd',
-            borderRadius: 8,
-            padding: 10,
-            marginTop: 12,
-          }}
-        />
-        <TextInput
-          placeholder='Role (Owner|Manager|Staff)'
-          value={role}
-          onChangeText={setRole}
-          style={{
-            borderWidth: 1,
-            borderColor: '#ddd',
-            borderRadius: 8,
-            padding: 10,
-            marginTop: 12,
-          }}
-        />
-        <TouchableOpacity
-          disabled={loading}
-          onPress={async () => {
-            await addMember({ email, role });
-            navigation.navigate('Step7');
-          }}
-          style={{
-            backgroundColor: '#2F80ED',
-            padding: 12,
-            borderRadius: 8,
-            marginTop: 16,
-          }}
-        >
-          <Text
-            style={{ color: '#fff', fontWeight: '600', textAlign: 'center' }}
-          >
-            Add member
-          </Text>
-        </TouchableOpacity>
-        {error ? (
-          <Text style={{ color: 'red', marginTop: 8 }}>{error}</Text>
-        ) : null}
-      </View>
-    </SafeAreaView>
+  const {
+    draft,
+    locations,
+    stage,
+    loading,
+    error,
+    submit,
+    refreshDraft,
+    bizId,
+  } = useBizOnboarding();
+  const primary = useMemo(
+    () => (Array.isArray(locations) ? locations[0] : null),
+    [locations]
   );
-}
 
-export function Step7Privacy() {
-  const navigation = useNavigation();
-  const { setPrivacy, loading, error, draft } = useBizOnboarding();
-  const [share, setShare] = useState(draft?.privacy?.analyticsShare !== false);
-  return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <View style={{ flex: 1, padding: 20 }}>
-        <Text style={{ fontSize: 18, fontWeight: '700' }}>Data sharing</Text>
-        <Text style={{ marginTop: 8 }}>
-          You’ll see aggregated analytics only; cohorts &lt;5 hidden.
-        </Text>
-        <TouchableOpacity
-          onPress={() => setShare(!share)}
-          style={{
-            marginTop: 16,
-            padding: 10,
-            borderWidth: 1,
-            borderColor: '#ccc',
-            borderRadius: 8,
-          }}
-        >
-          <Text>
-            {share ? 'analyticsShare: true' : 'analyticsShare: false'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          disabled={loading}
-          onPress={async () => {
-            await setPrivacy(share);
-            navigation.navigate('Step8');
-          }}
-          style={{
-            backgroundColor: '#2F80ED',
-            padding: 12,
-            borderRadius: 8,
-            marginTop: 16,
-          }}
-        >
-          <Text
-            style={{ color: '#fff', fontWeight: '600', textAlign: 'center' }}
-          >
-            Save & Continue
-          </Text>
-        </TouchableOpacity>
-        {error ? (
-          <Text style={{ color: 'red', marginTop: 8 }}>{error}</Text>
-        ) : null}
-      </View>
-    </SafeAreaView>
-  );
-}
+  useEffect(() => {
+    if (bizId && (!draft || !primary)) {
+      refreshDraft({ silent: true });
+    }
+  }, [bizId, draft, primary, refreshDraft]);
 
-export function Step8Review({ navigation }) {
-  const { submit, loading, error } = useBizOnboarding();
-  const goToBizProfile = () => {
-    const parent = navigation?.getParent?.();
-    if (parent?.navigate) {
-      parent.navigate('BusinessTabs', { screen: 'BizProfile' });
-    } else if (navigation?.navigate) {
-      navigation.navigate('BizProfile');
+  if (!bizId) {
+    return (
+      <MissingDraftNotice
+        navigation={navigation}
+        message='Start onboarding before reviewing.'
+      />
+    );
+  }
+
+  const isActive = stage === BUSINESS_ONBOARDING_STAGES.DONE;
+
+  const handleSubmit = async () => {
+    const res = await submit(true);
+    if (res) {
+      Alert.alert('Submitted', 'We will review your business shortly.');
     }
   };
+
+  const goTo = (target) => navigation.navigate(target);
+
   return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <View style={{ flex: 1, padding: 20 }}>
-        <Text style={{ fontSize: 18, fontWeight: '700' }}>Review & submit</Text>
-        <Text style={{ marginVertical: 8 }}>
-          We’ll warn for missing logo/cover (not blocking)
-        </Text>
-        <TouchableOpacity
-          disabled={loading}
-          onPress={async () => {
-            await submit(false);
-            goToBizProfile();
-          }}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
+      <ScrollView contentContainerStyle={{ padding: 24 }}>
+        <ProgressHeader stage={stage} />
+        <Text
           style={{
-            backgroundColor: '#27AE60',
-            padding: 12,
-            borderRadius: 8,
-            marginTop: 16,
+            fontSize: 24,
+            fontWeight: '700',
+            color: '#1A1A1A',
+            marginBottom: 8,
           }}
         >
-          <Text
-            style={{ color: '#fff', fontWeight: '600', textAlign: 'center' }}
+          Review & launch
+        </Text>
+        <Text style={{ fontSize: 15, color: '#666', marginBottom: 20 }}>
+          Double-check your info and submit when you’re ready. You can make
+          additional changes later from Business Settings.
+        </Text>
+
+        <SummaryCard
+          title='Business basics'
+          status={draft?.displayName ? 'Complete' : 'Missing'}
+          description={draft?.displayName || 'Add your business name'}
+          onEdit={() => goTo('Basics')}
+        />
+
+        <SummaryCard
+          title='Primary location'
+          status={primary ? 'Complete' : 'Missing'}
+          description={
+            primary
+              ? `${primary.address || ''} · ${primary.city || ''}`
+              : 'Add your address'
+          }
+          onEdit={() => goTo('Location')}
+        />
+
+        {error && (
+          <View
+            style={{
+              backgroundColor: '#FEE',
+              borderRadius: 8,
+              padding: 12,
+              marginBottom: 16,
+              borderLeftWidth: 4,
+              borderLeftColor: '#E53E3E',
+            }}
           >
-            Set active
-          </Text>
-        </TouchableOpacity>
+            <Text style={{ color: '#C53030' }}>{error}</Text>
+          </View>
+        )}
+
+        {isActive ? (
+          <View
+            style={{
+              backgroundColor: '#E8F5E9',
+              padding: 16,
+              borderRadius: 12,
+              marginBottom: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+            }}
+          >
+            <Ionicons
+              name='rocket'
+              size={28}
+              color='#27AE60'
+              style={{ marginRight: 12 }}
+            />
+            <Text style={{ color: '#1A1A1A', flex: 1 }}>
+              Your business is live! You can manage events and settings anytime.
+            </Text>
+          </View>
+        ) : (
+          <InfoPill
+            icon='shield-checkmark-outline'
+            text='Submissions may take up to 1 business day to approve.'
+          />
+        )}
+
         <TouchableOpacity
-          disabled={loading}
-          onPress={async () => {
-            await submit(true);
-            goToBizProfile();
-          }}
+          onPress={
+            isActive
+              ? () => navigation.getParent()?.navigate('BusinessTabs')
+              : handleSubmit
+          }
           style={{
-            backgroundColor: '#F2994A',
-            padding: 12,
-            borderRadius: 8,
+            backgroundColor: '#2F80ED',
+            paddingVertical: 16,
+            borderRadius: 12,
+            alignItems: 'center',
             marginTop: 12,
           }}
         >
-          <Text
-            style={{ color: '#fff', fontWeight: '600', textAlign: 'center' }}
-          >
-            Submit for review
-          </Text>
+          {loading ? (
+            <ActivityIndicator color='#FFF' />
+          ) : (
+            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 16 }}>
+              {isActive ? 'Go to business home' : 'Submit for review'}
+            </Text>
+          )}
         </TouchableOpacity>
-        {error ? (
-          <Text style={{ color: 'red', marginTop: 8 }}>{error}</Text>
-        ) : null}
-      </View>
+
+        {!isActive && (
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={{ alignItems: 'center', marginTop: 16 }}
+          >
+            <Text style={{ color: '#666', fontSize: 15 }}>Back</Text>
+          </TouchableOpacity>
+        )}
+      </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function InputBlock({ label, required, ...props }) {
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <Text
+        style={{
+          fontSize: 14,
+          fontWeight: '600',
+          color: '#1A1A1A',
+          marginBottom: 6,
+        }}
+      >
+        {label}
+        {required ? ' *' : ''}
+      </Text>
+      <TextInput
+        {...props}
+        style={{
+          borderWidth: 1,
+          borderColor: '#E0E0E0',
+          borderRadius: 10,
+          padding: 14,
+          fontSize: 15,
+          backgroundColor: '#FFF',
+        }}
+      />
+    </View>
+  );
+}
+
+function TextBlock({ label, ...props }) {
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <Text
+        style={{
+          fontSize: 14,
+          fontWeight: '600',
+          color: '#1A1A1A',
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </Text>
+      <TextInput
+        {...props}
+        multiline
+        numberOfLines={4}
+        style={{
+          borderWidth: 1,
+          borderColor: '#E0E0E0',
+          borderRadius: 10,
+          padding: 14,
+          fontSize: 15,
+          backgroundColor: '#FFF',
+          textAlignVertical: 'top',
+          minHeight: 120,
+        }}
+      />
+    </View>
+  );
+}
+
+function InputInline({ label, style, ...props }) {
+  return (
+    <View style={[{ flex: 1, marginRight: 12 }, style]}>
+      <Text
+        style={{
+          fontSize: 14,
+          fontWeight: '600',
+          color: '#1A1A1A',
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </Text>
+      <TextInput
+        {...props}
+        style={{
+          borderWidth: 1,
+          borderColor: '#E0E0E0',
+          borderRadius: 10,
+          padding: 14,
+          fontSize: 15,
+          backgroundColor: '#FFF',
+        }}
+      />
+    </View>
+  );
+}
+
+function SummaryCard({ title, description, status, onEdit }) {
+  return (
+    <View
+      style={{
+        backgroundColor: '#FFF',
+        borderRadius: 14,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+      }}
+    >
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
+        <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A1A' }}>
+          {title}
+        </Text>
+        <View
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            borderRadius: 999,
+            backgroundColor: status === 'Complete' ? '#E8F5E9' : '#FFF8EB',
+          }}
+        >
+          <Text
+            style={{
+              color: status === 'Complete' ? '#27AE60' : '#F2994A',
+              fontSize: 12,
+              fontWeight: '600',
+            }}
+          >
+            {status}
+          </Text>
+        </View>
+      </View>
+      <Text style={{ color: '#4A5568', marginBottom: 12 }}>{description}</Text>
+      <TouchableOpacity
+        onPress={onEdit}
+        style={{
+          alignSelf: 'flex-start',
+          paddingVertical: 6,
+          paddingHorizontal: 12,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: '#2F80ED',
+        }}
+      >
+        <Text style={{ color: '#2F80ED', fontWeight: '600' }}>Edit</Text>
+      </TouchableOpacity>
+    </View>
   );
 }

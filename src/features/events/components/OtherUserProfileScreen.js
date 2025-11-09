@@ -62,6 +62,7 @@ import {
   blockUser as blockUserService,
   unblockUser as unblockUserService,
 } from '../../profile/services/blockService';
+import logger from '../../../utils/logger';
 
 export default function OtherUserProfileScreen({ route, navigation }) {
   const { userId } = route.params;
@@ -292,7 +293,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
           ? postsResult
           : [];
       } catch (err) {
-        console.warn('Failed to load interest posts for other user', err);
+        logger.warn('Failed to load interest posts for other user', err);
       }
 
       setUserEvents({ created, attending, attended });
@@ -327,7 +328,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
           });
         } catch (e) {
           // Fallback retained: if snippet ensure fails, do nothing; downstream will handle
-          console.warn('Host snippet fetch failed', e?.message || e);
+          logger.warn('Host snippet fetch failed', e?.message || e);
         }
       }
       setHostMap(hostMapTemp);
@@ -367,7 +368,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         );
         setSharedEvents(shared);
       } catch (error) {
-        console.error('Error checking shared events:', error);
+        logger.error('Error checking shared events:', error);
         setSharedEvents(false);
       }
     };
@@ -427,7 +428,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         setUser(refreshed);
       }
     } catch (err) {
-      console.warn('Failed to refresh profiles after block action:', err);
+      logger.warn('Failed to refresh profiles after block action:', err);
     }
   }, [currentUser?.uid, userId, fetchCurrentUser]);
 
@@ -452,7 +453,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
                 'You will no longer see their activity.'
               );
             } catch (err) {
-              console.error('Block failed:', err);
+              logger.error('Block failed:', err);
               Alert.alert('Error', 'Unable to block this user.');
             } finally {
               setBlockBusy(false);
@@ -482,7 +483,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
                 'You can interact with them again.'
               );
             } catch (err) {
-              console.error('Unblock failed:', err);
+              logger.error('Unblock failed:', err);
               Alert.alert('Error', 'Unable to unblock this user.');
             } finally {
               setBlockBusy(false);
@@ -528,12 +529,60 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const rating = user.rating || 0;
   const ratingCount = user.ratingCount || 0;
   const verified = user.verified || false;
-  const userSince =
-    user.createdAt && typeof user.createdAt.toDate === 'function'
-      ? user.createdAt
+
+  // Description: Calculate userSince with multiple fallbacks for different timestamp formats
+  let userSince = '';
+  if (user.createdAt) {
+    try {
+      // Try Firestore Timestamp with toDate()
+      if (typeof user.createdAt.toDate === 'function') {
+        userSince = user.createdAt
           .toDate()
-          .toLocaleString('default', { month: 'short', year: 'numeric' })
-      : '';
+          .toLocaleString('default', { month: 'short', year: 'numeric' });
+      }
+      // Try Date object
+      else if (user.createdAt instanceof Date) {
+        userSince = user.createdAt.toLocaleString('default', {
+          month: 'short',
+          year: 'numeric',
+        });
+      }
+      // Try ISO string
+      else if (typeof user.createdAt === 'string') {
+        userSince = new Date(user.createdAt).toLocaleString('default', {
+          month: 'short',
+          year: 'numeric',
+        });
+      }
+      // Try _seconds field (Firestore serialized timestamp)
+      else if (user.createdAt._seconds) {
+        userSince = new Date(user.createdAt._seconds * 1000).toLocaleString(
+          'default',
+          { month: 'short', year: 'numeric' }
+        );
+      }
+      // Fallback to current date for placeholder timestamps
+      else {
+        userSince = new Date().toLocaleString('default', {
+          month: 'short',
+          year: 'numeric',
+        });
+      }
+    } catch (error) {
+      logger.warn('Error formatting userSince:', error);
+      userSince = new Date().toLocaleString('default', {
+        month: 'short',
+        year: 'numeric',
+      });
+    }
+  } else {
+    // No createdAt at all, use current date
+    userSince = new Date().toLocaleString('default', {
+      month: 'short',
+      year: 'numeric',
+    });
+  }
+
   const followerCount =
     typeof user.followerCount === 'number'
       ? user.followerCount
@@ -579,7 +628,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         return { user: { ...state.user, following: next } };
       });
     } catch (err) {
-      console.error('Follow failed:', err);
+      logger.error('Follow failed:', err);
       Alert.alert('Error', 'Failed to follow user.');
       return;
     } finally {
@@ -599,7 +648,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       linkId: currentUser.uid,
       read: false,
     }).catch((e) => {
-      console.warn('Notification send failed (non-blocking):', e?.message || e);
+      logger.warn('Notification send failed (non-blocking):', e?.message || e);
     });
   };
 
@@ -624,7 +673,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         return { user: { ...state.user, following: next } };
       });
     } catch (err) {
-      console.error('Unfollow failed:', err);
+      logger.error('Unfollow failed:', err);
       Alert.alert('Error', 'Failed to unfollow user.');
     } finally {
       setRequestingFollow(false);
@@ -673,7 +722,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       await deleteEvent(eventId, user.uid);
       Alert.alert('Success', 'The event has been deleted.');
     } catch (error) {
-      console.error('Error deleting event:', error);
+      logger.error('Error deleting event:', error);
       Alert.alert('Error', 'Failed to delete the event. Please try again.');
     } finally {
       setMenuVisible(false);
@@ -693,7 +742,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       setRatingModalVisible(false);
       Alert.alert('Success', 'Rating updated successfully!');
     } catch (err) {
-      console.error('Error rating user:', err);
+      logger.error('Error rating user:', err);
       const msg = err?.message || 'Failed to rate user.';
       Alert.alert('Error', msg);
     }
@@ -746,19 +795,19 @@ export default function OtherUserProfileScreen({ route, navigation }) {
             </Text>
             <Text style={styles.statLabel}>Events</Text>
           </View>
-          {rating > 0 && (
-            <View style={styles.statCard}>
-              <View
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-              >
-                <MaterialIcons name='star' size={20} color='#FFD700' />
-                <Text style={styles.statValue}>{rating.toFixed(1)}</Text>
-              </View>
-              <Text style={styles.statLabel}>
-                {`${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
-              </Text>
+          <View style={styles.statCard}>
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            >
+              <MaterialIcons name='star' size={20} color='#FFD700' />
+              <Text style={styles.statValue}>{rating.toFixed(1)}</Text>
             </View>
-          )}
+            <Text style={styles.statLabel}>
+              {ratingCount === 0
+                ? 'No ratings'
+                : `${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
+            </Text>
+          </View>
         </View>
 
         {/* Follow/Unfollow and Rate User Buttons */}

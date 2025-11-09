@@ -39,6 +39,7 @@ import {
 import { useUserStore } from '../../profile/stores/userStore';
 import { useMyEvents } from '../hooks/useMyEvents';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import {
   collection,
   getDocs,
@@ -327,12 +328,12 @@ export default function ProfileScreen({ navigation }) {
   // --- State ---
   const [showFullBio, setShowFullBio] = useState(false);
   const MAX_BIO_LENGTH = 100;
-  const [bio, setBio] = useState('');
-  const [profileImage, setProfileImage] = useState(null);
+  const [bio, setBio] = useState(user?.bio || '');
+  const [profileImage, setProfileImage] = useState(user?.profileImage || null);
   const [isEditing, setIsEditing] = useState(false);
-  const [ratingCount, setRatingCount] = useState(0);
-  const [rating, setRating] = useState(0);
-  const [verified, setVerified] = useState(false);
+  const [ratingCount, setRatingCount] = useState(user?.ratingCount || 0);
+  const [rating, setRating] = useState(user?.rating || 0);
+  const [verified, setVerified] = useState(user?.verified || false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [userEvents, setUserEvents] = useState({
@@ -468,12 +469,73 @@ export default function ProfileScreen({ navigation }) {
     user.profileImage ||
     user.avatarURL ||
     'https://example.com/default-avatar.png';
-  const userSince =
-    user.createdAt && typeof user.createdAt.toDate === 'function'
-      ? user.createdAt
-          .toDate()
-          .toLocaleString('default', { month: 'short', year: 'numeric' })
-      : '';
+
+  // Description: Parse user join date with fallback handling
+  const userSince = useMemo(() => {
+    if (!user?.createdAt) {
+      console.log(
+        '[ProfileScreen] No createdAt found on user object:',
+        user?.uid
+      );
+      // Fallback to current month/year for newly created users
+      const now = new Date();
+      return now.toLocaleString('default', { month: 'short', year: 'numeric' });
+    }
+
+    console.log(
+      '[ProfileScreen] createdAt value:',
+      user.createdAt,
+      'type:',
+      typeof user.createdAt
+    );
+
+    try {
+      let date;
+      // Handle Firestore Timestamp
+      if (typeof user.createdAt.toDate === 'function') {
+        date = user.createdAt.toDate();
+      }
+      // Handle Firestore Timestamp object with seconds
+      else if (user.createdAt.seconds) {
+        date = new Date(user.createdAt.seconds * 1000);
+      }
+      // Handle serialized timestamp with _seconds
+      else if (user.createdAt._seconds) {
+        date = new Date(user.createdAt._seconds * 1000);
+      }
+      // Handle plain Date object
+      else if (user.createdAt instanceof Date) {
+        date = user.createdAt;
+      }
+      // Handle ISO string
+      else if (typeof user.createdAt === 'string') {
+        date = new Date(user.createdAt);
+      }
+      // Handle timestamp-like object with _type marker - use current date as fallback
+      else if (user.createdAt._type === 'timestamp') {
+        console.log(
+          '[ProfileScreen] createdAt is placeholder timestamp, using current date'
+        );
+        date = new Date();
+      }
+
+      if (date && !isNaN(date.getTime())) {
+        const formatted = date.toLocaleString('default', {
+          month: 'short',
+          year: 'numeric',
+        });
+        console.log('[ProfileScreen] Formatted userSince:', formatted);
+        return formatted;
+      }
+    } catch (e) {
+      console.warn('[ProfileScreen] Error parsing createdAt:', e);
+    }
+
+    // Final fallback
+    const now = new Date();
+    return now.toLocaleString('default', { month: 'short', year: 'numeric' });
+  }, [user?.createdAt, user?.uid]);
+
   const followerCount =
     typeof user.followerCount === 'number'
       ? user.followerCount
@@ -577,17 +639,46 @@ export default function ProfileScreen({ navigation }) {
     }
   }, [user?.uid]);
 
+  // Description: Sync local state with user prop changes from store
+  useEffect(() => {
+    if (user) {
+      setBio(user.bio || '');
+      setProfileImage(user.profileImage || null);
+      setRating(user.rating || 0);
+      setRatingCount(user.ratingCount || 0);
+      setVerified(user.verified || false);
+    }
+  }, [
+    user?.uid,
+    user?.bio,
+    user?.profileImage,
+    user?.rating,
+    user?.ratingCount,
+    user?.verified,
+  ]);
+
   useEffect(() => {
     let isMounted = true;
     const fetchUserData = async () => {
       if (!user?.uid) return;
       const data = await getUserData(user.uid);
       if (!isMounted) return;
+
+      console.log(
+        '[ProfileScreen] Fetched user data createdAt:',
+        data.createdAt
+      );
+
       setBio(data.bio || '');
       setProfileImage(data.profileImage || null);
       setRating(data.rating || 0);
       setRatingCount(data.ratingCount || 0);
       setVerified(data.verified || false);
+
+      // Update the store with fresh data including proper timestamps
+      if (data.createdAt) {
+        setUser({ ...user, ...data });
+      }
     };
     fetchUserData();
     return () => {
@@ -895,6 +986,8 @@ export default function ProfileScreen({ navigation }) {
     }
 
     try {
+      console.log('[ProfileScreen] Starting image upload for user:', user.uid);
+
       const permissionResult =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permissionResult.granted) {
@@ -913,6 +1006,7 @@ export default function ProfileScreen({ navigation }) {
       });
 
       if (pickerResult.canceled) {
+        console.log('[ProfileScreen] Image picker canceled');
         return;
       }
 
@@ -922,27 +1016,112 @@ export default function ProfileScreen({ navigation }) {
         return;
       }
 
-      const response = await fetch(imageAsset.uri);
-      const blob = await response.blob();
+      console.log('[ProfileScreen] Image selected, URI:', imageAsset.uri);
 
-      if (blob?.size && blob.size > MAX_PROFILE_IMAGE_BYTES) {
-        Alert.alert(
-          'Image too large',
-          'Profile photos must be smaller than 5MB.'
+      // Compress the image to ensure it's under 5MB and optimized
+      console.log('[ProfileScreen] Compressing image...');
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        imageAsset.uri,
+        [{ resize: { width: 1024 } }], // Resize to max 1024px wide (maintains aspect ratio)
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      console.log(
+        '[ProfileScreen] Compressed image URI:',
+        manipulatedImage.uri
+      );
+
+      // Check compressed file size
+      try {
+        const fileInfo = await fetch(manipulatedImage.uri);
+        const blob = await fileInfo.blob();
+        console.log(
+          '[ProfileScreen] Compressed image size:',
+          blob.size,
+          'bytes'
         );
-        return;
+
+        // If still too large after compression, reduce quality further
+        if (blob?.size && blob.size > MAX_PROFILE_IMAGE_BYTES) {
+          console.log(
+            '[ProfileScreen] Still too large, compressing further...'
+          );
+          const furtherCompressed = await ImageManipulator.manipulateAsync(
+            imageAsset.uri,
+            [{ resize: { width: 800 } }],
+            { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
+          );
+
+          const recheck = await fetch(furtherCompressed.uri);
+          const recheckBlob = await recheck.blob();
+          console.log(
+            '[ProfileScreen] Further compressed size:',
+            recheckBlob.size,
+            'bytes'
+          );
+
+          if (recheckBlob?.size && recheckBlob.size > MAX_PROFILE_IMAGE_BYTES) {
+            Alert.alert(
+              'Image too large',
+              'Unable to compress the image below 5MB. Please select a different photo.'
+            );
+            return;
+          }
+
+          // Use the further compressed version
+          console.log('[ProfileScreen] Uploading to Firebase Storage...');
+          const newImage = await uploadProfileImage(
+            user.uid,
+            furtherCompressed.uri
+          );
+          console.log('[ProfileScreen] Upload successful, URL:', newImage);
+
+          console.log('[ProfileScreen] Updating Firestore user document...');
+          await updateUserData(user.uid, { profileImage: newImage });
+
+          console.log('[ProfileScreen] Updating local state...');
+          setProfileImage(newImage);
+          setUser({ ...user, profileImage: newImage });
+
+          console.log('[ProfileScreen] Profile image update complete!');
+          Alert.alert('Profile updated', 'Your profile photo was changed.');
+          return;
+        }
+      } catch (sizeCheckError) {
+        console.warn(
+          '[ProfileScreen] Could not check file size:',
+          sizeCheckError
+        );
+        // Continue with upload anyway
       }
 
-      const newImage = await uploadProfileImage(user.uid, blob);
+      console.log('[ProfileScreen] Uploading to Firebase Storage...');
+      // Pass the compressed URI
+      const newImage = await uploadProfileImage(user.uid, manipulatedImage.uri);
+      console.log('[ProfileScreen] Upload successful, URL:', newImage);
+
+      console.log('[ProfileScreen] Updating Firestore user document...');
       await updateUserData(user.uid, { profileImage: newImage });
+
+      console.log('[ProfileScreen] Updating local state...');
       setProfileImage(newImage);
       setUser({ ...user, profileImage: newImage });
+
+      // Clear snippet cache so event cards show the new profile image immediately
+      const clearUserFromCache = useUserSnippetStore.getState().clearUser;
+      if (clearUserFromCache) {
+        clearUserFromCache(user.uid);
+        console.log(
+          '[ProfileScreen] Cleared user snippet cache for updated profile image'
+        );
+      }
+
+      console.log('[ProfileScreen] Profile image update complete!');
       Alert.alert('Profile updated', 'Your profile photo was changed.');
     } catch (err) {
-      console.warn(
-        'Profile image upload failed:',
-        err?.code || err?.message || err
-      );
+      console.error('[ProfileScreen] Profile image upload failed:', err);
+      console.error('[ProfileScreen] Error code:', err?.code);
+      console.error('[ProfileScreen] Error message:', err?.message);
       Alert.alert(
         'Upload failed',
         'Failed to update profile image. Please try again.'
@@ -1414,7 +1593,7 @@ export default function ProfileScreen({ navigation }) {
             </View>
           </View>
           <View style={styles.avatarWrapper}>
-            <TouchableOpacity onPress={isEditing ? handleImageUpload : null}>
+            <TouchableOpacity onPress={handleImageUpload}>
               <Image
                 source={{ uri: profileImage || avatarURL }}
                 style={styles.profileImage}
@@ -1456,19 +1635,21 @@ export default function ProfileScreen({ navigation }) {
             <Text style={styles.statValue}>{eventCount}</Text>
             <Text style={styles.statLabel}>Events</Text>
           </TouchableOpacity>
-          {rating > 0 && (
-            <View style={styles.statCard}>
-              <View
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-              >
-                <MaterialIcons name='star' size={20} color='#FFD700' />
-                <Text style={styles.statValue}>{rating.toFixed(1)}</Text>
-              </View>
-              <Text style={styles.statLabel}>
-                {`${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`}
+          <View style={styles.statCard}>
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            >
+              <MaterialIcons name='star' size={20} color='#FFD700' />
+              <Text style={styles.statValue}>
+                {rating > 0 ? rating.toFixed(1) : '0'}
               </Text>
             </View>
-          )}
+            <Text style={styles.statLabel}>
+              {ratingCount > 0
+                ? `${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`
+                : 'No ratings'}
+            </Text>
+          </View>
         </View>
         {/* Bio */}
         <View style={styles.bioSection}>

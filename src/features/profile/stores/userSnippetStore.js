@@ -14,6 +14,19 @@ function toSnippet(uid, user) {
     `${first} ${last}`.trim() || user?.displayName || user?.username || 'User';
   const photoURL =
     user?.profileImage || user?.avatarURL || user?.photoURL || null;
+
+  // Debug logging for missing photos
+  if (!photoURL && uid) {
+    console.log(`[UserSnippet] No photo for ${uid}:`, {
+      hasProfileImage: !!user?.profileImage,
+      hasAvatarURL: !!user?.avatarURL,
+      hasPhotoURL: !!user?.photoURL,
+      profileImage: user?.profileImage?.substring?.(0, 50),
+      avatarURL: user?.avatarURL?.substring?.(0, 50),
+      photoURL: user?.photoURL?.substring?.(0, 50),
+    });
+  }
+
   const verified = !!user?.verified;
   const rating =
     typeof user?.rating === 'number'
@@ -68,6 +81,10 @@ export const useUserSnippetStore = create(
         const cached = get().getMany(ids);
         const missing = ids.filter((u) => !cached.has(u));
 
+        console.log(
+          `[UserSnippet] ensureSnippets: ${ids.length} requested, ${cached.size} cached, ${missing.length} missing`
+        );
+
         const fetched = [];
         // Batch in chunks of 10 for Firestore 'in' queries
         for (let i = 0; i < missing.length; i += 10) {
@@ -119,6 +136,21 @@ export const useUserSnippetStore = create(
         const finalMap = new Map(cached);
         for (const s of fetched) finalMap.set(s.uid, s);
         return finalMap;
+      },
+
+      // Clear entire cache (for debugging or when user data updates)
+      clearCache: () => {
+        console.log('[UserSnippet] Clearing entire cache');
+        set({ cache: {} });
+      },
+
+      // Clear specific user from cache (useful when profile image updates)
+      clearUser: (uid) => {
+        if (!uid) return;
+        const next = { ...get().cache };
+        delete next[uid];
+        set({ cache: next });
+        console.log(`[UserSnippet] Cleared cache for user ${uid}`);
       },
     }),
     {

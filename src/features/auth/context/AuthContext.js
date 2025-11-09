@@ -5,6 +5,7 @@ import {
   init as analyticsInit,
   setOptIn as analyticsSetOptIn,
 } from '../../../services/analytics';
+import { useSessionRole } from '../../profile';
 
 const AuthContext = createContext({ user: null, loading: true });
 if (!global.unsubscribeAllListeners) {
@@ -13,6 +14,7 @@ if (!global.unsubscribeAllListeners) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const sessionRoleStore = useSessionRole;
 
   useEffect(() => {
     let unsubscribeDoc = null; // Track the Firestore listener
@@ -33,6 +35,10 @@ export function AuthProvider({ children }) {
         } catch {}
         setUser(null);
         setLoading(false);
+        // Reset business session role when user logs out
+        try {
+          sessionRoleStore.getState().reset();
+        } catch {}
         return;
       }
 

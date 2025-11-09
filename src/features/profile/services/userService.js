@@ -3,13 +3,14 @@ import { db, serverTimestamp } from '../../../firebase/config';
 import { geohashForLocation } from 'geofire-common';
 import { track as trackClient } from '../../../lib/analytics';
 import { DEFAULT_BADGE } from '../utils/badgeConfig';
+import logger from '../../../utils/logger';
 
 /**
  * Checks if a user with the given email exists and is soft-deleted.
  * If found, returns the user document reference and data.
  */
 export async function findSoftDeletedUserByEmail(email) {
-  console.log('[userService] Checking for soft-deleted user by email:', email);
+  logger.debug('[userService] Checking for soft-deleted user by email:', email);
   trackClient('user_soft_deleted_check', {});
   const q = db
     .collection('users')
@@ -18,11 +19,11 @@ export async function findSoftDeletedUserByEmail(email) {
   const snap = await q.get();
   if (!snap.empty) {
     const docSnap = snap.docs[0];
-    console.log('[userService] Soft-deleted user found:', docSnap.id);
+    logger.debug('[userService] Soft-deleted user found:', docSnap.id);
     trackClient('user_soft_deleted_found', {});
     return { ref: docSnap.ref, data: docSnap.data(), id: docSnap.id };
   }
-  console.log('[userService] No soft-deleted user found for:', email);
+  logger.debug('[userService] No soft-deleted user found for:', email);
   trackClient('user_soft_deleted_not_found', {});
   return null;
 }
@@ -35,7 +36,7 @@ import { functions as firebaseFunctions } from '../../../firebase/config';
 
 export async function reactivateUser(userId, updates = {}) {
   const userRef = db.collection('users').doc(userId);
-  console.log('[userService] Reactivating user:', userId, updates);
+  logger.debug('[userService] Reactivating user:', userId, updates);
   trackClient('user_reactivate_attempt', {});
   await userRef.update({
     isDeleted: false,
@@ -46,14 +47,14 @@ export async function reactivateUser(userId, updates = {}) {
   try {
     const enableUser = firebaseFunctions.httpsCallable('enableAuthUser');
     await enableUser({ uid: userId });
-    console.log(
+    logger.debug(
       '[userService] Called enableAuthUser cloud function for:',
       userId
     );
     trackClient('user_reactivate_callable_ok', {});
   } catch (e) {
     // If the function doesn't exist or fails, ignore (user will be enabled by Firestore trigger if possible)
-    console.warn('Could not re-enable Auth user:', e.message);
+    logger.warn('Could not re-enable Auth user:', e.message);
   }
 }
 
@@ -73,10 +74,10 @@ export async function getUserById(userId) {
         rating: userData.rating || 0, // Ensure rating is included, default to 0
       };
     } else {
-      console.warn(`User with ID ${userId} not found.`);
+      logger.warn(`User with ID ${userId} not found.`);
     }
   } catch (error) {
-    console.error('Error fetching user data:', error);
+    logger.error('Error fetching user data:', error);
   }
   return null;
 }
@@ -213,6 +214,8 @@ export async function createUser(uid, userData = {}) {
     followerCount: 0,
     followingCount: 0,
     ratings: {},
+    rating: 0, // Initialize average rating to 0
+    ratingCount: 0, // Initialize rating count to 0
     savedCount: 0,
     referralCode: '',
     referredBy: '',
@@ -280,12 +283,12 @@ export async function createUser(uid, userData = {}) {
     analyticsConsentVersion: payload?.analyticsConsentVersion ?? null,
   });
 
-  console.log('[userService] Creating user in Firestore:', uid, sanitizedInput);
+  logger.debug('[userService] Creating user in Firestore:', uid, sanitizedInput);
   try {
     await db.collection('users').doc(uid).set(payload, { merge: true });
   } catch (err) {
     if (err?.code === 'permission-denied') {
-      console.warn(
+      logger.warn(
         '[userService] Primary createUser denied, attempting minimal fallback',
         err?.message || err
       );
@@ -297,7 +300,7 @@ export async function createUser(uid, userData = {}) {
       throw err;
     }
   }
-  console.log('[userService] User created in Firestore:', uid);
+  logger.debug('[userService] User created in Firestore:', uid);
 }
 
 export async function mergeUserFields(uid, data = {}) {
