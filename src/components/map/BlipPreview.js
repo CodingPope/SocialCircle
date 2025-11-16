@@ -318,6 +318,18 @@ export default function BlipPreview({
 
   return (
     <Animated.View style={[style, styles.wrapper, animatedStyle]}>
+      {/* Teardrop pointer under the card to anchor to the blip */}
+      <View
+        style={[
+          styles.pointerContainer,
+          pointerX != null ? { left: pointerX - 6 } : null,
+        ]}
+        pointerEvents='none'
+      >
+        <View style={styles.pointerShadow} />
+        <Animated.View style={styles.pointer} />
+      </View>
+
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={() => onPress?.(event)}
@@ -479,18 +491,6 @@ export default function BlipPreview({
           </View>
         </View>
       </TouchableOpacity>
-
-      {/* Teardrop pointer under the card to anchor to the blip */}
-      <View
-        style={[
-          styles.pointerContainer,
-          pointerX != null ? { left: pointerX - 6 } : null,
-        ]}
-        pointerEvents='none'
-      >
-        <View style={styles.pointerShadow} />
-        <Animated.View style={styles.pointer} />
-      </View>
     </Animated.View>
   );
 }
@@ -513,6 +513,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
+    zIndex: 1,
   },
   thumbWrapper: {
     width: 84,
@@ -645,6 +646,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-start',
     // no default translateX; computed from pointerX
+    zIndex: 0,
   },
   pointerShadow: {
     position: 'absolute',

@@ -81,6 +81,78 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
+  const googlePlacesStyles = useMemo(() => {
+    const baseInput = StyleSheet.flatten(styles.input);
+    return {
+      container: { flex: 1 },
+      textInput: {
+        ...baseInput,
+        color: theme.colors.text,
+        backgroundColor: theme.colors.card,
+        flex: 1,
+      },
+      textInputContainer: {
+        backgroundColor: 'transparent',
+        borderTopWidth: 0,
+        borderBottomWidth: 0,
+        paddingHorizontal: 0,
+        paddingVertical: 0,
+      },
+      listView: {
+        backgroundColor: theme.colors.card,
+        elevation: 5,
+        position: 'absolute',
+        top: 55,
+        maxHeight: 200,
+        borderColor: theme.colors.border,
+        borderWidth: StyleSheet.hairlineWidth,
+      },
+      row: {
+        backgroundColor: theme.colors.card,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        borderBottomColor: theme.colors.border,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+      },
+      separator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: theme.colors.border,
+      },
+      description: {
+        color: theme.colors.text,
+      },
+      predefinedPlacesDescription: {
+        color: theme.colors.textSecondary,
+      },
+      loader: {
+        color: theme.colors.primary,
+      },
+      poweredContainer: {
+        display: 'none',
+      },
+    };
+  }, [styles.input, theme]);
+  const datePickerTheme = useMemo(
+    () => ({
+      modalStyle: {
+        backgroundColor: theme.isDark
+          ? theme.colors.surfaceOverlay
+          : theme.colors.card,
+        borderRadius: 16,
+      },
+      pickerContainerStyle: {
+        backgroundColor: theme.colors.card,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+      },
+      pickerStyle: {
+        backgroundColor: theme.colors.card,
+      },
+      buttonColor: theme.colors.primary,
+    }),
+    [theme]
+  );
 
   // Debug: print Firebase runtime info to help diagnose permission errors
   useEffect(() => {
@@ -554,7 +626,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             <Image source={{ uri: imageUri }} style={styles.preview} />
           ) : (
             <View style={styles.previewPlaceholder}>
-              <Text>No Image</Text>
+              <Text style={styles.emptyStateText}>No Image</Text>
             </View>
           )}
           <TouchableOpacity
@@ -574,6 +646,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             onChangeText={setTitle}
             placeholder='Event title'
             placeholderTextColor={theme.colors.textSecondary}
+            keyboardAppearance={keyboardAppearance}
+            selectionColor={theme.colors.primary}
           />
 
           {/* Description */}
@@ -583,14 +657,16 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             value={description}
             onChangeText={setDescription}
             placeholder='What’s your event about?'
-            placeholderTextColor='grey' // Updated to a darker color
+            placeholderTextColor={theme.colors.textSecondary}
             multiline
+            keyboardAppearance={keyboardAppearance}
+            selectionColor={theme.colors.primary}
           />
 
           {/* Date & Time */}
           <Text style={styles.label}>Date & Time</Text>
           <TouchableOpacity style={styles.input} onPress={showDatePicker}>
-            <Text>
+            <Text style={styles.dateText}>
               {date.toLocaleString('en-US', {
                 dateStyle: 'medium',
                 timeStyle: 'short',
@@ -606,8 +682,13 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             minimumDate={new Date(Date.now() + MIN_MILLIS)}
             maximumDate={new Date(Date.now() + MAX_MILLIS)}
             minuteInterval={MINUTE_INCREMENT}
-            themeVariant='light' // Explicitly set theme to light
-            textColor='#000' // Ensure text is visible
+            themeVariant={theme.isDark ? 'dark' : 'light'}
+            textColor={theme.colors.text}
+            isDarkModeEnabled={theme.isDark}
+            buttonTextColorIOS={datePickerTheme.buttonColor}
+            pickerContainerStyleIOS={datePickerTheme.pickerContainerStyle}
+            pickerStyleIOS={datePickerTheme.pickerStyle}
+            modalStyleIOS={datePickerTheme.modalStyle}
           />
 
           {/* Address Input */}
@@ -622,20 +703,13 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
               enablePoweredByContainer={false}
               keyboardShouldPersistTaps='handled'
               predefinedPlaces={[]} // Prevents `.filter()` crash
-              styles={{
-                textInput: [styles.input, styles.flex],
-                container: { flex: 1 },
-                listView: {
-                  backgroundColor: '#fff',
-                  elevation: 5,
-                  position: 'absolute',
-                  top: 55,
-                  maxHeight: 200,
-                },
-              }}
+              styles={googlePlacesStyles}
               textInputProps={{
                 value: placeInput,
                 onChangeText: setPlaceInput,
+                placeholderTextColor: theme.colors.textSecondary,
+                keyboardAppearance,
+                selectionColor: theme.colors.primary,
               }}
               onPress={(data, details = null) => {
                 if (details?.geometry?.location) {
@@ -651,16 +725,16 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
               }}
             />
           </View>
-          {manualLocation && (
-            <View style={styles.row}>
-              <Ionicons
-                name='location-outline'
-                size={20}
-                color='#666'
-                style={{ marginRight: 8 }}
-              />
-              <Text style={styles.pinLocationText}>
-                Pin Location: {manualAddress || 'Unknown'}
+            {manualLocation && (
+              <View style={styles.row}>
+                <Ionicons
+                  name='location-outline'
+                  size={20}
+                  color={theme.colors.textSecondary}
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.pinLocationText}>
+                  Pin Location: {manualAddress || 'Unknown'}
               </Text>
             </View>
           )}
@@ -688,6 +762,24 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
               step={1}
               allowOverlap={false}
               snapped
+              selectedStyle={{ backgroundColor: theme.colors.primary }}
+              unselectedStyle={{ backgroundColor: theme.colors.border }}
+              markerStyle={{
+                height: 24,
+                width: 24,
+                borderRadius: 12,
+                backgroundColor: theme.colors.card,
+                borderWidth: 2,
+                borderColor: theme.colors.primary,
+              }}
+              pressedMarkerStyle={{
+                height: 24,
+                width: 24,
+                borderRadius: 12,
+                backgroundColor: theme.colors.primary,
+                borderColor: theme.colors.primary,
+              }}
+              trackStyle={{ height: 4 }}
             />
           </View>
 
@@ -701,10 +793,12 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
               }
               style={styles.segment}
-              backgroundColor='#f0f0f0'
-              tintColor='#007AFF'
-              fontStyle={{ color: '#333' }}
-              activeFontStyle={{ color: '#fff' }}
+              backgroundColor={
+                theme.isDark ? theme.colors.backgroundSecondary : '#f0f0f0'
+              }
+              tintColor={theme.colors.primary}
+              fontStyle={{ color: theme.colors.text }}
+              activeFontStyle={{ color: '#fff', fontWeight: '600' }}
             />
           ) : (
             <View style={styles.androidPrivacyWrapper}>
@@ -739,6 +833,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             placeholder='Leave empty for unlimited'
             placeholderTextColor={theme.colors.textSecondary}
             keyboardType='numeric'
+            keyboardAppearance={keyboardAppearance}
+            selectionColor={theme.colors.primary}
           />
 
           {/* Buttons */}
@@ -813,6 +909,9 @@ const createStyles = (theme) =>
       borderRadius: 8,
       marginBottom: 10,
     },
+    emptyStateText: {
+      color: theme.colors.textSecondary,
+    },
     photoBtn: {
       padding: 10,
       backgroundColor: theme.colors.primary,
@@ -834,6 +933,9 @@ const createStyles = (theme) =>
       marginTop: 5,
       color: theme.colors.text,
       backgroundColor: theme.colors.card,
+    },
+    dateText: {
+      color: theme.colors.text,
     },
     textArea: { height: 80, textAlignVertical: 'top' },
     row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
