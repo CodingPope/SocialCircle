@@ -39,6 +39,7 @@ import {
 import { useUserStore } from '../../profile/stores/userStore';
 import { useMyEvents } from '../hooks/useMyEvents';
 import * as ImagePicker from 'expo-image-picker';
+import { createImagePickerOptions } from '../../../utils/imagePicker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
   collection,
@@ -998,12 +999,12 @@ export default function ProfileScreen({ navigation }) {
         return;
       }
 
-      const pickerResult = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 1,
-      });
+      const pickerResult = await ImagePicker.launchImageLibraryAsync(
+        createImagePickerOptions({
+          aspect: [1, 1],
+          quality: 1,
+        })
+      );
 
       if (pickerResult.canceled) {
         console.log('[ProfileScreen] Image picker canceled');

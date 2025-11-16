@@ -45,6 +45,7 @@ import {
   interpretStorageError,
   logStorageDiagnostic,
 } from '../../../firebase/storageUtils';
+import { createImagePickerOptions } from '../../../utils/imagePicker';
 
 // --- Date/Time constraints ---
 const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
@@ -177,16 +178,9 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         );
         return;
       }
-      const mediaTypeImages =
-        ImagePicker?.MediaType?.IMAGES ??
-        ImagePicker?.MediaType?.IMAGE ??
-        ImagePicker?.MediaTypeOptions?.Images;
-
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: mediaTypeImages,
-        allowsEditing: true,
-        quality: 0.8,
-      });
+      const res = await ImagePicker.launchImageLibraryAsync(
+        createImagePickerOptions({ quality: 0.85 })
+      );
       if (!res.canceled && res.assets && res.assets[0]) {
         const uri = res.assets[0].uri;
         // Description: Defer uploading until after the event document exists (so storage rules that require ownerId match succeed).
