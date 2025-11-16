@@ -66,38 +66,7 @@ const extractAppleProfileFields = (appleCredential, firebaseUser) => {
 // Toggle visibility for the business login tab on the auth screen.
 const ENABLE_BUSINESS_ACCOUNT_SWITCH = false;
 
-const HERO_COPY = {
-  login: {
-    eyebrow: 'Back again?',
-    title: 'Pick up where you left off',
-    subtitle:
-      'Dive into new circles, RSVP to fresh experiences, and keep the conversation flowing.',
-  },
-  signup: {
-    eyebrow: 'New to SocialCircle',
-    title: 'Design your social life',
-    subtitle:
-      'Tell us what you are into and we will curate people, places, and plans that match.',
-  },
-  business: {
-    eyebrow: 'Partner access',
-    title: 'Host unforgettable gatherings',
-    subtitle:
-      'Showcase your venue, publish lineups, and keep your community engaged in real time.',
-  },
-};
-
-const HERO_STATS = [
-  { value: '1.2K+', label: 'Weekly hangouts' },
-  { value: '320+', label: 'Communities near you' },
-  { value: '4.8 ★', label: 'Host satisfaction' },
-];
-
-const BUSINESS_STATS = [
-  { value: '$42K', label: 'Avg. host revenue' },
-  { value: '24H', label: 'Approval turnaround' },
-  { value: '98%', label: 'Booking retention' },
-];
+const HERO_TAGLINE = 'Find Your Circle';
 
 const createStyles = (theme) => {
   const { colors, radii, spacing } = theme;
@@ -107,121 +76,57 @@ const createStyles = (theme) => {
     },
     overlay: {
       flex: 1,
-      paddingTop: spacing.xl,
+      paddingTop: spacing.xl * 2.5,
       paddingBottom: spacing.lg,
       paddingHorizontal: spacing.lg,
-      gap: spacing.xl,
-    },
-    heroBlock: {
-      borderRadius: radii.xl,
-      padding: spacing.lg,
-      backgroundColor: 'rgba(8, 3, 18, 0.35)',
-      borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.1)',
-    },
-    logoRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: spacing.md,
       gap: spacing.md,
     },
-    heroLogo: {
-      width: 56,
-      height: 56,
-      borderRadius: radii.xl,
+    hero: {
+      alignItems: 'center',
+      gap: 0,
     },
-    heroBrand: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.neutral50,
+    heroLogo: {
+      width: 205,
+      height: 205,
+      resizeMode: 'contain',
+      marginBottom: -30,
     },
     heroTagline: {
-      color: colors.neutral200,
-      fontSize: 13,
-    },
-    heroBadge: {
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
-      borderRadius: radii.lg,
-      backgroundColor: 'rgba(255,255,255,0.1)',
-      marginBottom: spacing.sm,
-      gap: spacing.xs,
-    },
-    heroBadgeText: {
-      color: colors.neutral100,
-      fontSize: 12,
-      letterSpacing: 1,
-      textTransform: 'uppercase',
-    },
-    heroTitle: {
-      fontSize: 32,
-      fontWeight: '700',
-      color: colors.neutral50,
-      marginBottom: spacing.xs,
-    },
-    heroSubtitle: {
-      color: colors.neutral200,
-      fontSize: 15,
-      lineHeight: 22,
-      marginBottom: spacing.lg,
-    },
-    heroStatsRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      gap: spacing.sm,
-    },
-    statCard: {
-      flex: 1,
-      borderRadius: radii.lg,
-      padding: spacing.sm,
-      backgroundColor: 'rgba(255,255,255,0.08)',
-    },
-    statValue: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.neutral50,
-    },
-    statLabel: {
-      fontSize: 12,
-      color: colors.neutral200,
-      marginTop: spacing.xs / 2,
+      color: 'rgba(255, 255, 255, 1)',
+      fontSize: 17,
+      fontWeight: '600',
+      textAlign: 'center',
+      letterSpacing: 0.4,
     },
     card: {
       backgroundColor: colors.neutral100,
       borderRadius: radii.xl,
-      padding: spacing.lg,
+      padding: spacing.lg * 1.25,
       shadowColor: '#0E1335',
-      shadowOpacity: 0.15,
+      shadowOpacity: 0.18,
       shadowRadius: 20,
       shadowOffset: { width: 0, height: 12 },
-      elevation: 8,
-    },
-    sectionEyebrow: {
-      fontSize: 12,
-      textTransform: 'uppercase',
-      letterSpacing: 1,
-      color: colors.neutral500,
-      marginBottom: spacing.xs,
+      elevation: 10,
     },
     cardTitle: {
-      fontSize: 24,
-      fontWeight: '700',
+      fontSize: 30,
+      fontWeight: '800',
       color: colors.neutral900,
+      marginBottom: spacing.lg,
+      letterSpacing: -0.5,
     },
     cardSubtitle: {
       fontSize: 15,
       color: colors.neutral600,
-      marginBottom: spacing.lg,
+      marginBottom: spacing.xl,
+      lineHeight: 21,
     },
     accountSwitchContainer: {
       flexDirection: 'row',
       backgroundColor: colors.neutral200,
       padding: spacing.xs,
       borderRadius: radii.xl,
-      marginBottom: spacing.md,
+      marginBottom: spacing.lg,
       gap: spacing.xs,
     },
     accountSwitchButton: {
@@ -245,12 +150,6 @@ const createStyles = (theme) => {
     },
     accountSwitchTextActive: {
       color: colors.primary,
-    },
-    accountSwitchHelper: {
-      fontSize: 13,
-      color: colors.neutral500,
-      marginBottom: spacing.sm,
-      textAlign: 'center',
     },
     modeSwitch: {
       flexDirection: 'row',
@@ -307,6 +206,32 @@ const createStyles = (theme) => {
       color: colors.neutral900,
       backgroundColor: colors.neutral50,
     },
+    forgotPasswordLink: {
+      alignSelf: 'flex-start',
+      marginTop: spacing.xs,
+      marginBottom: spacing.md,
+    },
+    linkText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    switchModeContainer: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginTop: spacing.md,
+      gap: spacing.xs,
+    },
+    switchModeText: {
+      color: colors.neutral600,
+      fontSize: 14,
+    },
+    switchModeLink: {
+      color: colors.primary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
     appleButton: {
       width: '100%',
       height: 44,
@@ -316,26 +241,10 @@ const createStyles = (theme) => {
       marginTop: spacing.sm,
       width: '100%',
     },
-    inlineActions: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: spacing.md,
-    },
-    linkText: {
-      color: colors.primary,
-      fontSize: 13,
-      fontWeight: '600',
-    },
-    subtleLinkText: {
-      color: colors.neutral500,
-      fontSize: 13,
-      fontWeight: '600',
-    },
     dividerRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginVertical: spacing.md,
+      marginVertical: spacing.lg,
       gap: spacing.sm,
     },
     dividerLine: {
@@ -367,12 +276,6 @@ const createStyles = (theme) => {
       fontWeight: '600',
       color: colors.neutral900,
     },
-    helperCopy: {
-      textAlign: 'center',
-      color: colors.neutral500,
-      fontSize: 13,
-      marginTop: spacing.lg,
-    },
   });
 };
 
@@ -396,37 +299,20 @@ export default function AuthScreen({ navigation, route }) {
   const setRole = useSessionRole((s) => s.setRole);
   const setNextBusinessRoute = useSessionRole((s) => s.setNextBusinessRoute);
   const theme = useTheme();
-  const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const heroCopy = useMemo(
-    () =>
-      businessMode ? HERO_COPY.business : HERO_COPY[mode] || HERO_COPY.login,
-    [businessMode, mode]
-  );
-  const heroStats = businessMode ? BUSINESS_STATS : HERO_STATS;
+
   const cardTitle = useMemo(() => {
     if (businessMode) {
-      return mode === 'login'
-        ? 'Welcome back, host'
-        : 'List your venue in minutes';
+      return mode === 'login' ? 'Welcome back' : 'Get started';
     }
-    return mode === 'login' ? 'Welcome back' : 'Create your profile';
+    return mode === 'login' ? 'Welcome back' : 'Get started';
   }, [businessMode, mode]);
+
   const cardSubtitle = useMemo(() => {
-    if (businessMode) {
-      return mode === 'login'
-        ? 'Track events, respond to requests, and keep your community engaged.'
-        : 'Share your brand details so we can fast-track your review.';
-    }
-    return mode === 'login'
-      ? 'Sign in to catch new drops, RSVPs, and chats tailored to you.'
-      : 'It takes less than a minute to tell us what you are into.';
+    // Remove subtitles entirely for cleaner look
+    return null;
   }, [businessMode, mode]);
-  const inlineModeLabel =
-    mode === 'login' ? 'Need an account? Sign up' : 'Back to login';
-  const supportEmail = businessMode
-    ? 'partners@socialcircle.app'
-    : 'support@socialcircle.app';
+
   const googleDisabled = !googleRequest;
   const handleAccountModeChange = useCallback(
     (nextBusiness) => {
@@ -900,42 +786,21 @@ export default function AuthScreen({ navigation, route }) {
         <View style={styles.overlay}>
           <LoadingOverlay visible={loading} />
 
-          <View style={styles.heroBlock}>
-            <View style={styles.logoRow}>
-              <Image
-                source={require('../../../../../assets/SocialCircleLogoClear.png')}
-                style={styles.heroLogo}
-                resizeMode='contain'
-              />
-              <View>
-                <Text style={styles.heroBrand}>SocialCircle</Text>
-                <Text style={styles.heroTagline}>IRL plans, curated daily</Text>
-              </View>
-            </View>
-            <View style={styles.heroBadge}>
-              <Ionicons name='sparkles-outline' size={16} color='#F5F3FF' />
-              <Text style={styles.heroBadgeText}>{heroCopy.eyebrow}</Text>
-            </View>
-            <Text style={styles.heroTitle}>{heroCopy.title}</Text>
-            <Text style={styles.heroSubtitle}>{heroCopy.subtitle}</Text>
-            <View style={styles.heroStatsRow}>
-              {heroStats.map((stat) => (
-                <View key={stat.label} style={styles.statCard}>
-                  <Text style={styles.statValue}>{stat.value}</Text>
-                  <Text style={styles.statLabel}>{stat.label}</Text>
-                </View>
-              ))}
-            </View>
+          <View style={styles.hero}>
+            <Image
+              source={require('../../../../../assets/SocialCircleLogoClear.png')}
+              style={styles.heroLogo}
+            />
+            <Text style={styles.heroTagline}>{HERO_TAGLINE}</Text>
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionEyebrow}>
-              {businessMode ? 'Business portal' : 'Member access'}
-            </Text>
             <Text style={styles.cardTitle}>{cardTitle}</Text>
-            <Text style={styles.cardSubtitle}>{cardSubtitle}</Text>
+            {cardSubtitle && (
+              <Text style={styles.cardSubtitle}>{cardSubtitle}</Text>
+            )}
 
-            {showBusinessAccountSwitch ? (
+            {showBusinessAccountSwitch && (
               <View style={styles.accountSwitchContainer}>
                 <TouchableOpacity
                   style={[
@@ -970,13 +835,7 @@ export default function AuthScreen({ navigation, route }) {
                   </Text>
                 </TouchableOpacity>
               </View>
-            ) : null}
-
-            <Text style={styles.accountSwitchHelper}>
-              {businessMode
-                ? 'Log in to manage your company profile, events, and team.'
-                : 'Discover and join events happening around you.'}
-            </Text>
+            )}
 
             <View style={styles.modeSwitch}>
               <TouchableOpacity
@@ -1013,10 +872,6 @@ export default function AuthScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
-            {businessMode ? (
-              <Text style={styles.businessLabel}>business login</Text>
-            ) : null}
-
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput
@@ -1031,7 +886,6 @@ export default function AuthScreen({ navigation, route }) {
                 autoComplete='email'
                 style={styles.input}
                 placeholderTextColor={theme.colors.neutral500}
-                keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
               />
             </View>
 
@@ -1048,20 +902,17 @@ export default function AuthScreen({ navigation, route }) {
                 spellCheck={false}
                 style={styles.input}
                 placeholderTextColor={theme.colors.neutral500}
-                keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
               />
             </View>
 
-            <View style={styles.inlineActions}>
-              <TouchableOpacity onPress={handlePasswordReset}>
+            {mode === 'login' && (
+              <TouchableOpacity
+                style={styles.forgotPasswordLink}
+                onPress={handlePasswordReset}
+              >
                 <Text style={styles.linkText}>Forgot password?</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
-              >
-                <Text style={styles.subtleLinkText}>{inlineModeLabel}</Text>
-              </TouchableOpacity>
-            </View>
+            )}
 
             {loading ? (
               <ActivityIndicator
@@ -1077,65 +928,37 @@ export default function AuthScreen({ navigation, route }) {
               />
             )}
 
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerLabel}>Quick options</Text>
-              <View style={styles.dividerLine} />
+            <View style={styles.switchModeContainer}>
+              <TouchableOpacity
+                onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
+              >
+                <Text style={styles.switchModeLink}>
+                  {mode === 'login' ? 'Sign up' : 'Sign in'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            {mode === 'login' ? (
-              <TouchableOpacity
-                style={[
-                  styles.socialButton,
-                  googleDisabled && styles.socialButtonDisabled,
-                ]}
-                onPress={handleGooglePress}
-                disabled={googleDisabled}
-              >
-                <Ionicons
-                  name='logo-google'
-                  size={18}
-                  color={
-                    googleDisabled
-                      ? theme.colors.neutral500
-                      : theme.colors.neutral900
-                  }
-                />
-                <Text style={styles.socialButtonText}>
-                  Continue with Google
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[styles.socialButton, styles.socialButtonDisabled]}
-                disabled
-              >
-                <Ionicons
-                  name='time-outline'
-                  size={18}
-                  color={theme.colors.neutral500}
-                />
-                <Text style={styles.socialButtonText}>
-                  Google sign up coming soon
-                </Text>
-              </TouchableOpacity>
-            )}
-
             {appleAvailable && (
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={
-                  AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
-                }
-                buttonStyle={
-                  AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-                }
-                cornerRadius={8}
-                style={styles.appleButton}
-                onPress={handleAppleSignIn}
-              />
-            )}
+              <>
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerLabel}>or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
 
-            <Text style={styles.helperCopy}>Need a hand? {supportEmail}</Text>
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={
+                    AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                  }
+                  buttonStyle={
+                    AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                  }
+                  cornerRadius={8}
+                  style={styles.appleButton}
+                  onPress={handleAppleSignIn}
+                />
+              </>
+            )}
           </View>
         </View>
       </View>

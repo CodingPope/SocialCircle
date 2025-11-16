@@ -4,10 +4,7 @@ import { Marker } from 'react-native-maps';
 import { LinearGradient } from 'expo-linear-gradient';
 
 // Description: Minimalist marker pin with clean design and photo preview
-export default function BlipMarker({
-  event,
-  onPress,
-}) {
+export default function BlipMarker({ event, onPress }) {
   if (!event?.location) {
     return null;
   }
@@ -23,7 +20,7 @@ export default function BlipMarker({
     const now = Date.now();
     let startMs = null;
     let endMs = null;
-    
+
     const d = event?.date;
     if (d?.toDate) startMs = d.toDate().getTime();
     else if (typeof d?.seconds === 'number') startMs = d.seconds * 1000;
@@ -32,7 +29,7 @@ export default function BlipMarker({
     const e = event?.endAt;
     if (e?.toDate) endMs = e.toDate().getTime();
     else if (typeof e?.seconds === 'number') endMs = e.seconds * 1000;
-    
+
     return startMs && now >= startMs && (!endMs || now < endMs);
   }, [event?.date, event?.endAt]);
 
@@ -46,7 +43,7 @@ export default function BlipMarker({
       <View style={styles.container}>
         {/* Outer glow for live events */}
         {isLive && <View style={styles.liveGlow} />}
-        
+
         {/* Main pin body */}
         <View style={styles.pinWrapper}>
           <LinearGradient
@@ -69,11 +66,11 @@ export default function BlipMarker({
               )}
             </View>
           </LinearGradient>
-          
+
           {/* Pin point */}
           <View style={styles.pinPoint} />
         </View>
-        
+
         {/* Anchor shadow */}
         <View style={styles.shadow} />
       </View>
