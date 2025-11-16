@@ -48,6 +48,8 @@
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>FIREBASE_ANALYTICS_COLLECTION_ENABLED</key>
+    <false/>
     <key>GMSApiKey</key>
     <string>${GOOGLE_MAPS_API_KEY}</string>
     <key>ITSAppUsesNonExemptEncryption</key>
@@ -108,10 +110,6 @@
     <key>UIUserInterfaceStyle</key>
     <string>Light</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
-    <false/>
-    <key>FIREBASE_ANALYTICS_COLLECTION_ENABLED</key>
-    <false/>
-    <key>FIREBASE_ANALYTICS_COLLECTION_DEACTIVATED</key>
     <false/>
   </dict>
 </plist>
