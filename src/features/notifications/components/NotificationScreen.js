@@ -48,6 +48,22 @@ const TypeIcon = ({ type, styles }) => {
   );
 };
 
+const getPreferredName = (user) => {
+  if (!user) return null;
+  const first =
+    typeof user.firstName === 'string' ? user.firstName.trim() : '';
+  const last = typeof user.lastName === 'string' ? user.lastName.trim() : '';
+  const combined = `${first} ${last}`.trim();
+  if (combined.length) return combined;
+  return (
+    user.displayName ||
+    user.name ||
+    user.username ||
+    user.userName ||
+    null
+  );
+};
+
 // Description: Renders a notification card based on type (polished UI)
 const NotificationCard = memo(
   ({ item, onAccept, onDeny, navigation, markAsRead, styles }) => {
@@ -61,68 +77,107 @@ const NotificationCard = memo(
 
     // Resolve requesterId from possible fields in payload
     const requesterId =
-      item.requesterId || item.fromUserId || item.userId || null;
+      item.requesterId ||
+      item.actorId ||
+      item.fromUserId ||
+      item.userId ||
+      item.senderId ||
+      item.createdBy ||
+      null;
 
     // Fetch missing event/user data for RSVP
     useEffect(() => {
       let mounted = true;
+      const isRsvp = item.type === 'rsvp_request';
+      const shouldFetchEvent = isRsvp && !eventTitle && item.eventId;
+
       (async () => {
         try {
-          if (item.type === 'rsvp_request') {
+          const tasks = [];
+          if (shouldFetchEvent) {
             setLoading(true);
-            const promises = [];
-            if (!eventTitle && item.eventId) {
-              promises.push(
-                db
-                  .collection('events')
-                  .doc(item.eventId)
-                  .get()
-                  .then((snap) => {
-                    if (mounted && snap.exists)
-                      setEventTitle(snap.data()?.title || null);
-                  })
-              );
-            }
-            if (requesterId) {
-              // Prefer snippet store (batched, cached)
-              try {
-                const map = await ensureSnippets([requesterId]);
-                const s = map.get(requesterId);
-                if (mounted && s)
-                  setRequester({
-                    profileImage: s.photoURL,
-                    avatarURL: null,
-                    photoURL: s.photoURL,
-                    firstName: null,
-                    lastName: null,
-                    rating: s.rating || null,
-                  });
-              } catch {}
-
-              if (!requester) {
-                // Fallback
-                promises.push(
-                  db
-                    .collection('users')
-                    .doc(requesterId)
-                    .get()
-                    .then((snap) => {
-                      if (mounted && snap.exists) setRequester(snap.data());
-                    })
-                );
-              }
-            }
-            await Promise.all(promises);
+            tasks.push(
+              db
+                .collection('events')
+                .doc(item.eventId)
+                .get()
+                .then((snap) => {
+                  if (mounted && snap.exists)
+                    setEventTitle(snap.data()?.title || null);
+                })
+            );
           }
+
+          if (requesterId) {
+            tasks.push(
+              (async () => {
+                let resolved = false;
+                try {
+                  const map = await ensureSnippets([requesterId]);
+                  const snippet = map.get(requesterId);
+                  if (mounted && snippet) {
+                    resolved = true;
+                    setRequester((prev) => ({
+                      ...(prev || {}),
+                      uid: requesterId,
+                      displayName: snippet.name || prev?.displayName || null,
+                      name:
+                        snippet.name ||
+                        prev?.name ||
+                        prev?.displayName ||
+                        null,
+                      profileImage:
+                        snippet.photoURL ||
+                        prev?.profileImage ||
+                        prev?.photoURL ||
+                        null,
+                      avatarURL:
+                        snippet.photoURL ||
+                        prev?.avatarURL ||
+                        prev?.photoURL ||
+                        null,
+                      photoURL:
+                        snippet.photoURL ||
+                        prev?.photoURL ||
+                        prev?.profileImage ||
+                        null,
+                      rating:
+                        typeof snippet.rating === 'number'
+                          ? snippet.rating
+                          : prev?.rating ?? null,
+                    }));
+                  }
+                } catch {}
+
+                if (!resolved) {
+                  try {
+                    const snap = await db
+                      .collection('users')
+                      .doc(requesterId)
+                      .get();
+                    if (mounted && snap.exists) {
+                      setRequester((prev) => ({
+                        ...(prev || {}),
+                        ...snap.data(),
+                      }));
+                    }
+                  } catch {}
+                }
+              })()
+            );
+          }
+
+          if (tasks.length) await Promise.all(tasks);
         } catch {
         } finally {
-          if (mounted) setLoading(false);
+          if (mounted && isRsvp) setLoading(false);
         }
       })();
+
       return () => {
         mounted = false;
       };
-    }, [item.type, item.eventId, requesterId]);
+    }, [item.type, item.eventId, requesterId, ensureSnippets, eventTitle]);
 
     const onPressAvatar = () => {
       if (item.type === 'rsvp_request' && requesterId) {
@@ -230,24 +285,33 @@ const NotificationCard = memo(
       }
     };
 
+    const resolvedName =
+      getPreferredName(requester) ||
+      item.userName ||
+      item.fromUserName ||
+      item.requesterName ||
+      item.actorName ||
+      null;
+
     const Subtitle = () => {
       if (item.type === 'rsvp_request') {
-        const name =
-          requester?.displayName ||
-          requester?.name ||
-          item.userName ||
-          item.fromUserName ||
-          item.requesterName ||
-          'Someone';
+        const name = resolvedName || 'Someone';
         return (
           <Text style={styles.subtitleTxt} numberOfLines={2}>
             {name} requested to join your event
           </Text>
         );
       }
+
+      const baseMessage = item.message || 'You have a new notification';
+      const messageText =
+        resolvedName && /\bsomeone\b/i.test(baseMessage)
+          ? baseMessage.replace(/\bsomeone\b/gi, resolvedName)
+          : baseMessage;
+
       return (
         <Text style={styles.subtitleTxt} numberOfLines={2}>
-          {item.message || 'You have a new notification'}
+          {messageText}
         </Text>
       );
     };

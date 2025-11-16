@@ -50,6 +50,7 @@ import PostCard from './PostCard';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import InterestPostCard from '../../interestPosts/components/InterestPostCard';
+import logger from '../../../utils/logger';
 import { fetchInterestPostsByCreator } from '../../interestPosts/services/interestPostService';
 import { trackReportContent } from '../../../lib/analytics';
 import { shareEvent } from '../../../services/share';
@@ -62,7 +63,6 @@ import {
   blockUser as blockUserService,
   unblockUser as unblockUserService,
 } from '../../profile/services/blockService';
-import logger from '../../../utils/logger';
 
 export default function OtherUserProfileScreen({ route, navigation }) {
   const { userId } = route.params;
@@ -342,25 +342,45 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       if (!currentUser || !userId) return;
 
       try {
-        // Fetch events attended by the current user
-        const currentUserEventsQuery = query(
-          collection(db, 'events'),
-          where('attendees', 'array-contains', currentUser.uid)
-        );
-        const currentUserEventsSnapshot = await getDocs(currentUserEventsQuery);
-        const currentUserEventIds = currentUserEventsSnapshot.docs.map(
-          (doc) => doc.id
-        );
+        // Description: Check if users share events (as attendees OR owners) to enable rating
+        // Fetch events where current user is attendee OR owner
+        const [currentUserAttending, currentUserOwned] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, 'events'),
+              where('attendees', 'array-contains', currentUser.uid)
+            )
+          ),
+          getDocs(
+            query(
+              collection(db, 'events'),
+              where('ownerId', '==', currentUser.uid)
+            )
+          ),
+        ]);
 
-        // Fetch events attended by the profile user
-        const profileUserEventsQuery = query(
-          collection(db, 'events'),
-          where('attendees', 'array-contains', userId)
-        );
-        const profileUserEventsSnapshot = await getDocs(profileUserEventsQuery);
-        const profileUserEventIds = profileUserEventsSnapshot.docs.map(
-          (doc) => doc.id
-        );
+        const currentUserEventIds = [
+          ...currentUserAttending.docs.map((doc) => doc.id),
+          ...currentUserOwned.docs.map((doc) => doc.id),
+        ];
+
+        // Fetch events where profile user is attendee OR owner
+        const [profileUserAttending, profileUserOwned] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, 'events'),
+              where('attendees', 'array-contains', userId)
+            )
+          ),
+          getDocs(
+            query(collection(db, 'events'), where('ownerId', '==', userId))
+          ),
+        ]);
+
+        const profileUserEventIds = [
+          ...profileUserAttending.docs.map((doc) => doc.id),
+          ...profileUserOwned.docs.map((doc) => doc.id),
+        ];
 
         // Check for shared events
         const shared = currentUserEventIds.some((id) =>
@@ -740,7 +760,8 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       setUser(updatedUser);
 
       setRatingModalVisible(false);
-      Alert.alert('Success', 'Rating updated successfully!');
+      setSelectedRating(0);
+      Alert.alert('Success', 'Rating submitted successfully! 🎉');
     } catch (err) {
       logger.error('Error rating user:', err);
       const msg = err?.message || 'Failed to rate user.';
@@ -1021,6 +1042,169 @@ export default function OtherUserProfileScreen({ route, navigation }) {
         : shouldHideProfile
         ? restrictedContent
         : profileContent}
+
+      {/* Description: Rating modal for users to rate each other after shared events */}
+      <Modal
+        visible={ratingModalVisible}
+        transparent
+        animationType='slide'
+        onRequestClose={() => {
+          setRatingModalVisible(false);
+          setSelectedRating(0);
+        }}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            setRatingModalVisible(false);
+            setSelectedRating(0);
+          }}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.ratingModal}>
+              {/* Header with close button */}
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderContent}>
+                  <View style={styles.ratingIconContainer}>
+                    <Text style={styles.ratingIcon}>⭐</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.closeButton}
+                    onPress={() => {
+                      setRatingModalVisible(false);
+                      setSelectedRating(0);
+                    }}
+                  >
+                    <Ionicons
+                      name='close'
+                      size={24}
+                      color={theme.colors.textSecondary}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* User info */}
+              <View style={styles.modalUserInfo}>
+                {user?.profileImage && (
+                  <Image
+                    source={{ uri: user.profileImage }}
+                    style={styles.modalUserImage}
+                  />
+                )}
+                <Text style={styles.modalTitle}>Rate {user?.firstName}</Text>
+                <Text style={styles.modalSubtitle}>Share your experience</Text>
+              </View>
+
+              {/* Star rating */}
+              <View style={styles.starContainer}>
+                <View style={styles.starRow}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity
+                      key={star}
+                      onPress={() => setSelectedRating(star)}
+                      style={styles.starButton}
+                      activeOpacity={0.7}
+                    >
+                      <Text
+                        style={[
+                          styles.star,
+                          star <= selectedRating && styles.starFilled,
+                        ]}
+                      >
+                        {star <= selectedRating ? '★' : '☆'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Rating labels */}
+                <View style={styles.ratingLabelsRow}>
+                  <Text style={styles.ratingLabel}>Poor</Text>
+                  <Text style={styles.ratingLabel}>Excellent</Text>
+                </View>
+              </View>
+
+              {/* Feedback message */}
+              {selectedRating > 0 && (
+                <View
+                  style={[
+                    styles.feedbackContainer,
+                    selectedRating >= 4 && styles.feedbackPositive,
+                    selectedRating === 3 && styles.feedbackNeutral,
+                    selectedRating <= 2 && styles.feedbackNegative,
+                  ]}
+                >
+                  <Text style={styles.feedbackEmoji}>
+                    {selectedRating === 5
+                      ? '🎉'
+                      : selectedRating === 4
+                      ? '😊'
+                      : selectedRating === 3
+                      ? '👍'
+                      : selectedRating === 2
+                      ? '😐'
+                      : '😕'}
+                  </Text>
+                  <Text style={styles.feedbackText}>
+                    {selectedRating === 5
+                      ? 'Amazing experience!'
+                      : selectedRating === 4
+                      ? 'Great time together'
+                      : selectedRating === 3
+                      ? 'It was good'
+                      : selectedRating === 2
+                      ? 'Could be better'
+                      : 'Not so great'}
+                  </Text>
+                </View>
+              )}
+
+              {/* Action buttons */}
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  selectedRating === 0 && styles.submitButtonDisabled,
+                ]}
+                onPress={() => {
+                  if (selectedRating > 0) {
+                    handleRateUser(selectedRating);
+                  }
+                }}
+                disabled={selectedRating === 0}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={
+                    selectedRating === 0
+                      ? [
+                          theme.colors.backgroundSecondary,
+                          theme.colors.backgroundSecondary,
+                        ]
+                      : ['#007AFF', '#0051D5']
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.submitGradient}
+                >
+                  <Text
+                    style={[
+                      styles.submitButtonText,
+                      selectedRating === 0 && styles.submitButtonTextDisabled,
+                    ]}
+                  >
+                    {selectedRating === 0 ? 'Select a rating' : 'Submit Rating'}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1245,64 +1429,184 @@ const createStyles = (theme) =>
     },
     modalOverlay: {
       flex: 1,
-      backgroundColor: theme.colors.overlay,
-      justifyContent: 'center',
-      alignItems: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      justifyContent: 'flex-end',
+      paddingTop: 60,
     },
     ratingModal: {
       backgroundColor: theme.colors.card,
-      borderRadius: 16,
-      padding: 24,
-      width: '80%',
+      borderTopLeftRadius: 32,
+      borderTopRightRadius: 32,
+      paddingTop: 8,
+      paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+      paddingHorizontal: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: -4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 24,
+      elevation: 20,
+      minHeight: 420,
+    },
+    modalHeader: {
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    modalHeaderContent: {
+      width: '100%',
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      position: 'relative',
+    },
+    ratingIconContainer: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: theme.isDark
+        ? 'rgba(255,200,0,0.15)'
+        : 'rgba(255,200,0,0.1)',
+      justifyContent: 'center',
       alignItems: 'center',
     },
+    ratingIcon: {
+      fontSize: 28,
+    },
+    closeButton: {
+      position: 'absolute',
+      right: 0,
+      top: 0,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: theme.isDark
+        ? 'rgba(255,255,255,0.08)'
+        : 'rgba(0,0,0,0.05)',
+    },
+    modalUserInfo: {
+      alignItems: 'center',
+      marginTop: 16,
+      marginBottom: 24,
+    },
+    modalUserImage: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      marginBottom: 12,
+      borderWidth: 3,
+      borderColor: theme.colors.primary,
+    },
     modalTitle: {
-      fontSize: 18,
-      fontWeight: '600',
-      marginBottom: 16,
+      fontSize: 26,
+      fontWeight: '700',
       color: theme.colors.text,
+      marginBottom: 4,
+    },
+    modalSubtitle: {
+      fontSize: 15,
+      color: theme.colors.textSecondary,
+      fontWeight: '500',
+    },
+    starContainer: {
+      marginBottom: 20,
     },
     starRow: {
       flexDirection: 'row',
-      marginBottom: 10,
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 8,
+    },
+    starButton: {
+      padding: 8,
+      borderRadius: 12,
+      backgroundColor: theme.isDark
+        ? 'rgba(255,255,255,0.05)'
+        : 'rgba(0,0,0,0.03)',
     },
     star: {
       fontSize: 36,
-      marginHorizontal: 4,
+      color: theme.isDark ? '#666' : '#D1D1D6',
+      textShadowColor: 'rgba(0,0,0,0.1)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 2,
     },
-    selectedRatingText: {
-      fontSize: 14,
-      color: theme.colors.textSecondary,
-      marginBottom: 16,
+    starFilled: {
+      color: '#FFB800',
+      textShadowColor: 'rgba(255,184,0,0.5)',
+      textShadowOffset: { width: 0, height: 2 },
+      textShadowRadius: 4,
     },
-    buttonRow: {
+    ratingLabelsRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      width: '100%',
-      marginTop: 12,
+      paddingHorizontal: 8,
     },
-    cancelButton: {
-      flex: 1,
-      padding: 12,
-      marginRight: 8,
-      borderRadius: 8,
-      backgroundColor: theme.colors.backgroundSecondary,
-      alignItems: 'center',
-    },
-    cancelButtonText: {
-      color: theme.colors.text,
+    ratingLabel: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
       fontWeight: '500',
     },
-    submitButton: {
-      flex: 1,
-      padding: 12,
-      marginLeft: 8,
-      borderRadius: 8,
-      backgroundColor: theme.colors.primary,
+    feedbackContainer: {
+      flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 16,
+      paddingHorizontal: 20,
+      borderRadius: 16,
+      marginBottom: 24,
+      gap: 12,
+    },
+    feedbackPositive: {
+      backgroundColor: theme.isDark
+        ? 'rgba(52,199,89,0.15)'
+        : 'rgba(52,199,89,0.1)',
+    },
+    feedbackNeutral: {
+      backgroundColor: theme.isDark
+        ? 'rgba(255,159,10,0.15)'
+        : 'rgba(255,159,10,0.1)',
+    },
+    feedbackNegative: {
+      backgroundColor: theme.isDark
+        ? 'rgba(255,69,58,0.15)'
+        : 'rgba(255,69,58,0.1)',
+    },
+    feedbackEmoji: {
+      fontSize: 28,
+    },
+    feedbackText: {
+      fontSize: 17,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    submitButton: {
+      width: '100%',
+      borderRadius: 16,
+      overflow: 'hidden',
+      shadowColor: '#007AFF',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    submitButtonDisabled: {
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    submitGradient: {
+      paddingVertical: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     submitButtonText: {
-      color: '#fff',
-      fontWeight: '600',
+      color: '#FFFFFF',
+      fontSize: 17,
+      fontWeight: '700',
+      letterSpacing: 0.3,
+    },
+    submitButtonTextDisabled: {
+      color: theme.colors.textSecondary,
     },
   });

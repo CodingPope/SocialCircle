@@ -2,7 +2,7 @@
   {
     "id": "active_outdoors",
     "name": "active outdoors",
-    "emoji": "",
+    "emoji": "\ud83c\udfd4\ufe0f",
     "interests": [
       {
         "name": "Hiking",
@@ -13,7 +13,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Yoga",
+        "name": "Running",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -29,79 +29,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Beach Days",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Kayaking",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Group Workouts",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Snowshoeing",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Beach Walks",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "eBike Cruising",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Surfing",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Trail Running",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Casual Walks",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Lake Hangouts",
+        "name": "Mountain Biking",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -117,7 +45,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Pilates",
+        "name": "Group Workouts",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -125,15 +53,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Mountain Biking",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Running Groups",
+        "name": "Kayaking",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -149,6 +69,22 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
+        "name": "Skiing",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Snowboarding",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
         "name": "Climbing",
         "count_selected": 0,
         "count_event_matches": 0,
@@ -157,7 +93,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Cold Plunge & Sauna",
+        "name": "Outdoor Hangouts",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -169,42 +105,10 @@
   {
     "id": "arts_hobbies",
     "name": "arts & hobbies",
-    "emoji": "",
+    "emoji": "\ud83c\udfa8",
     "interests": [
       {
-        "name": "Cosplay",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Craft Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Sip & Paint",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Art Gallery",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Book Club",
+        "name": "Art Nights",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -220,22 +124,6 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Knitting/Crochet Circles",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Painting",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
         "name": "Photography",
         "count_selected": 0,
         "count_event_matches": 0,
@@ -244,31 +132,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Poetry",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Baking",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Painting",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Creative Writing",
+        "name": "Books & Writing",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -284,7 +148,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Film Screenings",
+        "name": "Anime & Cosplay",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -292,31 +156,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Improv Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Theater Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Anime Watch Parties",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "DIY Projects",
+        "name": "DIY Crafts",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -328,10 +168,10 @@
   {
     "id": "volunteering_community",
     "name": "volunteering & community",
-    "emoji": "",
+    "emoji": "\ud83e\udd1d",
     "interests": [
       {
-        "name": "Charity",
+        "name": "Charity Events",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -347,7 +187,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Animal Shelter Help",
+        "name": "Volunteering",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -355,7 +195,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Soup Kitchen Volunteering",
+        "name": "Soup Kitchens",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -385,13 +225,29 @@
         "count_event_views": 0,
         "count_event_joins": 0,
         "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Mutual Aid",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Skill Exchange",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
       }
     ]
   },
   {
     "id": "family_kids",
     "name": "family & kids",
-    "emoji": "",
+    "emoji": "\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67\u200d\ud83d\udc66",
     "interests": [
       {
         "name": "Family Picnics",
@@ -402,7 +258,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Outdoor Crafts with Kids",
+        "name": "Kids Playdates",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -410,23 +266,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Mini Sports for Kids",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Storytime Meetups",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Holiday Crafting with Kids",
+        "name": "Outdoor Crafts",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -442,31 +282,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Parent Support Groups",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Park Playdates",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Parents Beach Play Days",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Family Bike Rides",
+        "name": "Parent Support Circles",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -478,18 +294,10 @@
   {
     "id": "food_drink",
     "name": "food & drink",
-    "emoji": "",
+    "emoji": "\ud83c\udf7d\ufe0f",
     "interests": [
       {
-        "name": "Food Festivals",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Potluck",
+        "name": "Brunch Meetups",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -505,30 +313,6 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Farmers Markets",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Brunch Meetup",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Luunch Meetup",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
         "name": "Dinner Parties",
         "count_selected": 0,
         "count_event_matches": 0,
@@ -537,7 +321,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Sushi Nights",
+        "name": "Potlucks",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -545,7 +329,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Dessert Crawls",
+        "name": "Local Food Finds",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -553,7 +337,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Food Trucks",
+        "name": "Specialty Eats",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -561,7 +345,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "BBQ Cookouts",
+        "name": "Cookouts",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -569,23 +353,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Hotpot",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Vegan Meetups",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Coffee Meetup",
+        "name": "Coffee Meetups",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -597,56 +365,8 @@
   {
     "id": "music_entertainment",
     "name": "music & entertainment",
-    "emoji": "",
+    "emoji": "\ud83c\udfb5",
     "interests": [
-      {
-        "name": "Jam Sessions",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Acoustic Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "House Concerts",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Salsa Dancing Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Open Mic Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Concerts",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
       {
         "name": "Live Music",
         "count_selected": 0,
@@ -664,7 +384,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Dance Socials",
+        "name": "Dance Nights",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -672,7 +392,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "DJ Nights",
+        "name": "Comedy",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -680,7 +400,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Hip Hop",
+        "name": "Karaoke",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -688,31 +408,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Drum Circles",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Jazz Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Folk Music Hangouts",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Karaoke Nights",
+        "name": "Jam Sessions",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -732,18 +428,10 @@
   {
     "id": "pets_animals",
     "name": "pets & animals",
-    "emoji": "",
+    "emoji": "\ud83d\udc15",
     "interests": [
       {
-        "name": "Pets",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Bird Watching ",
+        "name": "Dog Meetups",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -759,31 +447,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Horseback Trail Rides",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Group Dog Walks",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Dog-Friendly Hiking Trips",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Puppy Training Circles",
+        "name": "Dog-Friendly Hikes",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -799,7 +463,23 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Dog Meetups",
+        "name": "Animal Volunteering",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Horseback Rides",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Bird Watching",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -811,7 +491,7 @@
   {
     "id": "social_chill",
     "name": "social & chill",
-    "emoji": "",
+    "emoji": "\ud83d\ude0e",
     "interests": [
       {
         "name": "Picnics",
@@ -830,7 +510,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Conventions",
+        "name": "Bar Crawls",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -839,38 +519,6 @@
       },
       {
         "name": "Game Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Park Hangouts",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Bar Crawl",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Watch Parties",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Board Game Cafes",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -886,47 +534,15 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Game Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Beer Gardens",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Card Game Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Farmers Market",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Pool Parties",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
         "name": "Trivia Nights",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Happy Hour",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -942,7 +558,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Brunch Meetups",
+        "name": "Outdoor Hangouts",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -950,7 +566,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Bonfires",
+        "name": "Local Markets",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -958,39 +574,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Happy Hour Drinks",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Sunset Watch Parties",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Cars & Coffee",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Car Meetups",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Cruise Nights",
+        "name": "Auto Meetups",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1002,10 +586,50 @@
   {
     "id": "sports_recreation",
     "name": "sports & recreation",
-    "emoji": "",
+    "emoji": "\u26bd",
     "interests": [
       {
-        "name": "Mini Golf",
+        "name": "Volleyball",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Pickleball",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Basketball",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Soccer",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Tennis",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Golf",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1021,54 +645,6 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Badminton",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Kickball",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Volleyball",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Bowling",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Beach Volleyball",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Pick-Up Games",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
         "name": "Softball",
         "count_selected": 0,
         "count_event_matches": 0,
@@ -1077,7 +653,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Table Tennis",
+        "name": "Roller Skating",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1085,7 +661,15 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Tennis",
+        "name": "Ultimate Frisbee",
+        "count_selected": 0,
+        "count_event_matches": 0,
+        "count_event_views": 0,
+        "count_event_joins": 0,
+        "last_activity": "2025-07-30T00:00:00Z"
+      },
+      {
+        "name": "Billiards",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1107,102 +691,14 @@
         "count_event_views": 0,
         "count_event_joins": 0,
         "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Golf",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Soccer",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Ultimate Frisbee",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Roller Skating",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Flag Football",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Pickleball",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Dodgeball",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Basketball",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Billiards",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
       }
     ]
   },
   {
     "id": "tabletop_gaming",
     "name": "tabletop gaming",
-    "emoji": "",
+    "emoji": "\ud83c\udfb2",
     "interests": [
-      {
-        "name": "Magic: The Gathering Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Strategy Game Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
       {
         "name": "Board Games",
         "count_selected": 0,
@@ -1212,7 +708,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Bingo Nights",
+        "name": "RPG Campaigns",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1220,7 +716,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Pokemon Card Tournaments",
+        "name": "Strategy Games",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1228,7 +724,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Catan Tournaments",
+        "name": "Chess",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1236,7 +732,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Mahjong Nights",
+        "name": "Trivia",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1244,7 +740,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "Chess Meetups",
+        "name": "Bingo",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,
@@ -1252,23 +748,7 @@
         "last_activity": "2025-07-30T00:00:00Z"
       },
       {
-        "name": "RPG Campaigns (D&D, etc.)",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Backgammon Nights",
-        "count_selected": 0,
-        "count_event_matches": 0,
-        "count_event_views": 0,
-        "count_event_joins": 0,
-        "last_activity": "2025-07-30T00:00:00Z"
-      },
-      {
-        "name": "Scrabble Tournaments",
+        "name": "Card Games",
         "count_selected": 0,
         "count_event_matches": 0,
         "count_event_views": 0,

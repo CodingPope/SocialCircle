@@ -6,7 +6,10 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 typeCheckPayload();
 
-const dataPath = path.resolve(__dirname, 'categories.json');
+const dataPath = path.resolve(
+  __dirname,
+  '../src/features/events/constants/categoriesData.json'
+);
 const catalog = require(dataPath);
 
 const projectId =
@@ -69,7 +72,9 @@ const db = getFirestore();
 });
 
 function normalizeCategory(category) {
-  const interests = Array.isArray(category?.interests) ? category.interests : [];
+  const interests = Array.isArray(category?.interests)
+    ? category.interests
+    : [];
   return {
     name: sanitizeString(category?.name),
     emoji: sanitizeString(category?.emoji || ''),

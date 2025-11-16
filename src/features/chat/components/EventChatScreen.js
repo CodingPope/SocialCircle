@@ -62,12 +62,56 @@ import {
 } from '../../../lib/analytics';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { shareEventDetails } from '../../events/utils/shareUtils';
 import { addSocialCircleEventToCalendar } from '../../../services/calendarService';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
+
+// --- Date/Time editing constraints (mirror CreateEventScreen) ---
+const MIN_LEAD_MINUTES = 30;
+const MAX_LEAD_DAYS = 7;
+const MINUTE_INCREMENT = 5;
+const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
+const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
+
+const roundUpToMinuteIncrement = (inputDate) => {
+  const date = new Date(inputDate);
+  date.setSeconds(0);
+  date.setMilliseconds(0);
+  if (!MINUTE_INCREMENT || MINUTE_INCREMENT < 1) return date;
+  const minutes = date.getMinutes();
+  const remainder = minutes % MINUTE_INCREMENT;
+  if (remainder !== 0) {
+    date.setMinutes(minutes + (MINUTE_INCREMENT - remainder));
+  }
+  return date;
+};
+
+const getEditDateBounds = () => {
+  const now = new Date();
+  return {
+    min: new Date(now.getTime() + MIN_MILLIS),
+    max: new Date(now.getTime() + MAX_MILLIS),
+  };
+};
+
+const coerceDateWithinBounds = (rawDate) => {
+  if (!rawDate) return null;
+  const { min, max } = getEditDateBounds();
+  const rounded = roundUpToMinuteIncrement(rawDate);
+  if (rounded < min) return roundUpToMinuteIncrement(min);
+  if (rounded > max) return roundUpToMinuteIncrement(max);
+  return rounded;
+};
+
+const isWithinDateBounds = (candidate) => {
+  if (!(candidate instanceof Date)) return false;
+  const { min, max } = getEditDateBounds();
+  return candidate >= min && candidate <= max;
+};
 
 const EventChatScreen = () => {
   const route = useRoute();
@@ -76,6 +120,9 @@ const EventChatScreen = () => {
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme, insets), [theme, insets]);
+  const datePickerThemeVariant = theme.isDark ? 'dark' : 'light';
+  const datePickerTextColor = theme.isDark ? '#fff' : '#000';
+  const editDateBounds = getEditDateBounds();
   // Make route params defensive & provide default
   const {
     eventId,
@@ -101,7 +148,9 @@ const EventChatScreen = () => {
   const [editLocation, setEditLocation] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editDate, setEditDate] = useState(null);
-  const [isEditDatePickerVisible, setIsEditDatePickerVisible] = useState(false);
+  const [isEditDatePickerVisible, setIsEditDatePickerVisible] =
+    useState(false);
+  const [editDateDraft, setEditDateDraft] = useState(null);
   const [isSavingEvent, setIsSavingEvent] = useState(false);
   const [editPlaceDetails, setEditPlaceDetails] = useState(null);
   const [editLocationCoords, setEditLocationCoords] = useState(null);
@@ -111,7 +160,6 @@ const EventChatScreen = () => {
   const [pinnedDraft, setPinnedDraft] = useState('');
   const [pinnedSaving, setPinnedSaving] = useState(false);
   const [leaveInProgress, setLeaveInProgress] = useState(false);
-  const [deleteInProgress, setDeleteInProgress] = useState(false);
   const [hasShownAccessAlert, setHasShownAccessAlert] = useState(false);
   const [joinGraceActive, setJoinGraceActive] = useState(() => !!joinIntent);
   const sidebarScrollRef = useRef(null);
@@ -310,6 +358,7 @@ const EventChatScreen = () => {
     if (!isModalVisible) {
       setIsEditingEvent(false);
       setIsEditDatePickerVisible(false);
+      setEditDateDraft(null);
       setIsSavingEvent(false);
       setEditLocation('');
       setEditDescription('');
@@ -1095,7 +1144,7 @@ const EventChatScreen = () => {
         : '';
     setEditLocation(sanitizedLocation);
     setEditDescription(event?.description || '');
-    setEditDate(toDateOrNull(event?.date) || new Date());
+    setEditDate(coerceDateWithinBounds(toDateOrNull(event?.date) || new Date()));
     const loc = event?.location || {};
     const lat =
       typeof loc.latitude === 'number'
@@ -1133,6 +1182,7 @@ const EventChatScreen = () => {
         : null
     );
     setIsEditDatePickerVisible(false);
+    setEditDateDraft(null);
     setIsEditingEvent(true);
     trackClient('event_edit_start', { event_id_present: !!eventId });
   };
@@ -1140,6 +1190,7 @@ const EventChatScreen = () => {
   const handleCancelEdit = () => {
     setIsEditingEvent(false);
     setIsEditDatePickerVisible(false);
+    setEditDateDraft(null);
     setEditLocation('');
     setEditDescription('');
     setEditDate(null);
@@ -1226,8 +1277,44 @@ const EventChatScreen = () => {
     pinnedDraft,
   ]);
 
+  const getCurrentEditDate = useCallback(() => {
+    if (editDate instanceof Date) return editDate;
+    const fallback = toDateOrNull(event?.date) || new Date();
+    return coerceDateWithinBounds(fallback) || fallback;
+  }, [editDate, event?.date]);
+
+  const openEditDatePicker = () => {
+    if (Platform.OS === 'ios') {
+      setEditDateDraft(getCurrentEditDate());
+    } else {
+      setEditDateDraft(null);
+    }
+    setIsEditDatePickerVisible(true);
+  };
+
+  const handleInlineDateChange = (_, selectedDate) => {
+    if (selectedDate) {
+      setEditDateDraft(roundUpToMinuteIncrement(selectedDate));
+    }
+  };
+
+  const handleInlineDateCancel = () => {
+    setEditDateDraft(null);
+    setIsEditDatePickerVisible(false);
+  };
+
+  const handleInlineDateSave = () => {
+    const nextDate = roundUpToMinuteIncrement(
+      editDateDraft || getCurrentEditDate()
+    );
+    setEditDate(nextDate);
+    setEditDateDraft(null);
+    setIsEditDatePickerVisible(false);
+  };
+
   const handleEditDateConfirm = (pickedDate) => {
-    setEditDate(pickedDate || new Date());
+    setEditDate(roundUpToMinuteIncrement(pickedDate || new Date()));
+    setEditDateDraft(null);
     setIsEditDatePickerVisible(false);
   };
 
@@ -1238,11 +1325,6 @@ const EventChatScreen = () => {
       Alert.alert('Description needed', 'Please enter a description.');
       return;
     }
-    if (!editDate) {
-      Alert.alert('Date required', 'Please select a date and time.');
-      return;
-    }
-
     const trimmedLocation = editLocation.trim();
     const placeSnapshot = editPlaceDetails;
     const displayAddress =
@@ -1257,11 +1339,25 @@ const EventChatScreen = () => {
       updatedAt: serverTimestamp(),
     };
 
-    const normalizedDate =
+    const baseEditDate =
       editDate instanceof Date ? editDate : toDateOrNull(editDate);
-    if (normalizedDate) {
-      updates.date = Timestamp.fromDate(normalizedDate);
+    if (!baseEditDate) {
+      Alert.alert('Date required', 'Please select a date and time.');
+      return;
     }
+    const normalizedDate = roundUpToMinuteIncrement(baseEditDate);
+    if (!normalizedDate) {
+      Alert.alert('Date required', 'Please select a date and time.');
+      return;
+    }
+    if (!isWithinDateBounds(normalizedDate)) {
+      Alert.alert(
+        'Date out of range',
+        'Events can only be scheduled between 30 minutes and 7 days from now.'
+      );
+      return;
+    }
+    updates.date = Timestamp.fromDate(normalizedDate);
 
     const latitudeCandidate =
       placeSnapshot?.latitude ?? editLocationCoords?.latitude;
@@ -1570,7 +1666,6 @@ const EventChatScreen = () => {
               }}
               editable={!readOnly}
               returnKeyType='send'
-              keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
             />
             <TouchableOpacity
               onPress={sendMessage}
@@ -1612,8 +1707,8 @@ const EventChatScreen = () => {
           scrollTo={handleSidebarScrollTo}
           scrollOffset={sidebarScrollOffset}
           scrollOffsetMax={sidebarScrollOffsetMax}
-        >
-          <View style={styles.sidebarWrapper} onLayout={handleSidebarLayout}>
+            >
+              <View style={styles.sidebarWrapper} onLayout={handleSidebarLayout}>
             {/* Floating close button */}
             <TouchableOpacity
               style={styles.floatingCloseButton}
@@ -1854,7 +1949,7 @@ const EventChatScreen = () => {
                 {isCreator && isEditingEvent && (
                   <TouchableOpacity
                     style={styles.editDateButton}
-                    onPress={() => setIsEditDatePickerVisible(true)}
+                    onPress={openEditDatePicker}
                     disabled={isSavingEvent}
                   >
                     <Ionicons name='time-outline' size={20} color='#2563EB' />
@@ -1877,9 +1972,6 @@ const EventChatScreen = () => {
                       onChangeText={setEditDescription}
                       placeholder='Share what attendees should know'
                       placeholderTextColor='#9CA3AF'
-                      keyboardAppearance={
-                        themeMode === 'dark' ? 'dark' : 'light'
-                      }
                     />
                     <Text style={styles.editInfoNotice}>
                       Update details attendees see about this event.
@@ -2062,8 +2154,7 @@ const EventChatScreen = () => {
               <TouchableOpacity
                 style={[
                   styles.leaveButton,
-                  (leaveInProgress || deleteInProgress) &&
-                    styles.leaveButtonDisabled,
+                  leaveInProgress && styles.leaveButtonDisabled,
                 ]}
                 onPress={() => {
                   if (isCreator) {
@@ -2075,31 +2166,41 @@ const EventChatScreen = () => {
                         {
                           text: 'Delete',
                           style: 'destructive',
-                          onPress: async () => {
-                            setDeleteInProgress(true);
-                            try {
-                              // Description: Soft delete event and navigate away immediately
-                              await deleteEvent(
-                                eventId,
-                                auth().currentUser.uid
-                              );
-                              // Exit chat immediately after successful deletion
-                              safeExitChat();
-                              // Show success message after navigation
-                              setTimeout(() => {
+                          onPress: () => {
+                            // Description: Delete event from Firestore
+                            // const eventRef = doc(db, 'events', eventId);
+                            // deleteDoc(eventRef)
+                            //   .then(() => {
+                            //     navigation.goBack();
+                            //     Alert.alert(
+                            //       'Event Deleted',
+                            //       'The event has been deleted.'
+                            //     );
+                            //   })
+                            //   .catch((error) => {
+                            //     console.error('Error deleting event:', error);
+                            //     Alert.alert(
+                            //       'Error',
+                            //       'Failed to delete the event.'
+                            //     );
+                            //   });
+
+                            // Soft delete flow
+                            deleteEvent(eventId, auth().currentUser.uid)
+                              .then(() => {
+                                safeExitChat();
                                 Alert.alert(
                                   'Event Deleted',
                                   'The event has been deleted.'
                                 );
-                              }, 300);
-                            } catch (error) {
-                              console.error('Error deleting event:', error);
-                              setDeleteInProgress(false);
-                              Alert.alert(
-                                'Error',
-                                'Failed to delete the event. Please try again.'
-                              );
-                            }
+                              })
+                              .catch((error) => {
+                                console.error('Error deleting event:', error);
+                                Alert.alert(
+                                  'Error',
+                                  'Failed to delete the event.'
+                                );
+                              });
                           },
                         },
                       ]
@@ -2108,12 +2209,10 @@ const EventChatScreen = () => {
                     handleLeaveEvent();
                   }
                 }}
-                disabled={leaveInProgress || deleteInProgress}
+                disabled={leaveInProgress}
               >
                 <Text style={styles.leaveButtonText}>
-                  {deleteInProgress
-                    ? 'Deleting...'
-                    : leaveInProgress
+                  {leaveInProgress
                     ? 'Leaving...'
                     : isCreator
                     ? 'Delete Event'
@@ -2131,17 +2230,76 @@ const EventChatScreen = () => {
                 <Text style={styles.reportButtonText}>Report Event</Text>
               </TouchableOpacity>
             </ScrollView>
-
-            {/* Date & Time Picker - inside modal for proper z-index */}
-            <DateTimePickerModal
-              isVisible={isEditDatePickerVisible}
-              mode='datetime'
-              onConfirm={handleEditDateConfirm}
-              onCancel={() => setIsEditDatePickerVisible(false)}
-              date={editDate || toDateOrNull(event?.date) || new Date()}
-            />
+            {Platform.OS === 'ios' && isEditDatePickerVisible && (
+              <View style={styles.inlineDatePickerOverlay}>
+                <TouchableOpacity
+                  style={styles.inlineDatePickerBackdrop}
+                  activeOpacity={1}
+                  onPress={handleInlineDateCancel}
+                />
+                <View style={styles.inlineDatePickerCard}>
+                  <Text style={styles.inlineDatePickerTitle}>
+                    Adjust Date & Time
+                  </Text>
+                  <DateTimePicker
+                    mode='datetime'
+                    display='spinner'
+                    value={editDateDraft || getCurrentEditDate()}
+                    minuteInterval={MINUTE_INCREMENT}
+                    minimumDate={editDateBounds.min}
+                    maximumDate={editDateBounds.max}
+                    themeVariant={datePickerThemeVariant}
+                    textColor={datePickerTextColor}
+                    onChange={handleInlineDateChange}
+                    style={styles.inlineDatePickerControl}
+                  />
+                  <View style={styles.inlineDatePickerActions}>
+                    <TouchableOpacity
+                      style={[
+                        styles.inlineDatePickerButton,
+                        styles.inlineDatePickerCancel,
+                      ]}
+                      onPress={handleInlineDateCancel}
+                    >
+                      <Text style={styles.inlineDatePickerCancelText}>
+                        Cancel
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.inlineDatePickerButton,
+                        styles.inlineDatePickerConfirm,
+                      ]}
+                      onPress={handleInlineDateSave}
+                    >
+                      <Text style={styles.inlineDatePickerConfirmText}>
+                        Save
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
           </View>
         </Modal>
+
+        {Platform.OS !== 'ios' && (
+          <DateTimePickerModal
+            isVisible={isEditDatePickerVisible}
+            mode='datetime'
+            onConfirm={handleEditDateConfirm}
+            onCancel={() => {
+              setIsEditDatePickerVisible(false);
+              setEditDateDraft(null);
+            }}
+            date={getCurrentEditDate()}
+            minimumDate={editDateBounds.min}
+            maximumDate={editDateBounds.max}
+            minuteInterval={MINUTE_INCREMENT}
+            themeVariant={datePickerThemeVariant}
+            textColor={datePickerTextColor}
+          />
+        )}
 
         <Modal
           isVisible={pinnedEditorVisible}
@@ -2161,7 +2319,6 @@ const EventChatScreen = () => {
               value={pinnedDraft}
               onChangeText={setPinnedDraft}
               maxLength={400}
-              keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
             />
             <View style={styles.pinnedModalActions}>
               <TouchableOpacity
@@ -2299,6 +2456,7 @@ const createStyles = (
       backgroundColor: theme.colors.background,
       width: '100%', // Full width
       height: '100%',
+      position: 'relative',
       paddingLeft: insets.left, // Respect safe area on left
       paddingRight: insets.right, // Respect safe area on right
       shadowColor: '#000',
@@ -2424,6 +2582,68 @@ const createStyles = (
       fontWeight: '600',
       fontSize: 15,
       marginLeft: 8,
+    },
+    inlineDatePickerOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'transparent',
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 200,
+      paddingHorizontal: 16,
+    },
+    inlineDatePickerBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.35)',
+    },
+    inlineDatePickerCard: {
+      width: '100%',
+      maxWidth: 360,
+      backgroundColor: theme.colors.card,
+      borderRadius: 16,
+      padding: 16,
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.15,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 5,
+    },
+    inlineDatePickerTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.colors.text,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    inlineDatePickerControl: {
+      width: '100%',
+    },
+    inlineDatePickerActions: {
+      marginTop: 12,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    inlineDatePickerButton: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    inlineDatePickerCancel: {
+      backgroundColor: theme.colors.background,
+      borderWidth: 1,
+      borderColor: theme.colors.primary,
+    },
+    inlineDatePickerConfirm: {
+      backgroundColor: theme.colors.primary,
+    },
+    inlineDatePickerCancelText: {
+      color: theme.colors.primary,
+      fontWeight: '600',
+    },
+    inlineDatePickerConfirmText: {
+      color: '#fff',
+      fontWeight: '600',
     },
     autocompleteWrapper: {
       marginTop: 12,

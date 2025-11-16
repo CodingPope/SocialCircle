@@ -6,7 +6,10 @@ const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 typeCheckPayload();
 
-const dataPath = path.resolve(__dirname, 'categories.json');
+const dataPath = path.resolve(
+  __dirname,
+  '../src/features/events/constants/categoriesData.json'
+);
 const catalog = require(dataPath);
 
 const projectId = 'social-scene1'; // Hardcoded for now

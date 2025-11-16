@@ -18,8 +18,12 @@ const app = initializeApp(firebaseConfig);
 const functions = getFunctions(app);
 const auth = getAuth(app);
 
-// Load categories data
-const categoriesData = require('./categories.json');
+const admin = require('firebase-admin');
+
+// Load the categories data
+const categoriesData = require('../src/features/events/constants/categoriesData.json');
+
+// Initialize Firebase Admin
 
 async function updateCategories() {
   try {

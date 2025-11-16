@@ -66,12 +66,44 @@ import {
   getEventEndMs,
   getTimelineTimestamp,
   mergeUniqueEvents,
+  toMillis,
 } from '../utils/dateUtils';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import VerificationModal from '../../profile/components/VerificationModal';
 
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const removeEventById = (list = [], eventId) => {
+  if (!Array.isArray(list) || !eventId) return Array.isArray(list) ? [...list] : [];
+  return list.filter((event) => event?.id !== eventId);
+};
+
+const cloneEventsState = (events) => ({
+  created: Array.isArray(events?.created) ? [...events.created] : [],
+  attending: Array.isArray(events?.attending) ? [...events.attending] : [],
+  attended: Array.isArray(events?.attended) ? [...events.attended] : [],
+});
+
+const getEventVersionToken = (event) => {
+  if (!event) return '';
+  const version =
+    toMillis(event.updatedAt) ||
+    toMillis(event.date) ||
+    toMillis(event.startAt) ||
+    toMillis(event.createdAt);
+  return `${event.id || 'event'}:${version || 0}`;
+};
+
+const eventListsMatch = (left = [], right = []) => {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (left[i]?.id !== right[i]?.id) return false;
+    if (getEventVersionToken(left[i]) !== getEventVersionToken(right[i]))
+      return false;
+  }
+  return true;
+};
 
 export default function ProfileScreen({ navigation }) {
   // Description: Get current user from Zustand userStore
@@ -365,6 +397,7 @@ export default function ProfileScreen({ navigation }) {
   const sidebarClosing = useRef(false);
   const menuButtonRef = useRef(null);
   const menuHighlightLatestRef = useRef(null);
+  const optimisticallyRemovedIdsRef = useRef(new Set());
 
   // PanResponder for swipe-to-close gesture
   sidebarPan.current =
@@ -796,6 +829,25 @@ export default function ProfileScreen({ navigation }) {
     };
   }, [user?.uid]);
 
+  useEffect(() => {
+    if (!Array.isArray(myEvents)) return;
+    const hiddenIds = optimisticallyRemovedIdsRef.current;
+    if (hiddenIds?.size) {
+      hiddenIds.forEach((eventId) => {
+        const stillExists = myEvents.some((event) => event?.id === eventId);
+        if (!stillExists) hiddenIds.delete(eventId);
+      });
+    }
+    const liveEvents = myEvents.filter(
+      (event) => event?.id && !hiddenIds?.has(event.id)
+    );
+    const nextCreated = mergeUniqueEvents(liveEvents);
+    setUserEvents((prev) => {
+      if (eventListsMatch(prev.created, nextCreated)) return prev;
+      return { ...prev, created: nextCreated };
+    });
+  }, [myEvents]);
+
   // ✅ Move these two lines UP, before the useEffect
   const allEvents = mergeUniqueEvents(
     userEvents.created,
@@ -1164,25 +1216,73 @@ export default function ProfileScreen({ navigation }) {
 
   // Add: implement delete handler referenced by modal
   const handleDeleteEvent = async () => {
+    if (!selectedEvent || !selectedEvent.id) {
+      setModalVisible(false);
+      return;
+    }
+    // Only host can delete (soft delete)
+    if (selectedEvent.ownerId && selectedEvent.ownerId !== user?.uid) {
+      Alert.alert('Not allowed', 'Only the host can delete this event.');
+      setModalVisible(false);
+      return;
+    }
+
+    const eventId = selectedEvent.id;
+    const previousEventsSnapshot = cloneEventsState(userEvents);
+    const previousEnhancedSnapshot = Array.isArray(enhancedEvents)
+      ? [...enhancedEvents]
+      : [];
+    const previousMyEventsSnapshot = Array.isArray(myEventsRef.current)
+      ? [...myEventsRef.current]
+      : null;
+    const guardLiveEvents =
+      Array.isArray(previousMyEventsSnapshot) &&
+      previousMyEventsSnapshot.some((event) => event?.id === eventId);
+
+    if (guardLiveEvents) {
+      optimisticallyRemovedIdsRef.current.add(eventId);
+    }
+
+    setUserEvents((prev) => ({
+      created: removeEventById(prev.created, eventId),
+      attending: removeEventById(prev.attending, eventId),
+      attended: removeEventById(prev.attended, eventId),
+    }));
+    setEnhancedEvents((prev) => removeEventById(prev, eventId));
+    if (previousMyEventsSnapshot) {
+      myEventsRef.current = removeEventById(previousMyEventsSnapshot, eventId);
+    }
+
     try {
-      if (!selectedEvent || !selectedEvent.id) {
-        setModalVisible(false);
-        return;
-      }
-      // Only host can delete (soft delete)
-      if (selectedEvent.ownerId && selectedEvent.ownerId !== user?.uid) {
-        Alert.alert('Not allowed', 'Only the host can delete this event.');
-        setModalVisible(false);
-        return;
-      }
-      await updateDoc(doc(db, 'events', selectedEvent.id), {
+      await updateDoc(doc(db, 'events', eventId), {
         isDeleted: true,
         deletedAt: new Date(),
       });
+
+      if (user) {
+        const filterIds = (list) =>
+          Array.isArray(list) ? list.filter((id) => id !== eventId) : list;
+        setUser({
+          ...user,
+          createdEvents: filterIds(user.createdEvents),
+          attendingEvents: filterIds(user.attendingEvents),
+          attendedEvents: filterIds(user.attendedEvents),
+        });
+      }
+
       Alert.alert('Deleted', 'Event has been deleted.');
     } catch (e) {
+      setUserEvents(previousEventsSnapshot);
+      setEnhancedEvents(previousEnhancedSnapshot);
+      if (previousMyEventsSnapshot) {
+        myEventsRef.current = previousMyEventsSnapshot;
+      }
+      if (guardLiveEvents) {
+        optimisticallyRemovedIdsRef.current.delete(eventId);
+      }
       Alert.alert('Error', 'Failed to delete event.');
     } finally {
+      setSelectedEvent(null);
       setModalVisible(false);
     }
   };

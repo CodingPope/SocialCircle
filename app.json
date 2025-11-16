@@ -22,7 +22,6 @@
       "buildNumber": "1",
       "useFrameworks": "dynamic",
       "entitlements": {
-        "aps-environment": "development",
         "com.apple.developer.applesignin": ["Default"],
         "keychain-access-groups": [
           "$(AppIdentifierPrefix)com.socialcirclellc.app"

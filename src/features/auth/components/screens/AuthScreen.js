@@ -89,7 +89,7 @@ const createStyles = (theme) => {
       width: 205,
       height: 205,
       resizeMode: 'contain',
-      marginBottom: -30,
+      marginBottom: -35,
     },
     heroTagline: {
       color: 'rgba(255, 255, 255, 1)',
@@ -313,7 +313,6 @@ export default function AuthScreen({ navigation, route }) {
     return null;
   }, [businessMode, mode]);
 
-  const googleDisabled = !googleRequest;
   const handleAccountModeChange = useCallback(
     (nextBusiness) => {
       try {
@@ -324,40 +323,6 @@ export default function AuthScreen({ navigation, route }) {
     },
     [navigation, setBusinessMode]
   );
-  const handleGooglePress = useCallback(() => {
-    if (googleDisabled) {
-      return;
-    }
-    googlePromptAsync();
-  }, [googleDisabled, googlePromptAsync]);
-
-  // Description: Test Firebase Auth configuration on mount
-  useEffect(() => {
-    const testFirebaseConfig = async () => {
-      try {
-        console.log('🔍 Firebase Auth Check:');
-        console.log('   App:', auth().app.name);
-        console.log('   Current User:', auth().currentUser?.email || 'None');
-
-        // Try to get auth state to verify connectivity
-        const unsubscribe = auth().onAuthStateChanged((user) => {
-          console.log(
-            '   Auth State:',
-            user ? `Logged in as ${user.email}` : 'Not logged in'
-          );
-        });
-
-        return unsubscribe;
-      } catch (error) {
-        console.error('❌ Firebase Auth initialization error:', error);
-      }
-    };
-
-    const unsubscribe = testFirebaseConfig();
-    return () => {
-      if (typeof unsubscribe === 'function') unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     if (route?.params && 'business' in route.params) {
@@ -392,6 +357,16 @@ export default function AuthScreen({ navigation, route }) {
     Google.useIdTokenAuthRequest({
       clientId: GOOGLE_CLIENT_ID,
     });
+
+  // Description: Calculate googleDisabled AFTER googleRequest is declared to avoid ReferenceError
+  const googleDisabled = !googleRequest;
+  
+  const handleGooglePress = useCallback(() => {
+    if (googleDisabled) {
+      return;
+    }
+    googlePromptAsync();
+  }, [googleDisabled, googlePromptAsync]);
 
   const [appleAvailable, setAppleAvailable] = useState(false);
   useEffect(() => {
@@ -496,7 +471,6 @@ export default function AuthScreen({ navigation, route }) {
                               'Apple account linked successfully.'
                             );
                           } catch (linkErr) {
-                            console.warn('Link error', linkErr);
                             Alert.alert(
                               'Link failed',
                               linkErr?.message || String(linkErr)
@@ -529,14 +503,6 @@ export default function AuthScreen({ navigation, route }) {
       if (err && err.code === 'ERR_CANCELED') {
         // user cancelled, don't alert
       } else {
-        // Log detailed error for debugging
-        console.error('[Apple Sign-In] Error details:', {
-          code: err?.code,
-          message: err?.message,
-          nativeError: err?.nativeError,
-          fullError: err,
-        });
-
         logAuthError(err, 'apple-signin', {});
         const { title, message } = getAuthErrorMessage(err, 'login');
         Alert.alert(title, message);
@@ -629,10 +595,6 @@ export default function AuthScreen({ navigation, route }) {
               sendToTabs ? 'BusinessTabs' : 'BusinessOnboarding'
             );
           } catch (resumeErr) {
-            console.warn(
-              '[AuthScreen] Failed to resume business draft:',
-              resumeErr?.message || resumeErr
-            );
             setNextBusinessRoute('BusinessOnboarding');
           }
           setLoading(false);
@@ -652,8 +614,7 @@ export default function AuthScreen({ navigation, route }) {
         try {
           methods = await auth().fetchSignInMethodsForEmail(email);
         } catch (e) {
-          // If invalid email, we already validated format; surface other errors
-          console.warn('fetchSignInMethodsForEmail error', e);
+          // Validation already done above
         }
 
         if (Array.isArray(methods) && methods.length > 0) {
@@ -712,10 +673,6 @@ export default function AuthScreen({ navigation, route }) {
             pushOptIn: !!token,
           });
         } catch (err) {
-          console.log(
-            '[AuthScreen] Error creating Firestore user doc:',
-            err?.message || err
-          );
           Alert.alert(
             'Account Creation Error',
             'Could not create user profile. Please try again.'

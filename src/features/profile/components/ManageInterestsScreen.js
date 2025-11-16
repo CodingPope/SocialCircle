@@ -24,6 +24,7 @@ import { useUserStore } from '../stores/userStore';
 import Button from '../../../components/ui/Button';
 import AnimatedGradientBackground from '../../../components/ui/AnimatedGradientBackground';
 import { useTheme } from '../../../theme';
+import categoriesData from '../../events/constants/categoriesData.json';
 
 const createStyles = (theme) => {
   const { colors, radii, spacing } = theme;
@@ -203,13 +204,28 @@ export default function ManageInterestsScreen({ navigation }) {
           );
         };
 
-        // Fetch categories
-        const snapshot = await getDocs(collection(db, 'categories'));
-        const fetchedCategories = snapshot.docs.map((categoryDoc) => ({
-          id: categoryDoc.id,
-          name: categoryDoc.data().name,
-          interests: categoryDoc.data().interests || [],
-        }));
+        // Fetch categories (fall back to bundled data if Firestore is empty/unavailable)
+        let fetchedCategories = [];
+        try {
+          const snapshot = await getDocs(collection(db, 'categories'));
+          fetchedCategories = snapshot.docs.map((categoryDoc) => ({
+            id: categoryDoc.id,
+            name: categoryDoc.data().name,
+            interests: categoryDoc.data().interests || [],
+          }));
+        } catch (fetchErr) {
+          console.warn('Failed to fetch categories from Firestore', fetchErr);
+        }
+
+        if (!fetchedCategories.length) {
+          fetchedCategories = (categoriesData || []).map((category) => ({
+            id: category.id,
+            name: category.name,
+            interests: Array.isArray(category.interests)
+              ? category.interests.map((interest) => ({ ...interest }))
+              : [],
+          }));
+        }
 
         // Description: Track unique interests with counts for deduplication
         const interestMap = new Map();
