@@ -449,7 +449,10 @@ function InterestsScreen({ navigation }) {
         return;
       }
       // Update Firestore and local user store
-      await db.collection('users').doc(user.uid).update({ interests: selected });
+      await db
+        .collection('users')
+        .doc(user.uid)
+        .update({ interests: selected });
 
       // Update the user store with new interests immediately
       useUserStore.getState().setUser({ ...user, interests: selected });
@@ -610,7 +613,14 @@ function InterestsScreen({ navigation }) {
                         </Text>
                       </>
                     )}
-                    {selected.includes(activity.name)}
+                    {selected.includes(activity.name) && (
+                      <Ionicons
+                        name='checkmark'
+                        size={14}
+                        color={theme.colors.neutral100}
+                        style={styles.checkIcon}
+                      />
+                    )}
                   </TouchableOpacity>
                 ))
               ) : (

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ImageBackground,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -12,12 +13,52 @@ import Avatar from '../../../components/ui/Avatar';
 import AttendeeBubbleRow from './AttendeeBubbleRow';
 import { shareEventDetails } from '../utils/shareUtils';
 import { useTheme } from '../../../theme';
+import { getCategoryConfig } from '../../../config/categoryPins';
 
-const FALLBACK_IMAGE = 'https://via.placeholder.com/400x300?text=Social+Circle';
+// Description: Helper to adjust hex color brightness for gradient effect
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const adjustHexColor = (hex, amount = 0) => {
+  if (typeof hex !== 'string') return '#E5E7EB';
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return '#E5E7EB';
+
+  const num = parseInt(normalized, 16);
+  const factor = clamp(amount, -1, 1);
+  const adjust = (channel) => {
+    const base = (num >> channel) & 0xff;
+    return clamp(Math.round(base + factor * 255), 0, 255);
+  };
+  const r = adjust(16);
+  const g = adjust(8);
+  const b = adjust(0);
+  const toHex = (value) => value.toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
 
 export default function UpcomingEventCard({ event, onOpen, onPrimaryAction }) {
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+
+  // Description: Get category-based emoji and color for events without images
+  const fallbackInitial = useMemo(() => {
+    const source = (event?.title || event?.interest || '').trim();
+    return source ? source.charAt(0).toUpperCase() : '🎉';
+  }, [event?.title, event?.interest]);
+
+  const categoryConfig = useMemo(() => getCategoryConfig(event || {}), [event]);
+  const placeholderEmoji = categoryConfig?.emoji || fallbackInitial;
+  const placeholderColor = categoryConfig?.color || '#E5E7EB';
+  const placeholderGradientStart = useMemo(
+    () => adjustHexColor(placeholderColor, 0.2),
+    [placeholderColor]
+  );
+  const placeholderGradientEnd = useMemo(
+    () => adjustHexColor(placeholderColor, -0.08),
+    [placeholderColor]
+  );
+
+  const hasImage = !!(event?.imageUrl || event?.imageUri);
+
   const eventDate = useMemo(() => {
     if (!event?.date) return null;
     if (typeof event.date?.toDate === 'function') return event.date.toDate();
@@ -70,56 +111,120 @@ export default function UpcomingEventCard({ event, onOpen, onPrimaryAction }) {
       onPress={handleOpen}
       activeOpacity={0.92}
     >
-      <ImageBackground
-        source={{ uri: event?.imageUrl || FALLBACK_IMAGE }}
-        style={styles.media}
-        imageStyle={styles.mediaImage}
-      >
-        <LinearGradient
-          colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.55)']}
-          style={styles.mediaOverlay}
+      {hasImage ? (
+        <ImageBackground
+          source={{ uri: event.imageUrl || event.imageUri }}
+          style={styles.media}
+          imageStyle={styles.mediaImage}
         >
-          <View style={styles.overlayHeader}>
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{badge}</Text>
+          <LinearGradient
+            colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.55)']}
+            style={styles.mediaOverlay}
+          >
+            <View style={styles.overlayHeader}>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{badge}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.overlayShareButton}
+                onPress={handleShare}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Ionicons name='share-social-outline' size={20} color='#fff' />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              style={styles.overlayShareButton}
-              onPress={handleShare}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Ionicons name='share-social-outline' size={20} color='#fff' />
-            </TouchableOpacity>
-          </View>
 
-          {(eventDate || event?.interest) && (
-            <View style={styles.overlayFooter}>
-              {eventDate && (
-                <View style={styles.datePill}>
-                  <Text style={styles.dateMonth}>
-                    {eventDate
-                      .toLocaleString([], { month: 'short' })
-                      .toUpperCase()}
-                  </Text>
-                  <Text style={styles.dateDay}>{eventDate.getDate()}</Text>
-                </View>
-              )}
-              {event?.interest ? (
+            {(eventDate || event?.interest) && (
+              <View style={styles.overlayFooter}>
+                {eventDate && (
+                  <View style={styles.datePill}>
+                    <Text style={styles.dateMonth}>
+                      {eventDate
+                        .toLocaleString([], { month: 'short' })
+                        .toUpperCase()}
+                    </Text>
+                    <Text style={styles.dateDay}>{eventDate.getDate()}</Text>
+                  </View>
+                )}
+                {event?.interest ? (
+                  <View
+                    style={[
+                      styles.categoryPillOverlay,
+                      eventDate && styles.categoryPillWithDate,
+                    ]}
+                  >
+                    <Text style={styles.categoryPillText} numberOfLines={1}>
+                      {event.interest}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+          </LinearGradient>
+        </ImageBackground>
+      ) : (
+        <LinearGradient
+          colors={[placeholderGradientStart, placeholderGradientEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.media}
+        >
+          <View style={styles.fallbackOverlay}>
+            <View style={styles.overlayHeader}>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{badge}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.overlayShareButton}
+                onPress={handleShare}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Ionicons name='share-social-outline' size={20} color='#fff' />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.emojiContainer}>
+              <View style={styles.emojiBadgeOuter}>
                 <View
                   style={[
-                    styles.categoryPillOverlay,
-                    eventDate && styles.categoryPillWithDate,
+                    styles.emojiBadgeInner,
+                    { borderColor: placeholderGradientStart },
                   ]}
                 >
-                  <Text style={styles.categoryPillText} numberOfLines={1}>
-                    {event.interest}
-                  </Text>
+                  <Text style={styles.emojiText}>{placeholderEmoji}</Text>
                 </View>
-              ) : null}
+              </View>
             </View>
-          )}
+
+            {(eventDate || event?.interest) && (
+              <View style={styles.overlayFooter}>
+                {eventDate && (
+                  <View style={styles.datePill}>
+                    <Text style={styles.dateMonth}>
+                      {eventDate
+                        .toLocaleString([], { month: 'short' })
+                        .toUpperCase()}
+                    </Text>
+                    <Text style={styles.dateDay}>{eventDate.getDate()}</Text>
+                  </View>
+                )}
+                {event?.interest ? (
+                  <View
+                    style={[
+                      styles.categoryPillOverlay,
+                      eventDate && styles.categoryPillWithDate,
+                    ]}
+                  >
+                    <Text style={styles.categoryPillText} numberOfLines={1}>
+                      {event.interest}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+          </View>
         </LinearGradient>
-      </ImageBackground>
+      )}
 
       <View style={styles.content}>
         <Text style={styles.title} numberOfLines={1} ellipsizeMode='tail'>
@@ -213,6 +318,43 @@ const createStyles = (theme) =>
       flex: 1,
       justifyContent: 'space-between',
       padding: 12,
+    },
+    fallbackOverlay: {
+      flex: 1,
+      justifyContent: 'space-between',
+      padding: 12,
+    },
+    emojiContainer: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      flex: 1,
+    },
+    emojiBadgeOuter: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: 'rgba(255,255,255,0.35)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.1,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    emojiBadgeInner: {
+      width: 52,
+      height: 52,
+      borderRadius: 26,
+      backgroundColor: '#fff',
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+    },
+    emojiText: {
+      fontSize: 32,
+      textShadowColor: 'rgba(0,0,0,0.15)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 2,
     },
     overlayHeader: {
       flexDirection: 'row',

@@ -3,14 +3,14 @@
     "name": "SocialCircle",
     "slug": "socialcircle",
     "scheme": "socialcircle",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#1a1d2e"
     },
     "ios": {
       "supportsTablet": true,
@@ -19,7 +19,7 @@
         "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}",
         "usesNonExemptEncryption": false
       },
-      "buildNumber": "3",
+      "buildNumber": "1",
       "useFrameworks": "dynamic",
       "entitlements": {
         "aps-environment": "development",

@@ -211,7 +211,7 @@ service cloud.firestore {
       allow create: if signedIn() &&
         request.auth.uid == request.resource.data.creatorId &&
         validPostContent(request.resource.data.content) &&
-        userHasInterest(request.auth.uid, request.resource.data.interestId) &&
+        // userHasInterest(request.auth.uid, request.resource.data.interestId) &&
         request.resource.data.commentCount == 0 &&
         request.resource.data.likeCount == 0 &&
         request.resource.data.isDeleted == false;
@@ -221,6 +221,7 @@ service cloud.firestore {
           request.auth.uid == resource.data.creatorId &&
           request.resource.data.diff(resource.data).changedKeys().hasOnly([
             'content',
+            'interestId',
             'mediaUrl',
             'mediaThumbnailUrl',
             'mediaStoragePath',
@@ -232,6 +233,7 @@ service cloud.firestore {
             'deletedAt',
           ]) &&
           validPostContent(request.resource.data.content)
+          // userHasInterest(request.auth.uid, request.resource.data.interestId)
         ) ||
         (
           request.resource.data.diff(resource.data).changedKeys().hasOnly([

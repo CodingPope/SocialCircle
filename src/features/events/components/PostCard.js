@@ -190,6 +190,16 @@ export default function PostCard({ event, onPress, onJoinPress }) {
       Alert.alert('Sign in required', 'Log in to save events for later.');
       return;
     }
+
+    // Description: Prevent users from saving their own events
+    if (isOwner) {
+      Alert.alert(
+        'Cannot save your own event',
+        'You can always find your events in the My Circle tab under "Your Upcoming Events".'
+      );
+      return;
+    }
+
     if (saveBusy) return;
 
     setSaveBusy(true);
@@ -228,6 +238,7 @@ export default function PostCard({ event, onPress, onJoinPress }) {
     event?.interest,
     eventId,
     isEventSaved,
+    isOwner,
     saveBusy,
     user?.uid,
   ]);

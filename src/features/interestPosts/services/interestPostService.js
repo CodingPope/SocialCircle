@@ -161,47 +161,56 @@ export async function createInterestPost({ content, interestId, media }) {
     isDeleted: false,
   };
 
+  // Description: Create Firestore doc immediately so UI can show instant feedback
   const docRef = await addDoc(getCollection(), baseDoc);
 
-  let uploaded = null;
-  if (media?.uri) {
-    const compressed = await compressImageAsync(media.uri);
-    const storagePath = `interest-posts/${user.uid}/${docRef.id}`;
-    uploaded = await uploadImage({
-      fileUri: compressed?.image?.uri || media.uri,
-      thumbnailUri: compressed?.thumbnail?.uri || media.uri,
-      storagePath,
-      contentType: media?.mimeType || 'image/jpeg',
-    });
-
-    await updateDoc(docRef, {
-      mediaUrl: uploaded.main.url,
-      mediaThumbnailUrl: uploaded.thumb.url,
-      mediaStoragePath: storagePath,
-      mediaSize: uploaded.main.size,
-      mediaThumbSize: uploaded.thumb.size,
-      mediaWidth: compressed?.image?.width || media.width || null,
-      mediaHeight: compressed?.image?.height || media.height || null,
-      updatedAt: serverTimestamp(),
-    });
-  }
-
-  await updateDoc(doc(db, 'users', user.uid), {
-    createdInterestPosts: arrayUnion(docRef.id),
-    lastInterestPostAt: serverTimestamp(),
-  });
-
-  return {
+  // Description: Return immediately with post ID - don't block on upload
+  const returnValue = {
     id: docRef.id,
     ...baseDoc,
     createdAt: localCreatedAt,
     updatedAt: localCreatedAt,
-    mediaUrl: uploaded?.main?.url || null,
-    mediaThumbnailUrl: uploaded?.thumb?.url || null,
-    mediaStoragePath: uploaded
-      ? `interest-posts/${user.uid}/${docRef.id}`
-      : null,
+    mediaUrl: null,
+    mediaThumbnailUrl: null,
+    mediaStoragePath: null,
   };
+
+  // Description: Fire-and-forget background task for image compression + upload + user doc update
+  (async () => {
+    try {
+      let uploaded = null;
+      if (media?.uri) {
+        const compressed = await compressImageAsync(media.uri);
+        const storagePath = `interest-posts/${user.uid}/${docRef.id}`;
+        uploaded = await uploadImage({
+          fileUri: compressed?.image?.uri || media.uri,
+          thumbnailUri: compressed?.thumbnail?.uri || media.uri,
+          storagePath,
+          contentType: media?.mimeType || 'image/jpeg',
+        });
+
+        await updateDoc(docRef, {
+          mediaUrl: uploaded.main.url,
+          mediaThumbnailUrl: uploaded.thumb.url,
+          mediaStoragePath: storagePath,
+          mediaSize: uploaded.main.size,
+          mediaThumbSize: uploaded.thumb.size,
+          mediaWidth: compressed?.image?.width || media.width || null,
+          mediaHeight: compressed?.image?.height || media.height || null,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        createdInterestPosts: arrayUnion(docRef.id),
+        lastInterestPostAt: serverTimestamp(),
+      });
+    } catch (bgErr) {
+      console.warn('Background post-create task failed (non-critical):', bgErr);
+    }
+  })();
+
+  return returnValue;
 }
 
 export async function deleteInterestPost(postId) {

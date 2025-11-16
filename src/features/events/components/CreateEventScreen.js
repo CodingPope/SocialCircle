@@ -296,157 +296,173 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         interest: newEvent?.interest || null,
         privacy: newEvent?.privacy || null,
       });
+
+      // Description: Create event doc and return immediately for instant UI feedback
       const docRef = await addDoc(collection(db, 'events'), newEvent);
       createdEventId = docRef.id;
 
-      // Wait for the event document to be readable by security rules (avoid storage.get() race)
-      const waitForEventDoc = async (id, attempts = 12, delayMs = 750) => {
-        for (let i = 0; i < attempts; i++) {
-          try {
-            const snap = await getDoc(doc(db, 'events', id));
-            const activeUser = getAuthUser();
-            if (snap.exists && snap.data()?.ownerId === activeUser?.uid)
-              return true;
-          } catch (err) {
-            // ignore and retry
-          }
-          await new Promise((r) => setTimeout(r, delayMs));
-        }
-        return false;
-      };
-
-      const ready = await waitForEventDoc(docRef.id);
-      if (!ready) {
-        console.warn(
-          'DBG event doc not readable yet or ownerId mismatch for',
-          docRef.id
-        );
-      }
-
-      // Extra delay to avoid any propagation timing issues before Storage rule get() lookup
-      await new Promise((res) => setTimeout(res, 500));
-
-      // If user selected an image, upload now to owner-scoped path so storage rules allow it
-      if (imageUri) {
-        try {
-          const resp = await fetch(imageUri);
-          const blob = await resp.blob();
-          const contentType = blob.type || 'image/jpeg';
-
-          if (blob?.size && blob.size > MAX_EVENT_IMAGE_BYTES) {
-            Alert.alert(
-              'Image too large',
-              'Your event was created, but the selected photo exceeds the 10MB limit.'
-            );
-          } else {
-            // Retry upload a few times to avoid transient rule/propagation issues
-            const tryUpload = async () => {
-              const storageRef = storage.ref(
-                `event-images/${docRef.id}/${Date.now()}.jpg`
-              );
-              await storageRef.putFile(imageUri, { contentType });
-              return await storageRef.getDownloadURL();
-            };
-
-            let downloadUrl = null;
-            let lastErr = null;
-            for (let attempt = 1; attempt <= 3; attempt++) {
-              try {
-                downloadUrl = await tryUpload();
-                break;
-              } catch (e) {
-                lastErr = e;
-                console.warn(`Upload attempt ${attempt} failed:`, e?.code || e);
-                await new Promise((r) => setTimeout(r, 500 * attempt));
-              }
-            }
-
-            // Fallback: if Storage rule still denies under event-images, upload under user's profileImages (still public-read per rules)
-            if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
-              try {
-                const altRef = storage.ref(
-                  `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
-                );
-                await altRef.putFile(imageUri, { contentType });
-                downloadUrl = await altRef.getDownloadURL();
-              } catch (altErr) {
-                logStorageDiagnostic('event-image-fallback', {
-                  code: altErr?.code,
-                  message: altErr?.message,
-                  path: `profileImages/${user.uid}/${docRef.id}`,
-                });
-                console.warn('Fallback upload also failed:', altErr);
-              }
-            }
-
-            if (downloadUrl) {
-              // Update event document with the uploaded image URL
-              await updateDoc(doc(db, 'events', docRef.id), {
-                imageUrl: downloadUrl,
-              });
-              setImageUrl(downloadUrl);
-            } else if (lastErr) {
-              const interpreted = interpretStorageError(lastErr, {
-                context: 'create-event',
-                path: `event-images/${docRef.id}`,
-              });
-              logStorageDiagnostic('event-image-upload', interpreted.details);
-              const userMessage = interpreted.needsConsoleFix
-                ? 'Event created, but Firebase Storage needs to be re-linked in the console before photos will work.'
-                : interpreted.userMessage ||
-                  'Your event was created without a photo due to permissions.';
-              Alert.alert('Image upload failed', userMessage);
-            }
-          }
-        } catch (uploadErr) {
-          const interpreted = interpretStorageError(uploadErr, {
-            context: 'create-event-unexpected',
-            path: `event-images/${docRef?.id || 'unknown'}`,
-          });
-          logStorageDiagnostic('event-image-unexpected', interpreted.details);
-          console.warn('Image upload unexpected error:', uploadErr);
-          Alert.alert('Image upload failed', interpreted.userMessage);
-        }
-      }
-
-      // Success: navigate away / close creator BEFORE any non-critical updates
+      // Description: Call success handler immediately - don't block on upload
       try {
         onSuccess && onSuccess(eventLocation);
       } catch (navErr) {
         console.warn('onSuccess handler error:', navErr);
       }
 
-      // Fire-and-forget: user doc updates should not block success UX
+      // Description: Fire-and-forget background task for image upload + user doc updates
       (async () => {
         try {
-          await trackCreateEventSafe({
-            privacy: privacyValue,
-            hasImage: !!imageUri,
-            category: selectedInterest || 'unknown',
-          });
-        } catch {}
-        // Normalize deviceToken to satisfy Firestore rules on update
-        const safeToken =
-          typeof user?.deviceToken === 'string' &&
-          /^ExponentPushToken/.test(user.deviceToken)
-            ? user.deviceToken
-            : null;
-        try {
-          await updateDoc(doc(db, 'users', user.uid), {
-            createdEvents: arrayUnion(docRef.id),
-            // Ensure deviceToken is valid or null to pass rule validation
-            deviceToken: safeToken,
-          });
-        } catch (userUpdateErr) {
+          // Wait for the event document to be readable by security rules (avoid storage.get() race)
+          const waitForEventDoc = async (id, attempts = 12, delayMs = 750) => {
+            for (let i = 0; i < attempts; i++) {
+              try {
+                const snap = await getDoc(doc(db, 'events', id));
+                const activeUser = getAuthUser();
+                if (snap.exists && snap.data()?.ownerId === activeUser?.uid)
+                  return true;
+              } catch (err) {
+                // ignore and retry
+              }
+              await new Promise((r) => setTimeout(r, delayMs));
+            }
+            return false;
+          };
+
+          const ready = await waitForEventDoc(docRef.id);
+          if (!ready) {
+            console.warn(
+              'DBG event doc not readable yet or ownerId mismatch for',
+              docRef.id
+            );
+          }
+
+          // Extra delay to avoid any propagation timing issues before Storage rule get() lookup
+          await new Promise((res) => setTimeout(res, 500));
+
+          // If user selected an image, upload now to owner-scoped path so storage rules allow it
+          if (imageUri) {
+            try {
+              const resp = await fetch(imageUri);
+              const blob = await resp.blob();
+              const contentType = blob.type || 'image/jpeg';
+
+              if (blob?.size && blob.size > MAX_EVENT_IMAGE_BYTES) {
+                console.warn(
+                  'Image exceeds 10MB limit - event created without photo'
+                );
+              } else {
+                // Retry upload a few times to avoid transient rule/propagation issues
+                const tryUpload = async () => {
+                  const storageRef = storage.ref(
+                    `event-images/${docRef.id}/${Date.now()}.jpg`
+                  );
+                  await storageRef.putFile(imageUri, { contentType });
+                  return await storageRef.getDownloadURL();
+                };
+
+                let downloadUrl = null;
+                let lastErr = null;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                  try {
+                    downloadUrl = await tryUpload();
+                    break;
+                  } catch (e) {
+                    lastErr = e;
+                    console.warn(
+                      `Upload attempt ${attempt} failed:`,
+                      e?.code || e
+                    );
+                    await new Promise((r) => setTimeout(r, 500 * attempt));
+                  }
+                }
+
+                // Fallback: if Storage rule still denies under event-images, upload under user's profileImages
+                if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
+                  try {
+                    const altRef = storage.ref(
+                      `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
+                    );
+                    await altRef.putFile(imageUri, { contentType });
+                    downloadUrl = await altRef.getDownloadURL();
+                  } catch (altErr) {
+                    logStorageDiagnostic('event-image-fallback', {
+                      code: altErr?.code,
+                      message: altErr?.message,
+                      path: `profileImages/${user.uid}/${docRef.id}`,
+                    });
+                    console.warn('Fallback upload also failed:', altErr);
+                  }
+                }
+
+                if (downloadUrl) {
+                  // Update event document with the uploaded image URL
+                  await updateDoc(doc(db, 'events', docRef.id), {
+                    imageUrl: downloadUrl,
+                  });
+                  setImageUrl(downloadUrl);
+                } else if (lastErr) {
+                  const interpreted = interpretStorageError(lastErr, {
+                    context: 'create-event',
+                    path: `event-images/${docRef.id}`,
+                  });
+                  logStorageDiagnostic(
+                    'event-image-upload',
+                    interpreted.details
+                  );
+                  console.warn(
+                    'Image upload failed:',
+                    interpreted.userMessage || lastErr
+                  );
+                }
+              }
+            } catch (uploadErr) {
+              const interpreted = interpretStorageError(uploadErr, {
+                context: 'create-event-unexpected',
+                path: `event-images/${docRef?.id || 'unknown'}`,
+              });
+              logStorageDiagnostic(
+                'event-image-unexpected',
+                interpreted.details
+              );
+              console.warn('Image upload unexpected error:', uploadErr);
+            }
+          }
+
+          // User doc updates (non-critical)
+          try {
+            await trackCreateEventSafe({
+              privacy: privacyValue,
+              hasImage: !!imageUri,
+              category: selectedInterest || 'unknown',
+            });
+          } catch {}
+
+          // Normalize deviceToken to satisfy Firestore rules on update
+          const safeToken =
+            typeof user?.deviceToken === 'string' &&
+            /^ExponentPushToken/.test(user.deviceToken)
+              ? user.deviceToken
+              : null;
+          try {
+            await updateDoc(doc(db, 'users', user.uid), {
+              createdEvents: arrayUnion(docRef.id),
+              deviceToken: safeToken,
+            });
+          } catch (userUpdateErr) {
+            console.warn(
+              'Non-critical: failed to tag createdEvents on user',
+              userUpdateErr
+            );
+          }
+          try {
+            await updateEventCount(user.uid);
+          } catch (cntErr) {
+            console.warn('Non-critical: updateEventCount failed', cntErr);
+          }
+        } catch (bgErr) {
           console.warn(
-            'Non-critical: failed to tag createdEvents on user',
-            userUpdateErr
+            'Background event post-create task failed (non-critical):',
+            bgErr
           );
-        }
-        try {
-          await updateEventCount(user.uid);
-        } catch (cntErr) {
-          console.warn('Non-critical: updateEventCount failed', cntErr);
         }
       })();
     } catch (e) {
@@ -566,6 +582,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             onChangeText={setTitle}
             placeholder='Event title'
             placeholderTextColor={theme.colors.textSecondary}
+            keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
           />
 
           {/* Description */}
@@ -574,9 +591,10 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             style={[styles.input, styles.textArea]}
             value={description}
             onChangeText={setDescription}
-            placeholder='What’s your event about?'
-            placeholderTextColor='grey' // Updated to a darker color
+            placeholder="What's your event about?"
+            placeholderTextColor='grey'
             multiline
+            keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
           />
 
           {/* Date & Time */}
@@ -731,6 +749,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             placeholder='Leave empty for unlimited'
             placeholderTextColor={theme.colors.textSecondary}
             keyboardType='numeric'
+            keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
           />
 
           {/* Buttons */}

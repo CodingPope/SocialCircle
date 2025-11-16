@@ -111,6 +111,7 @@ const EventChatScreen = () => {
   const [pinnedDraft, setPinnedDraft] = useState('');
   const [pinnedSaving, setPinnedSaving] = useState(false);
   const [leaveInProgress, setLeaveInProgress] = useState(false);
+  const [deleteInProgress, setDeleteInProgress] = useState(false);
   const [hasShownAccessAlert, setHasShownAccessAlert] = useState(false);
   const [joinGraceActive, setJoinGraceActive] = useState(() => !!joinIntent);
   const sidebarScrollRef = useRef(null);
@@ -1569,6 +1570,7 @@ const EventChatScreen = () => {
               }}
               editable={!readOnly}
               returnKeyType='send'
+              keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
             />
             <TouchableOpacity
               onPress={sendMessage}
@@ -1875,6 +1877,9 @@ const EventChatScreen = () => {
                       onChangeText={setEditDescription}
                       placeholder='Share what attendees should know'
                       placeholderTextColor='#9CA3AF'
+                      keyboardAppearance={
+                        themeMode === 'dark' ? 'dark' : 'light'
+                      }
                     />
                     <Text style={styles.editInfoNotice}>
                       Update details attendees see about this event.
@@ -2057,7 +2062,8 @@ const EventChatScreen = () => {
               <TouchableOpacity
                 style={[
                   styles.leaveButton,
-                  leaveInProgress && styles.leaveButtonDisabled,
+                  (leaveInProgress || deleteInProgress) &&
+                    styles.leaveButtonDisabled,
                 ]}
                 onPress={() => {
                   if (isCreator) {
@@ -2069,41 +2075,31 @@ const EventChatScreen = () => {
                         {
                           text: 'Delete',
                           style: 'destructive',
-                          onPress: () => {
-                            // Description: Delete event from Firestore
-                            // const eventRef = doc(db, 'events', eventId);
-                            // deleteDoc(eventRef)
-                            //   .then(() => {
-                            //     navigation.goBack();
-                            //     Alert.alert(
-                            //       'Event Deleted',
-                            //       'The event has been deleted.'
-                            //     );
-                            //   })
-                            //   .catch((error) => {
-                            //     console.error('Error deleting event:', error);
-                            //     Alert.alert(
-                            //       'Error',
-                            //       'Failed to delete the event.'
-                            //     );
-                            //   });
-
-                            // Soft delete flow
-                            deleteEvent(eventId, auth().currentUser.uid)
-                              .then(() => {
-                                safeExitChat();
+                          onPress: async () => {
+                            setDeleteInProgress(true);
+                            try {
+                              // Description: Soft delete event and navigate away immediately
+                              await deleteEvent(
+                                eventId,
+                                auth().currentUser.uid
+                              );
+                              // Exit chat immediately after successful deletion
+                              safeExitChat();
+                              // Show success message after navigation
+                              setTimeout(() => {
                                 Alert.alert(
                                   'Event Deleted',
                                   'The event has been deleted.'
                                 );
-                              })
-                              .catch((error) => {
-                                console.error('Error deleting event:', error);
-                                Alert.alert(
-                                  'Error',
-                                  'Failed to delete the event.'
-                                );
-                              });
+                              }, 300);
+                            } catch (error) {
+                              console.error('Error deleting event:', error);
+                              setDeleteInProgress(false);
+                              Alert.alert(
+                                'Error',
+                                'Failed to delete the event. Please try again.'
+                              );
+                            }
                           },
                         },
                       ]
@@ -2112,10 +2108,12 @@ const EventChatScreen = () => {
                     handleLeaveEvent();
                   }
                 }}
-                disabled={leaveInProgress}
+                disabled={leaveInProgress || deleteInProgress}
               >
                 <Text style={styles.leaveButtonText}>
-                  {leaveInProgress
+                  {deleteInProgress
+                    ? 'Deleting...'
+                    : leaveInProgress
                     ? 'Leaving...'
                     : isCreator
                     ? 'Delete Event'
@@ -2133,16 +2131,17 @@ const EventChatScreen = () => {
                 <Text style={styles.reportButtonText}>Report Event</Text>
               </TouchableOpacity>
             </ScrollView>
+
+            {/* Date & Time Picker - inside modal for proper z-index */}
+            <DateTimePickerModal
+              isVisible={isEditDatePickerVisible}
+              mode='datetime'
+              onConfirm={handleEditDateConfirm}
+              onCancel={() => setIsEditDatePickerVisible(false)}
+              date={editDate || toDateOrNull(event?.date) || new Date()}
+            />
           </View>
         </Modal>
-
-        <DateTimePickerModal
-          isVisible={isEditDatePickerVisible}
-          mode='datetime'
-          onConfirm={handleEditDateConfirm}
-          onCancel={() => setIsEditDatePickerVisible(false)}
-          date={editDate || toDateOrNull(event?.date) || new Date()}
-        />
 
         <Modal
           isVisible={pinnedEditorVisible}
@@ -2162,6 +2161,7 @@ const EventChatScreen = () => {
               value={pinnedDraft}
               onChangeText={setPinnedDraft}
               maxLength={400}
+              keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
             />
             <View style={styles.pinnedModalActions}>
               <TouchableOpacity

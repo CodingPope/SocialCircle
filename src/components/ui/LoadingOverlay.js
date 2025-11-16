@@ -1,21 +1,63 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, Image, Platform } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withRepeat,
+  withSequence,
+  Easing,
 } from 'react-native-reanimated';
 
+// Description: Premium loading overlay with gradient background and elegant animations
 export default function LoadingOverlay({ visible }) {
   const opacity = useSharedValue(0);
+  const scale = useSharedValue(1);
+  const glowOpacity = useSharedValue(0);
 
   useEffect(() => {
-    opacity.value = visible
-      ? withTiming(1, { duration: 350 })
-      : withTiming(0, { duration: 250 });
+    if (visible) {
+      opacity.value = withTiming(1, { duration: 300 });
+      // Subtle breathing animation for logo
+      scale.value = withRepeat(
+        withSequence(
+          withTiming(1.08, {
+            duration: 1400,
+            easing: Easing.inOut(Easing.ease),
+          }),
+          withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      // Pulsing glow effect
+      glowOpacity.value = withRepeat(
+        withSequence(
+          withTiming(0.4, {
+            duration: 1400,
+            easing: Easing.inOut(Easing.ease),
+          }),
+          withTiming(0.15, {
+            duration: 1400,
+            easing: Easing.inOut(Easing.ease),
+          })
+        ),
+        -1,
+        false
+      );
+    } else {
+      opacity.value = withTiming(0, { duration: 250 });
+      scale.value = withTiming(1, { duration: 200 });
+      glowOpacity.value = withTiming(0, { duration: 200 });
+    }
   }, [visible]);
 
   const fadeStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const logoStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+  const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
 
   if (!visible) return null;
 
@@ -26,15 +68,26 @@ export default function LoadingOverlay({ visible }) {
       accessibilityRole='alert'
       accessible
     >
-      <View style={styles.backdrop} />
-      <View style={styles.iconCard}>
+      <LinearGradient
+        colors={['#0A0C14', '#1a1d2e', '#0A0C14']}
+        locations={[0, 0.5, 1]}
+        style={styles.gradient}
+      />
+
+      {/* Glow effect behind logo */}
+      <Animated.View style={[styles.glowContainer, glowStyle]}>
+        <View style={styles.glow} />
+      </Animated.View>
+
+      {/* Logo */}
+      <Animated.View style={[styles.logoContainer, logoStyle]}>
         <Image
           source={require('../../../assets/icon.png')}
-          style={styles.iconImage}
+          style={styles.logo}
           resizeMode='contain'
-          accessibilityLabel='App loading'
+          accessibilityLabel='Social Circle loading'
         />
-      </View>
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -50,25 +103,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 9999,
   },
-  backdrop: {
+  gradient: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(10,12,20,0.72)',
   },
-  iconCard: {
-    width: 96,
-    height: 96,
-    borderRadius: 24,
-    backgroundColor: '#111827',
-    alignItems: 'center',
+  glowContainer: {
+    position: 'absolute',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: Platform.OS === 'ios' ? 0.18 : 0,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 16,
-    elevation: 8,
+    alignItems: 'center',
   },
-  iconImage: {
-    width: 72,
-    height: 72,
+  glow: {
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: '#6366f1',
+    shadowColor: '#6366f1',
+    shadowOpacity: 0.6,
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 60,
+    elevation: 20,
+  },
+  logoContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logo: {
+    width: 140,
+    height: 140,
   },
 });

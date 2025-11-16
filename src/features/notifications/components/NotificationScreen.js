@@ -428,17 +428,15 @@ const NotificationScreen = () => {
     const id = data.item.id;
     const height = rowHeights[id];
     return (
-      <View style={[styles.rowContainer, height ? { height } : null]}>
-        <View style={[styles.hiddenRow, { height: '100%' }]}>
-          <TouchableOpacity
-            style={[styles.deleteBtn, { height: '100%' }]}
-            onPress={() => confirmDeleteNotification(id)}
-            accessibilityLabel='Delete notification'
-          >
-            <MaterialCommunityIcons name='delete' size={20} color='#fff' />
-            <Text style={styles.deleteText}>Delete</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={[styles.hiddenRowContainer, height ? { height } : null]}>
+        <TouchableOpacity
+          style={styles.deleteBtn}
+          onPress={() => confirmDeleteNotification(id)}
+          accessibilityLabel='Delete notification'
+        >
+          <MaterialCommunityIcons name='delete' size={20} color='#fff' />
+          <Text style={styles.deleteText}>Delete</Text>
+        </TouchableOpacity>
       </View>
     );
   };
@@ -569,7 +567,6 @@ const createStyles = (theme) =>
     list: { padding: 16 },
     rowContainer: {
       borderRadius: 14,
-      overflow: 'hidden',
       marginBottom: 12,
     },
 
@@ -638,27 +635,32 @@ const createStyles = (theme) =>
     pillText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 
     // Hidden row (revealed on swipe)
-    hiddenRow: {
-      height: '100%',
+    hiddenRowContainer: {
       flexDirection: 'row',
       justifyContent: 'flex-end',
-      alignItems: 'stretch',
+      alignItems: 'center',
       backgroundColor: 'transparent',
+      marginBottom: 12,
+      paddingRight: 16,
     },
     deleteBtn: {
-      width: 96,
+      width: 60,
+      height: 60,
       backgroundColor: theme.colors.danger,
       justifyContent: 'center',
       alignItems: 'center',
-      borderTopRightRadius: 14,
-      borderBottomRightRadius: 18,
-      height: '100%',
+      borderRadius: 12,
+      shadowColor: '#000',
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 3,
     },
     deleteText: {
       color: '#fff',
       fontWeight: 'bold',
       marginTop: 2,
-      fontSize: 16,
+      fontSize: 12,
     },
 
     // Modal

@@ -34,6 +34,7 @@ export default function CreateInterestPostModal({
   const user = useUserStore((state) => state.user);
   const insets = useSafeAreaInsets();
   const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [content, setContent] = useState('');
@@ -330,11 +331,12 @@ export default function CreateInterestPostModal({
                   <TextInput
                     value={content}
                     onChangeText={setContent}
-                    placeholder='What’s happening today?'
+                    placeholder="What's happening today?"
                     multiline
                     style={styles.editorInput}
                     maxLength={MAX_TEXT_LENGTH}
                     placeholderTextColor={theme.colors.textSecondary}
+                    keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
                   />
                   <Text style={[styles.charCount, { color: charColor }]}>
                     {content.length}/{MAX_TEXT_LENGTH}

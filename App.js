@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
+import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   NavigationContainer,
@@ -48,6 +49,11 @@ import {
 } from './src/services/deepLinking';
 import { ThemeProvider, lightTheme, darkTheme } from './src/theme';
 import { useThemeStore } from './src/store/themeStore';
+
+// Description: Keep splash screen visible while app loads
+SplashScreen.preventAutoHideAsync().catch(() => {
+  /* ignore errors */
+});
 console.log('Sentry initialization disabled - troubleshooting __extends error');
 
 function AppContent() {
@@ -62,9 +68,25 @@ function AppContent() {
   const [onboardingStep, setOnboardingStep] = useState(null);
   const [showAnalyticsPrompt, setShowAnalyticsPrompt] = useState(false);
   const [consentBusy, setConsentBusy] = useState(false);
+  const [appReady, setAppReady] = useState(false);
   const themeMode = useThemeStore((state) => state.mode);
   // Import onboarding router utility
   const { getNextOnboardingStep } = require('./src/utils/onboardingRouter');
+
+  // Description: Hide splash screen once app is ready
+  useEffect(() => {
+    if (!storeLoading && !checking && appReady) {
+      const hideSplash = async () => {
+        try {
+          await SplashScreen.hideAsync();
+        } catch (err) {
+          // Splash already hidden
+        }
+      };
+      // Small delay to ensure smooth transition
+      setTimeout(hideSplash, 100);
+    }
+  }, [storeLoading, checking, appReady]);
 
   // Create navigation theme based on current theme mode
   const navigationTheme = useMemo(() => {
@@ -252,7 +274,12 @@ function AppContent() {
     } else {
       setShowAnalyticsPrompt(false);
     }
-  }, [user?.uid, user?.analyticsOptIn, user?.analyticsPromptedAt, isBusinessSession]);
+  }, [
+    user?.uid,
+    user?.analyticsOptIn,
+    user?.analyticsPromptedAt,
+    isBusinessSession,
+  ]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -389,6 +416,7 @@ function AppContent() {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
             navigationRef.routeNameRef = rn;
             if (rn) analyticsScreen(rn);
+            setAppReady(true);
           } catch {}
         }}
         onStateChange={async () => {
@@ -415,6 +443,7 @@ function AppContent() {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
             navigationRef.routeNameRef = rn;
             if (rn) analyticsScreen(rn);
+            setAppReady(true);
           } catch {}
         }}
         onStateChange={async () => {

@@ -1668,6 +1668,7 @@ export default function ProfileScreen({ navigation }) {
               multiline
               maxLength={300}
               textAlignVertical='top'
+              keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
             />
             {isEditing && (
               <Text style={styles.bioCharCount}>

@@ -46,6 +46,12 @@ import { CategoryMarker } from '../../../components/map/CategoryMarker';
 import { Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useEventStore } from '../stores/eventStore';
+import {
+  useDiscoveryLocationStore,
+  DEFAULT_DISCOVERY_RADIUS_METERS,
+  MIN_DISCOVERY_RADIUS_METERS,
+  MAX_DISCOVERY_RADIUS_METERS,
+} from '../stores/discoveryLocationStore';
 import joinEvent from '../services/joinEvent';
 import { trackCardClick, trackOpenEvent } from '../../../lib/analytics';
 import { filterBlockedEvents } from '../utils/blockUtils';
@@ -71,6 +77,51 @@ const QUICK_DATE_FILTERS = [
   { key: 'tomorrow', label: 'Tomorrow', startOffset: 1, endOffset: 1 },
   { key: 'week', label: 'This Week', startOffset: 0, endOffset: 6 },
 ];
+
+const METERS_PER_DEGREE_LAT = 111320;
+const MIN_COS_LAT = 0.01;
+
+const clampRadiusToDiscoveryBounds = (value) =>
+  Math.min(
+    Math.max(
+      typeof value === 'number' && !Number.isNaN(value)
+        ? value
+        : DEFAULT_DISCOVERY_RADIUS_METERS,
+      MIN_DISCOVERY_RADIUS_METERS
+    ),
+    MAX_DISCOVERY_RADIUS_METERS
+  );
+
+const deriveRadiusFromRegion = (region) => {
+  if (!region) return DEFAULT_DISCOVERY_RADIUS_METERS;
+  const latDelta = Math.abs(region.latitudeDelta || 0);
+  const lngDelta = Math.abs(region.longitudeDelta || 0);
+  const centerLat = region.latitude || 0;
+  const latMeters = latDelta * METERS_PER_DEGREE_LAT;
+  const lngMeters =
+    lngDelta *
+    METERS_PER_DEGREE_LAT *
+    Math.max(Math.cos((centerLat * Math.PI) / 180), MIN_COS_LAT);
+  const estimatedRadius = Math.max(latMeters, lngMeters) / 2;
+  const fallback = latMeters || lngMeters || DEFAULT_DISCOVERY_RADIUS_METERS;
+  return clampRadiusToDiscoveryBounds(estimatedRadius || fallback);
+};
+
+const buildRegionFromContext = (
+  coords,
+  radiusMeters = DEFAULT_DISCOVERY_RADIUS_METERS
+) => {
+  if (!coords) return null;
+  const latDelta = ((radiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS) * 2) / METERS_PER_DEGREE_LAT;
+  const cosLat = Math.max(Math.cos((coords.latitude * Math.PI) / 180), MIN_COS_LAT);
+  const lngDelta = latDelta / cosLat;
+  return {
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    latitudeDelta: latDelta || 0.05,
+    longitudeDelta: lngDelta || 0.05,
+  };
+};
 
 export default function MapScreen() {
   // Description: Get current user from Zustand userStore
@@ -157,6 +208,7 @@ export default function MapScreen() {
   const [previewItems, setPreviewItems] = useState([]);
   const previewsIdleTimerRef = useRef(null);
   const previewsCooldownRef = useRef(0);
+  const previewRotationRef = useRef({ signature: null, nextIndex: 0 });
   const mapRef = useRef(null);
   const eventStoreRef = useRef(useEventStore.getState());
   const createFabRef = useRef(null);
@@ -167,6 +219,10 @@ export default function MapScreen() {
   });
   const tutorialOpacity = useRef(new Animated.Value(0)).current;
   const lastInteractionRef = useRef(Date.now());
+  const skipNextRegionSyncRef = useRef(false);
+  const setGpsLocation = useDiscoveryLocationStore((state) => state.setGpsLocation);
+  const setMapOverride = useDiscoveryLocationStore((state) => state.setMapOverride);
+  const clearOverride = useDiscoveryLocationStore((state) => state.clearOverride);
 
   const [isLocating, setIsLocating] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -554,15 +610,25 @@ export default function MapScreen() {
         }
 
         const location = await Location.getCurrentPositionAsync({});
-        const initialRegion = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          latitudeDelta: 0.0922 * 1.5,
-          longitudeDelta: 0.0421 * 1.5,
-        };
+        const storedOverride = useDiscoveryLocationStore.getState().override;
+        const overrideRegion = storedOverride?.coords
+          ? buildRegionFromContext(
+              storedOverride.coords,
+              storedOverride.radiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS
+            )
+          : null;
+        const initialRegion =
+          overrideRegion || {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            latitudeDelta: 0.0922 * 1.5,
+            longitudeDelta: 0.0421 * 1.5,
+          };
 
+        skipNextRegionSyncRef.current = true;
         setRegion(initialRegion);
         await fetchEventsInRegion(initialRegion, true);
+        setGpsLocation({ coords: location.coords });
       } catch (error) {
         console.error('Error loading map data:', error);
       }
@@ -810,6 +876,11 @@ export default function MapScreen() {
     fetchEventsInRegion(newRegion);
     // Schedule previews after idle delay if cooldown allows
     schedulePreviews();
+    if (skipNextRegionSyncRef.current) {
+      skipNextRegionSyncRef.current = false;
+      return;
+    }
+    syncDiscoveryLocationFromRegion(newRegion, 'pan');
   };
 
   // Hide previews while actively moving the map
@@ -892,6 +963,7 @@ export default function MapScreen() {
 
       if (!candidates.length) {
         setPreviewItems([]);
+        previewRotationRef.current = { signature: null, nextIndex: 0 };
         return;
       }
 
@@ -900,23 +972,44 @@ export default function MapScreen() {
           event,
           isBoosted: isBoostedEvent(event),
           popularity: getPopularityScore(event),
-          seq: Math.random(),
         }))
         .sort((a, b) => {
           if (a.isBoosted !== b.isBoosted) return a.isBoosted ? -1 : 1;
           if (b.popularity !== a.popularity) return b.popularity - a.popularity;
-          return a.seq - b.seq;
+          const aId = a.event?.id || '';
+          const bId = b.event?.id || '';
+          return aId.localeCompare(bId);
         })
         .map((entry) => entry.event);
+
+      const signature = prioritized.map((ev) => ev?.id || '').join('|');
+      const rotationState = previewRotationRef.current;
+      if (rotationState.signature !== signature) {
+        rotationState.signature = signature;
+        rotationState.nextIndex = 0;
+      }
+
+      const rotationOffset =
+        prioritized.length > 1
+          ? rotationState.nextIndex % prioritized.length
+          : 0;
+
+      const rotated =
+        rotationOffset > 0
+          ? [
+              ...prioritized.slice(rotationOffset),
+              ...prioritized.slice(0, rotationOffset),
+            ]
+          : prioritized;
 
       const anchors = [];
       const items = [];
       for (
         let i = 0;
-        i < prioritized.length && items.length < MAX_EVENT_PREVIEWS;
+        i < rotated.length && items.length < MAX_EVENT_PREVIEWS;
         i++
       ) {
-        const ev = prioritized[i];
+        const ev = rotated[i];
         try {
           const pt = await mapRef.current.pointForCoordinate(ev.location);
           if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number')
@@ -970,6 +1063,13 @@ export default function MapScreen() {
       }
 
       setPreviewItems(items);
+      if (rotated.length) {
+        const advanceBy = Math.max(1, items.length);
+        rotationState.nextIndex =
+          (rotationOffset + advanceBy) % rotated.length;
+      } else {
+        rotationState.nextIndex = 0;
+      }
       previewsCooldownRef.current = Date.now();
     } catch (e) {
       // ignore
@@ -1157,6 +1257,22 @@ export default function MapScreen() {
     [markerColors]
   );
 
+  const syncDiscoveryLocationFromRegion = useCallback(
+    (region, source = 'pan', label = null) => {
+      if (!region) return;
+      setMapOverride({
+        coords: {
+          latitude: region.latitude,
+          longitude: region.longitude,
+        },
+        radiusMeters: deriveRadiusFromRegion(region),
+        label,
+        source,
+      });
+    },
+    [setMapOverride]
+  );
+
   const handlePlaceSelect = (data, details) => {
     markInteraction();
     if (details?.geometry?.location) {
@@ -1167,8 +1283,14 @@ export default function MapScreen() {
         latitudeDelta: 0.05,
         longitudeDelta: 0.05,
       };
+      skipNextRegionSyncRef.current = true;
       setRegion(newRegion);
       fetchEventsInRegion(newRegion);
+      syncDiscoveryLocationFromRegion(
+        newRegion,
+        'search',
+        data?.description || details?.formatted_address || null
+      );
       if (Platform.OS === 'android') setIsSearchFocused(false); // ✅ close overlay
     }
   };
@@ -1190,8 +1312,11 @@ export default function MapScreen() {
         latitudeDelta: 0.05,
         longitudeDelta: 0.05,
       };
+      skipNextRegionSyncRef.current = true;
       setRegion(userRegion);
       fetchEventsInRegion(userRegion);
+      setGpsLocation({ coords: location.coords });
+      clearOverride();
     } catch {
       Alert.alert('Error', 'Unable to get your location.');
     }
@@ -1512,7 +1637,19 @@ export default function MapScreen() {
         >
           {filteredEvents
             // Defensive: ensure marker has a valid location and isn't soft-deleted
-            .filter((e) => e && e.location && !e.isDeleted)
+            .filter((e) => {
+              if (!e || e.isDeleted) return false;
+              const loc = e?.location;
+              const lat = loc?.latitude;
+              const lng = loc?.longitude;
+              return (
+                loc &&
+                typeof lat === 'number' &&
+                !Number.isNaN(lat) &&
+                typeof lng === 'number' &&
+                !Number.isNaN(lng)
+              );
+            })
             .map((event) => {
               // Description: Check if event owner is a friend/following for blue border
               // Handle multiple possible owner field names

@@ -151,6 +151,21 @@ const createStyles = (theme) => {
       paddingVertical: spacing.sm,
       borderRadius: radii.md,
     },
+    countDivider: {
+      width: 1,
+      height: 12,
+      backgroundColor: 'rgba(255,255,255,0.4)',
+      marginHorizontal: spacing.xs,
+    },
+    countText: {
+      fontSize: 11,
+      color: 'rgba(255,255,255,0.7)',
+      fontWeight: '500',
+    },
+    selectedCountText: {
+      color: 'rgba(255,255,255,0.9)',
+      fontWeight: '600',
+    },
   });
 };
 
@@ -170,6 +185,24 @@ export default function ManageInterestsScreen({ navigation }) {
   useEffect(() => {
     const fetchCategoriesAndUserInterests = async () => {
       try {
+        // Description: Helper to normalize interest names for deduplication
+        const normalizeInterest = (name) => {
+          return name.toLowerCase().trim().replace(/\s+/g, ' ');
+        };
+
+        // Description: Extract count from interest object checking multiple fields
+        const getInterestCount = (interest) => {
+          if (typeof interest === 'string') return 0;
+          return (
+            interest.count_selected ||
+            interest.count ||
+            interest.count_event_matches ||
+            interest.count_event_views ||
+            interest.count_event_joins ||
+            0
+          );
+        };
+
         // Fetch categories
         const snapshot = await getDocs(collection(db, 'categories'));
         const fetchedCategories = snapshot.docs.map((categoryDoc) => ({
@@ -178,15 +211,54 @@ export default function ManageInterestsScreen({ navigation }) {
           interests: categoryDoc.data().interests || [],
         }));
 
-        // Add "All" category
-        const allInterests = fetchedCategories.flatMap((cat) => cat.interests);
-        fetchedCategories.unshift({
+        // Description: Track unique interests with counts for deduplication
+        const interestMap = new Map();
+        const interestOrder = [];
+
+        fetchedCategories.forEach((category) => {
+          category.interests.forEach((interest) => {
+            const interestName =
+              typeof interest === 'string' ? interest : interest.name;
+            const normalized = normalizeInterest(interestName);
+
+            if (!interestMap.has(normalized)) {
+              const count = getInterestCount(interest);
+              interestMap.set(normalized, { name: interestName, count });
+              interestOrder.push({ name: interestName, count });
+            }
+          });
+        });
+
+        // Description: Create Popular category with top 30 interests sorted by count
+        const POPULAR_LIMIT = 30;
+        const filteredBaseCategories = fetchedCategories.filter(
+          (cat) => cat.id !== 'all' && cat.id !== 'popular'
+        );
+
+        const sortedPopular = interestOrder
+          .sort((a, b) => b.count - a.count)
+          .slice(0, POPULAR_LIMIT);
+
+        const popularCategory = {
+          id: 'popular',
+          name: 'Popular',
+          interests: sortedPopular,
+        };
+
+        // Description: Build final category list with Popular first, then All
+        const allInterests = Array.from(interestMap.values());
+        const allCategory = {
           id: 'all',
           name: 'All',
           interests: allInterests,
-        });
+        };
 
-        setCategories(fetchedCategories);
+        const categoriesWithSpecials = [
+          popularCategory,
+          allCategory,
+          ...filteredBaseCategories,
+        ];
+        setCategories(categoriesWithSpecials);
 
         // Fetch user's selected interests
         const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -195,7 +267,7 @@ export default function ManageInterestsScreen({ navigation }) {
           setSelected(userData.interests || []); // Prepopulate selected interests
         }
 
-        setActiveCategory(fetchedCategories[0]?.id || '');
+        setActiveCategory('popular');
         fadeIn();
       } catch (e) {
         console.error(e);
@@ -370,6 +442,20 @@ export default function ManageInterestsScreen({ navigation }) {
                     >
                       {activity.name}
                     </Text>
+                    {(activity.count || 0) > 0 && (
+                      <>
+                        <View style={styles.countDivider} />
+                        <Text
+                          style={[
+                            styles.countText,
+                            selected.includes(activity.name) &&
+                              styles.selectedCountText,
+                          ]}
+                        >
+                          {activity.count}
+                        </Text>
+                      </>
+                    )}
                     {selected.includes(activity.name) && (
                       <Ionicons
                         name='checkmark'

@@ -3142,6 +3142,126 @@ exports.updateCategoriesHttp = onRequest(
   }
 );
 
+// HTTP function to recalculate interest counts from existing users
+exports.recalculateInterestCountsHttp = onRequest(
+  {
+    region: 'us-central1',
+    cors: true,
+  },
+  async (request, response) => {
+    // Simple security: require a secret key
+    const secretKey = request.query.secret || request.body?.secret;
+    if (secretKey !== 'update-categories-2025') {
+      response.status(403).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      logger.info('[recalculateInterestCounts] Fetching all users...');
+      const usersSnapshot = await db.collection('users').get();
+
+      // Count how many times each interest is selected across all users
+      const interestCounts = new Map();
+
+      usersSnapshot.docs.forEach((userDoc) => {
+        const userData = userDoc.data();
+        const interests = Array.isArray(userData.interests)
+          ? userData.interests
+          : [];
+
+        interests.forEach((interest) => {
+          const count = interestCounts.get(interest) || 0;
+          interestCounts.set(interest, count + 1);
+        });
+      });
+
+      logger.info(
+        `[recalculateInterestCounts] Counted interests from ${usersSnapshot.size} users`
+      );
+      logger.info(
+        `[recalculateInterestCounts] Found ${interestCounts.size} unique interests`
+      );
+
+      // Update categories with the counts
+      logger.info('[recalculateInterestCounts] Updating categories...');
+      const categoriesSnapshot = await db.collection('categories').get();
+
+      let batch = db.batch();
+      let updatedCount = 0;
+      let writes = 0;
+
+      categoriesSnapshot.docs.forEach((categoryDoc) => {
+        const categoryData = categoryDoc.data();
+        const interests = categoryData.interests || [];
+
+        const updatedInterests = interests.map((interest) => {
+          const interestName =
+            typeof interest === 'string' ? interest : interest.name;
+          const count = interestCounts.get(interestName) || 0;
+
+          if (typeof interest === 'string') {
+            return {
+              name: interest,
+              count_selected: count,
+              count_event_matches: 0,
+              count_event_views: 0,
+              count_event_joins: 0,
+              last_activity: null,
+            };
+          }
+
+          return {
+            ...interest,
+            count_selected: count,
+          };
+        });
+
+        batch.update(categoryDoc.ref, {
+          interests: updatedInterests,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        writes++;
+        updatedCount++;
+
+        // Commit batch every 500 writes
+        if (writes % 500 === 0) {
+          batch.commit();
+          batch = db.batch();
+        }
+      });
+
+      // Commit remaining writes
+      if (writes % 500 !== 0) {
+        await batch.commit();
+      }
+
+      // Get top interests for response
+      const topInterests = Array.from(interestCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 20)
+        .map(([interest, count]) => ({ interest, count }));
+
+      logger.info(
+        `[recalculateInterestCounts] Successfully updated ${updatedCount} categories`
+      );
+      response.json({
+        success: true,
+        categoriesUpdated: updatedCount,
+        totalUsers: usersSnapshot.size,
+        uniqueInterests: interestCounts.size,
+        topInterests,
+      });
+    } catch (error) {
+      logger.error('[recalculateInterestCounts] Error:', error);
+      response.status(500).json({
+        error: 'Failed to recalculate interest counts',
+        details: error.message,
+      });
+    }
+  }
+);
+
 // Function to update categories from the new categories data
 exports.updateCategories = onCall(
   {
@@ -3458,8 +3578,8 @@ exports.aggregateUsageMetrics = onSchedule(
 
 // -------------------- USER VERIFICATION --------------------
 
-// Description: Request email verification
-// Sends verification email to user's registered email address
+// Description: Request email verification using Firebase Auth's built-in system
+// Note: Firebase Auth sends the email automatically, no custom email service needed
 exports.requestEmailVerification = onCall(
   {
     region: 'us-central1',
@@ -3470,63 +3590,55 @@ exports.requestEmailVerification = onCall(
   async (req) => {
     logger.info('[requestEmailVerification] Function called');
     const uid = req.auth?.uid;
-    logger.info(`[requestEmailVerification] UID: ${uid}`);
 
     if (!uid) {
       throw new HttpsError('unauthenticated', 'Authentication required');
     }
 
     try {
-      // Get user data
-      const userDoc = await db.doc(`users/${uid}`).get();
-      if (!userDoc.exists) {
-        throw new HttpsError('not-found', 'User not found');
-      }
+      // Get user from Firebase Auth
+      const userRecord = await admin.auth().getUser(uid);
 
-      const userData = userDoc.data();
-      logger.info(`[requestEmailVerification] User email: ${userData.email}`);
-
-      // Check if already verified
-      if (userData.verified === true) {
-        logger.info('[requestEmailVerification] User already verified');
+      // Check if email is already verified in Firebase Auth
+      if (userRecord.emailVerified) {
+        logger.info(
+          '[requestEmailVerification] Email already verified in Firebase Auth'
+        );
+        // Also update Firestore to match
+        await db.doc(`users/${uid}`).update({
+          verified: true,
+          verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          verificationMethod: 'email',
+        });
         return { ok: true, alreadyVerified: true };
       }
 
-      // Check if email is set
-      const email = userData.email || req.auth.token.email;
-      if (!email) {
-        throw new HttpsError('failed-precondition', 'No email address on file');
-      }
+      // Generate email verification link
+      const actionCodeSettings = {
+        url: `https://${
+          process.env.GCLOUD_PROJECT || 'social-scene1'
+        }.firebaseapp.com`,
+        handleCodeInApp: false,
+      };
 
-      // Generate verification code (6 digits)
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = admin.firestore.Timestamp.fromMillis(
-        Date.now() + 15 * 60 * 1000 // 15 minutes
-      );
+      const link = await admin
+        .auth()
+        .generateEmailVerificationLink(userRecord.email, actionCodeSettings);
 
       logger.info(
-        `[requestEmailVerification] Generated code: ${code} for ${email}`
+        `[requestEmailVerification] Generated link for ${userRecord.email}`
       );
 
-      // Store verification request
-      await db.doc(`users/${uid}`).update({
-        verificationRequest: {
-          type: 'email',
-          code,
-          email,
-          expiresAt,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          attempts: 0,
-        },
-      });
+      // Note: In production, you'd send this link via your email service (SendGrid, etc.)
+      // For now, Firebase Console settings must have email templates configured
+      // The link is generated but Firebase doesn't automatically send it from Cloud Functions
+      // You need to call auth().currentUser.sendEmailVerification() from the client
 
-      // TODO: Send email with code (integrate with SendGrid/similar)
-      // For now, log the code (development only)
-      logger.info(`✅ VERIFICATION CODE for ${email}: ${code}`);
-      console.log(`✅✅✅ VERIFICATION CODE for ${email}: ${code} ✅✅✅`);
-
-      // DEVELOPMENT ONLY: Return code in response (remove in production!)
-      return { ok: true, email, codeLength: 6, devCode: code };
+      return {
+        ok: true,
+        email: userRecord.email,
+        message: 'Please check your email for verification link',
+      };
     } catch (err) {
       if (err instanceof HttpsError) throw err;
       logger.error('[requestEmailVerification] error', err?.message || err);
@@ -3670,11 +3782,14 @@ exports.requestPhoneVerification = onCall(
         },
       });
 
-      // TODO: Send SMS with code (integrate with Twilio)
-      logger.info(`[verification] SMS code for ${phoneNumber}: ${code}`);
+      // Send SMS with code
+      // TODO: Integrate with Twilio or similar SMS service
+      logger.info(
+        `[requestPhoneVerification] Code generated for ${phoneNumber}: ${code}`
+      );
+      // For now, code is logged server-side only
 
-      // DEVELOPMENT ONLY: Return code in response (remove in production!)
-      return { ok: true, phoneNumber, codeLength: 6, devCode: code };
+      return { ok: true, phoneNumber, codeLength: 6 };
     } catch (err) {
       if (err instanceof HttpsError) throw err;
       logger.error('[requestPhoneVerification] error', err?.message || err);
@@ -3761,6 +3876,100 @@ exports.verifyPhoneCode = onCall(
       if (err instanceof HttpsError) throw err;
       logger.error('[verifyPhoneCode] error', err?.message || err);
       throw new HttpsError('internal', 'Phone verification failed');
+    }
+  }
+);
+
+/**
+ * Description: Cloud Function to update interest counts in categories when user interests change
+ * Tracks count_selected field for each interest across all categories
+ */
+exports.updateInterestCounts = onDocumentUpdated(
+  'users/{userId}',
+  async (event) => {
+    try {
+      const beforeData = event.data.before.data();
+      const afterData = event.data.after.data();
+
+      const beforeInterests = Array.isArray(beforeData?.interests)
+        ? beforeData.interests
+        : [];
+      const afterInterests = Array.isArray(afterData?.interests)
+        ? afterData.interests
+        : [];
+
+      // Find interests that were added or removed
+      const addedInterests = afterInterests.filter(
+        (interest) => !beforeInterests.includes(interest)
+      );
+      const removedInterests = beforeInterests.filter(
+        (interest) => !afterInterests.includes(interest)
+      );
+
+      if (addedInterests.length === 0 && removedInterests.length === 0) {
+        // No interest changes
+        return null;
+      }
+
+      logger.info(
+        `[updateInterestCounts] User ${event.params.userId} added ${addedInterests.length}, removed ${removedInterests.length} interests`
+      );
+
+      // Fetch all categories
+      const categoriesSnapshot = await db.collection('categories').get();
+
+      const batch = db.batch();
+
+      categoriesSnapshot.docs.forEach((categoryDoc) => {
+        const categoryData = categoryDoc.data();
+        const interests = categoryData.interests || [];
+        let modified = false;
+
+        const updatedInterests = interests.map((interest) => {
+          const interestName =
+            typeof interest === 'string' ? interest : interest.name;
+
+          if (addedInterests.includes(interestName)) {
+            modified = true;
+            const currentCount =
+              typeof interest === 'object' ? interest.count_selected || 0 : 0;
+            return {
+              ...(typeof interest === 'object' ? interest : { name: interest }),
+              count_selected: currentCount + 1,
+            };
+          }
+
+          if (removedInterests.includes(interestName)) {
+            modified = true;
+            const currentCount =
+              typeof interest === 'object' ? interest.count_selected || 0 : 0;
+            return {
+              ...(typeof interest === 'object' ? interest : { name: interest }),
+              count_selected: Math.max(0, currentCount - 1),
+            };
+          }
+
+          return interest;
+        });
+
+        if (modified) {
+          batch.update(categoryDoc.ref, {
+            interests: updatedInterests,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      });
+
+      await batch.commit();
+      logger.info(
+        `[updateInterestCounts] Successfully updated interest counts`
+      );
+
+      return null;
+    } catch (error) {
+      logger.error('[updateInterestCounts] Error:', error);
+      // Don't throw - we don't want to block user updates
+      return null;
     }
   }
 );

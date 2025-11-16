@@ -22,10 +22,12 @@ import {
   verifyPhoneCode,
 } from '../../../firebase/config';
 import { useTheme } from '../../../theme';
+import { useThemeStore } from '../../../store/themeStore';
 import { useUserStore } from '../stores/userStore';
 
 export default function VerificationModal({ isVisible, onClose, onSuccess }) {
   const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
   const user = useUserStore((state) => state.user);
 
   const [step, setStep] = useState('choose'); // 'choose', 'email-input', 'phone-input', 'email-code', 'phone-code'
@@ -313,6 +315,7 @@ export default function VerificationModal({ isVisible, onClose, onSuccess }) {
         placeholder='(555) 123-4567'
         placeholderTextColor={theme.colors.textSecondary}
         value={phoneNumber}
+        keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
         onChangeText={setPhoneNumber}
         keyboardType='phone-pad'
         autoFocus
@@ -366,6 +369,7 @@ export default function VerificationModal({ isVisible, onClose, onSuccess }) {
         placeholderTextColor={theme.colors.textSecondary}
         value={code}
         onChangeText={setCode}
+        keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
         keyboardType='number-pad'
         maxLength={6}
         autoFocus

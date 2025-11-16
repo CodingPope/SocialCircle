@@ -31,6 +31,7 @@ import LoadingOverlay from '../../../../components/ui/LoadingOverlay';
 import AnimatedGradientBackground from '../../../../components/ui/AnimatedGradientBackground';
 import Button from '../../../../components/ui/Button';
 import { useTheme } from '../../../../theme';
+import { useThemeStore } from '../../../../store/themeStore';
 import {
   getAuthErrorMessage,
   isValidEmail,
@@ -38,6 +39,65 @@ import {
   logAuthError,
 } from '../../utils/authErrorHandler';
 import { useBizOnboarding } from '../../../business';
+import { Ionicons } from '@expo/vector-icons';
+
+const extractAppleProfileFields = (appleCredential, firebaseUser) => {
+  const fullName = appleCredential?.fullName || {};
+  const displayNameParts = (firebaseUser?.displayName || '')
+    .split(' ')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const [displayFirstName, ...displayRemaining] = displayNameParts;
+
+  return {
+    email:
+      firebaseUser?.email ||
+      appleCredential?.email ||
+      firebaseUser?.providerData?.find((p) => p?.email)?.email ||
+      '',
+    firstName:
+      fullName.givenName || fullName.nickname || displayFirstName || '',
+    lastName: fullName.familyName || displayRemaining.join(' ') || '',
+    appleRelayEmail: appleCredential?.email || null,
+  };
+};
+
+// Toggle visibility for the business login tab on the auth screen.
+const ENABLE_BUSINESS_ACCOUNT_SWITCH = false;
+
+const HERO_COPY = {
+  login: {
+    eyebrow: 'Back again?',
+    title: 'Pick up where you left off',
+    subtitle:
+      'Dive into new circles, RSVP to fresh experiences, and keep the conversation flowing.',
+  },
+  signup: {
+    eyebrow: 'New to SocialCircle',
+    title: 'Design your social life',
+    subtitle:
+      'Tell us what you are into and we will curate people, places, and plans that match.',
+  },
+  business: {
+    eyebrow: 'Partner access',
+    title: 'Host unforgettable gatherings',
+    subtitle:
+      'Showcase your venue, publish lineups, and keep your community engaged in real time.',
+  },
+};
+
+const HERO_STATS = [
+  { value: '1.2K+', label: 'Weekly hangouts' },
+  { value: '320+', label: 'Communities near you' },
+  { value: '4.8 ★', label: 'Host satisfaction' },
+];
+
+const BUSINESS_STATS = [
+  { value: '$42K', label: 'Avg. host revenue' },
+  { value: '24H', label: 'Approval turnaround' },
+  { value: '98%', label: 'Booking retention' },
+];
 
 const createStyles = (theme) => {
   const { colors, radii, spacing } = theme;
@@ -47,63 +107,127 @@ const createStyles = (theme) => {
     },
     overlay: {
       flex: 1,
-      justifyContent: 'center',
+      paddingTop: spacing.xl,
+      paddingBottom: spacing.lg,
       paddingHorizontal: spacing.lg,
-      backgroundColor: 'rgba(255,255,255,0.12)',
+      gap: spacing.xl,
     },
-    logo: {
-      width: 220,
-      height: 90,
-      alignSelf: 'center',
-      marginBottom: spacing.xl + spacing.sm,
+    heroBlock: {
+      borderRadius: radii.xl,
+      padding: spacing.lg,
+      backgroundColor: 'rgba(8, 3, 18, 0.35)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.1)',
+    },
+    logoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.md,
+      gap: spacing.md,
+    },
+    heroLogo: {
+      width: 56,
+      height: 56,
+      borderRadius: radii.xl,
+    },
+    heroBrand: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: colors.neutral50,
+    },
+    heroTagline: {
+      color: colors.neutral200,
+      fontSize: 13,
+    },
+    heroBadge: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: radii.lg,
+      backgroundColor: 'rgba(255,255,255,0.1)',
+      marginBottom: spacing.sm,
+      gap: spacing.xs,
+    },
+    heroBadgeText: {
+      color: colors.neutral100,
+      fontSize: 12,
+      letterSpacing: 1,
+      textTransform: 'uppercase',
+    },
+    heroTitle: {
+      fontSize: 32,
+      fontWeight: '700',
+      color: colors.neutral50,
+      marginBottom: spacing.xs,
+    },
+    heroSubtitle: {
+      color: colors.neutral200,
+      fontSize: 15,
+      lineHeight: 22,
+      marginBottom: spacing.lg,
+    },
+    heroStatsRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: spacing.sm,
+    },
+    statCard: {
+      flex: 1,
+      borderRadius: radii.lg,
+      padding: spacing.sm,
+      backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    statValue: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: colors.neutral50,
+    },
+    statLabel: {
+      fontSize: 12,
+      color: colors.neutral200,
+      marginTop: spacing.xs / 2,
     },
     card: {
       backgroundColor: colors.neutral100,
-      borderRadius: radii.lg,
+      borderRadius: radii.xl,
       padding: spacing.lg,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 3 },
-      elevation: 4,
+      shadowColor: '#0E1335',
+      shadowOpacity: 0.15,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 8,
     },
-    input: {
-      borderWidth: 1,
-      borderColor: colors.neutral400,
-      borderRadius: radii.md,
-      padding: spacing.md,
-      marginBottom: spacing.md,
-      fontSize: 16,
-      color: colors.neutral900,
-      backgroundColor: colors.neutral200,
+    sectionEyebrow: {
+      fontSize: 12,
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      color: colors.neutral500,
+      marginBottom: spacing.xs,
     },
-    linkButton: {
-      marginTop: spacing.md,
-      alignItems: 'center',
-    },
-    linkText: {
-      color: colors.primary,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    businessLabel: {
-      fontSize: 14,
+    cardTitle: {
+      fontSize: 24,
       fontWeight: '700',
-      color: colors.secondary,
-      marginBottom: spacing.sm,
-      textTransform: 'none',
+      color: colors.neutral900,
+    },
+    cardSubtitle: {
+      fontSize: 15,
+      color: colors.neutral600,
+      marginBottom: spacing.lg,
     },
     accountSwitchContainer: {
       flexDirection: 'row',
       backgroundColor: colors.neutral200,
       padding: spacing.xs,
-      borderRadius: radii.lg,
+      borderRadius: radii.xl,
       marginBottom: spacing.md,
+      gap: spacing.xs,
     },
     accountSwitchButton: {
       flex: 1,
       paddingVertical: spacing.sm,
-      borderRadius: radii.md,
+      borderRadius: radii.lg,
       alignItems: 'center',
     },
     accountSwitchButtonActive: {
@@ -123,36 +247,131 @@ const createStyles = (theme) => {
       color: colors.primary,
     },
     accountSwitchHelper: {
-      fontSize: 12,
-      color: colors.neutral600,
-      marginBottom: spacing.md,
+      fontSize: 13,
+      color: colors.neutral500,
+      marginBottom: spacing.sm,
       textAlign: 'center',
+    },
+    modeSwitch: {
+      flexDirection: 'row',
+      borderRadius: radii.xl,
+      backgroundColor: colors.neutral200,
+      padding: spacing.xs,
+      marginBottom: spacing.lg,
+      gap: spacing.xs,
+    },
+    modeOption: {
+      flex: 1,
+      paddingVertical: spacing.sm,
+      borderRadius: radii.lg,
+      alignItems: 'center',
+    },
+    modeOptionActive: {
+      backgroundColor: colors.neutral100,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowOffset: { width: 0, height: 2 },
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    modeOptionText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.neutral600,
+    },
+    modeOptionTextActive: {
+      color: colors.primary,
+    },
+    businessLabel: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.secondary,
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      marginBottom: spacing.xs,
+    },
+    inputGroup: {
+      marginBottom: spacing.md,
+    },
+    inputLabel: {
+      fontSize: 13,
+      color: colors.neutral500,
+      marginBottom: spacing.xs / 2,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.neutral300,
+      borderRadius: radii.lg,
+      padding: spacing.md,
+      fontSize: 16,
+      color: colors.neutral900,
+      backgroundColor: colors.neutral50,
     },
     appleButton: {
       width: '100%',
       height: 44,
       marginTop: spacing.sm,
     },
-    divider: {
-      height: 1,
-      backgroundColor: colors.neutral400,
-      marginVertical: spacing.lg,
-    },
     buttonSpacing: {
       marginTop: spacing.sm,
       width: '100%',
     },
-    secondaryButton: {
-      backgroundColor: colors.primaryLight,
-      paddingVertical: spacing.md,
-      borderRadius: radii.md,
+    inlineActions: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
       alignItems: 'center',
-      marginTop: spacing.md,
+      marginBottom: spacing.md,
     },
-    secondaryButtonText: {
-      color: colors.neutral100,
+    linkText: {
+      color: colors.primary,
+      fontSize: 13,
       fontWeight: '600',
+    },
+    subtleLinkText: {
+      color: colors.neutral500,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    dividerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginVertical: spacing.md,
+      gap: spacing.sm,
+    },
+    dividerLine: {
+      flex: 1,
+      height: 1,
+      backgroundColor: colors.neutral200,
+    },
+    dividerLabel: {
+      fontSize: 12,
+      color: colors.neutral500,
+      letterSpacing: 1,
+      textTransform: 'uppercase',
+    },
+    socialButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.neutral300,
+      borderRadius: radii.lg,
+      paddingVertical: spacing.md,
+      gap: spacing.sm,
+    },
+    socialButtonDisabled: {
+      opacity: 0.5,
+    },
+    socialButtonText: {
       fontSize: 15,
+      fontWeight: '600',
+      color: colors.neutral900,
+    },
+    helperCopy: {
+      textAlign: 'center',
+      color: colors.neutral500,
+      fontSize: 13,
+      marginTop: spacing.lg,
     },
   });
 };
@@ -170,12 +389,45 @@ export default function AuthScreen({ navigation, route }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [businessMode, setBusinessMode] = useState(!!route?.params?.business);
+  const showBusinessAccountSwitch =
+    ENABLE_BUSINESS_ACCOUNT_SWITCH || businessMode;
   const setUser = useUserStore((state) => state.setUser);
   const setProfileComplete = useUserStore((state) => state.setProfileComplete);
   const setRole = useSessionRole((s) => s.setRole);
   const setNextBusinessRoute = useSessionRole((s) => s.setNextBusinessRoute);
   const theme = useTheme();
+  const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const heroCopy = useMemo(
+    () =>
+      businessMode ? HERO_COPY.business : HERO_COPY[mode] || HERO_COPY.login,
+    [businessMode, mode]
+  );
+  const heroStats = businessMode ? BUSINESS_STATS : HERO_STATS;
+  const cardTitle = useMemo(() => {
+    if (businessMode) {
+      return mode === 'login'
+        ? 'Welcome back, host'
+        : 'List your venue in minutes';
+    }
+    return mode === 'login' ? 'Welcome back' : 'Create your profile';
+  }, [businessMode, mode]);
+  const cardSubtitle = useMemo(() => {
+    if (businessMode) {
+      return mode === 'login'
+        ? 'Track events, respond to requests, and keep your community engaged.'
+        : 'Share your brand details so we can fast-track your review.';
+    }
+    return mode === 'login'
+      ? 'Sign in to catch new drops, RSVPs, and chats tailored to you.'
+      : 'It takes less than a minute to tell us what you are into.';
+  }, [businessMode, mode]);
+  const inlineModeLabel =
+    mode === 'login' ? 'Need an account? Sign up' : 'Back to login';
+  const supportEmail = businessMode
+    ? 'partners@socialcircle.app'
+    : 'support@socialcircle.app';
+  const googleDisabled = !googleRequest;
   const handleAccountModeChange = useCallback(
     (nextBusiness) => {
       try {
@@ -186,6 +438,12 @@ export default function AuthScreen({ navigation, route }) {
     },
     [navigation, setBusinessMode]
   );
+  const handleGooglePress = useCallback(() => {
+    if (googleDisabled) {
+      return;
+    }
+    googlePromptAsync();
+  }, [googleDisabled, googlePromptAsync]);
 
   // Description: Test Firebase Auth configuration on mount
   useEffect(() => {
@@ -305,8 +563,15 @@ export default function AuthScreen({ navigation, route }) {
             createUser,
           } = require('../../../profile/services/userService');
           const token = await registerForPushTokenAsync().catch(() => null);
+          const appleProfile = extractAppleProfileFields(
+            credential,
+            result.user
+          );
           await createUser(result.user.uid, {
-            email: result.user.email || '',
+            email: appleProfile.email || result.user.email || '',
+            firstName: appleProfile.firstName,
+            lastName: appleProfile.lastName,
+            appleRelayEmail: appleProfile.appleRelayEmail,
             deviceToken: token || null,
             pushOptIn: !!token,
           });
@@ -335,7 +600,7 @@ export default function AuthScreen({ navigation, route }) {
                     await googlePromptAsync();
                     // Wait for googleResponse effect to handle signInWithCredential;
                     // after user is signed in, try linking
-                    const unsubscribe = auth.onAuthStateChanged(
+                    const unsubscribe = auth().onAuthStateChanged(
                       async (user) => {
                         if (user) {
                           try {
@@ -633,49 +898,79 @@ export default function AuthScreen({ navigation, route }) {
     <AnimatedGradientBackground style={styles.container} variant='onboarding'>
       <View style={{ flex: 1 }}>
         <View style={styles.overlay}>
-          {/* Loading overlay */}
           <LoadingOverlay visible={loading} />
-          <Image
-            source={require('../../../../../assets/SocialCircleLogoClear.png')}
-            style={styles.logo}
-            resizeMode='contain'
-          />
+
+          <View style={styles.heroBlock}>
+            <View style={styles.logoRow}>
+              <Image
+                source={require('../../../../../assets/SocialCircleLogoClear.png')}
+                style={styles.heroLogo}
+                resizeMode='contain'
+              />
+              <View>
+                <Text style={styles.heroBrand}>SocialCircle</Text>
+                <Text style={styles.heroTagline}>IRL plans, curated daily</Text>
+              </View>
+            </View>
+            <View style={styles.heroBadge}>
+              <Ionicons name='sparkles-outline' size={16} color='#F5F3FF' />
+              <Text style={styles.heroBadgeText}>{heroCopy.eyebrow}</Text>
+            </View>
+            <Text style={styles.heroTitle}>{heroCopy.title}</Text>
+            <Text style={styles.heroSubtitle}>{heroCopy.subtitle}</Text>
+            <View style={styles.heroStatsRow}>
+              {heroStats.map((stat) => (
+                <View key={stat.label} style={styles.statCard}>
+                  <Text style={styles.statValue}>{stat.value}</Text>
+                  <Text style={styles.statLabel}>{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
 
           <View style={styles.card}>
-            <View style={styles.accountSwitchContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.accountSwitchButton,
-                  !businessMode && styles.accountSwitchButtonActive,
-                ]}
-                onPress={() => handleAccountModeChange(false)}
-              >
-                <Text
+            <Text style={styles.sectionEyebrow}>
+              {businessMode ? 'Business portal' : 'Member access'}
+            </Text>
+            <Text style={styles.cardTitle}>{cardTitle}</Text>
+            <Text style={styles.cardSubtitle}>{cardSubtitle}</Text>
+
+            {showBusinessAccountSwitch ? (
+              <View style={styles.accountSwitchContainer}>
+                <TouchableOpacity
                   style={[
-                    styles.accountSwitchText,
-                    !businessMode && styles.accountSwitchTextActive,
+                    styles.accountSwitchButton,
+                    !businessMode && styles.accountSwitchButtonActive,
                   ]}
+                  onPress={() => handleAccountModeChange(false)}
                 >
-                  I&apos;m here to attend
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.accountSwitchButton,
-                  businessMode && styles.accountSwitchButtonActive,
-                ]}
-                onPress={() => handleAccountModeChange(true)}
-              >
-                <Text
+                  <Text
+                    style={[
+                      styles.accountSwitchText,
+                      !businessMode && styles.accountSwitchTextActive,
+                    ]}
+                  >
+                    I&apos;m here to attend
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[
-                    styles.accountSwitchText,
-                    businessMode && styles.accountSwitchTextActive,
+                    styles.accountSwitchButton,
+                    businessMode && styles.accountSwitchButtonActive,
                   ]}
+                  onPress={() => handleAccountModeChange(true)}
                 >
-                  I manage a business
-                </Text>
-              </TouchableOpacity>
-            </View>
+                  <Text
+                    style={[
+                      styles.accountSwitchText,
+                      businessMode && styles.accountSwitchTextActive,
+                    ]}
+                  >
+                    I manage a business
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             <Text style={styles.accountSwitchHelper}>
               {businessMode
@@ -683,35 +978,90 @@ export default function AuthScreen({ navigation, route }) {
                 : 'Discover and join events happening around you.'}
             </Text>
 
+            <View style={styles.modeSwitch}>
+              <TouchableOpacity
+                style={[
+                  styles.modeOption,
+                  mode === 'login' && styles.modeOptionActive,
+                ]}
+                onPress={() => setMode('login')}
+              >
+                <Text
+                  style={[
+                    styles.modeOptionText,
+                    mode === 'login' && styles.modeOptionTextActive,
+                  ]}
+                >
+                  Sign in
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modeOption,
+                  mode === 'signup' && styles.modeOptionActive,
+                ]}
+                onPress={() => setMode('signup')}
+              >
+                <Text
+                  style={[
+                    styles.modeOptionText,
+                    mode === 'signup' && styles.modeOptionTextActive,
+                  ]}
+                >
+                  Sign up
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {businessMode ? (
               <Text style={styles.businessLabel}>business login</Text>
             ) : null}
 
-            <TextInput
-              placeholder='Email'
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize='none'
-              keyboardType='email-address'
-              autoCorrect={false}
-              spellCheck={false}
-              textContentType='emailAddress'
-              autoComplete='email'
-              style={styles.input}
-              placeholderTextColor={theme.colors.neutral600}
-            />
-            <TextInput
-              placeholder='Password'
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              textContentType='password'
-              autoComplete='password'
-              autoCorrect={false}
-              spellCheck={false}
-              style={styles.input}
-              placeholderTextColor={theme.colors.neutral600}
-            />
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email</Text>
+              <TextInput
+                placeholder='you@example.com'
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize='none'
+                keyboardType='email-address'
+                autoCorrect={false}
+                spellCheck={false}
+                textContentType='emailAddress'
+                autoComplete='email'
+                style={styles.input}
+                placeholderTextColor={theme.colors.neutral500}
+                keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                placeholder='••••••••'
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                textContentType='password'
+                autoComplete='password'
+                autoCorrect={false}
+                spellCheck={false}
+                style={styles.input}
+                placeholderTextColor={theme.colors.neutral500}
+                keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
+              />
+            </View>
+
+            <View style={styles.inlineActions}>
+              <TouchableOpacity onPress={handlePasswordReset}>
+                <Text style={styles.linkText}>Forgot password?</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
+              >
+                <Text style={styles.subtleLinkText}>{inlineModeLabel}</Text>
+              </TouchableOpacity>
+            </View>
 
             {loading ? (
               <ActivityIndicator
@@ -721,24 +1071,56 @@ export default function AuthScreen({ navigation, route }) {
               />
             ) : (
               <Button
-                title={mode === 'login' ? 'Login' : 'Create Account'}
+                title={mode === 'login' ? 'Sign in' : 'Create account'}
                 onPress={handleSubmit}
                 style={styles.buttonSpacing}
               />
             )}
 
-            {mode === 'signup' && (
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerLabel}>Quick options</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {mode === 'login' ? (
               <TouchableOpacity
-                style={[styles.secondaryButton, { opacity: 0.5 }]}
+                style={[
+                  styles.socialButton,
+                  googleDisabled && styles.socialButtonDisabled,
+                ]}
+                onPress={handleGooglePress}
+                disabled={googleDisabled}
+              >
+                <Ionicons
+                  name='logo-google'
+                  size={18}
+                  color={
+                    googleDisabled
+                      ? theme.colors.neutral500
+                      : theme.colors.neutral900
+                  }
+                />
+                <Text style={styles.socialButtonText}>
+                  Continue with Google
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.socialButton, styles.socialButtonDisabled]}
                 disabled
               >
-                <Text style={styles.secondaryButtonText}>
-                  Sign up with Google (Coming Soon)
+                <Ionicons
+                  name='time-outline'
+                  size={18}
+                  color={theme.colors.neutral500}
+                />
+                <Text style={styles.socialButtonText}>
+                  Google sign up coming soon
                 </Text>
               </TouchableOpacity>
             )}
 
-            {/* Sign in with Apple - iOS only */}
             {appleAvailable && (
               <AppleAuthentication.AppleAuthenticationButton
                 buttonType={
@@ -753,23 +1135,7 @@ export default function AuthScreen({ navigation, route }) {
               />
             )}
 
-            <TouchableOpacity
-              style={styles.linkButton}
-              onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
-            >
-              <Text style={styles.linkText}>
-                {mode === 'login'
-                  ? 'Need an account? Sign Up'
-                  : 'Already have an account? Login'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.linkButton}
-              onPress={handlePasswordReset}
-            >
-              <Text style={styles.linkText}>Forgot Password?</Text>
-            </TouchableOpacity>
+            <Text style={styles.helperCopy}>Need a hand? {supportEmail}</Text>
           </View>
         </View>
       </View>

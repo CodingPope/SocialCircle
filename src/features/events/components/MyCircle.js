@@ -17,6 +17,7 @@ import {
   useWindowDimensions,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   collection,
   query,
@@ -61,6 +62,13 @@ export default function MyCircle({ navigation }) {
     Array.isArray(user?.following) ? user.following : []
   );
   const { width: windowWidth } = useWindowDimensions();
+
+  // Collapsible section state
+  const [collapsedSections, setCollapsedSections] = useState({
+    friendActivities: false,
+    saved: false,
+    friends: false,
+  });
 
   const savedRecords = useSavedEventsStore((s) => s.savedEvents);
   const savedLoading = useSavedEventsStore((s) => s.isLoading);
@@ -506,6 +514,13 @@ export default function MyCircle({ navigation }) {
 
   const hasUpcomingEvents = upcomingEvents.length > 0;
 
+  const toggleSection = useCallback((sectionKey) => {
+    setCollapsedSections((prev) => ({
+      ...prev,
+      [sectionKey]: !prev[sectionKey],
+    }));
+  }, []);
+
   const handleEventPress = useCallback(
     (event, targetScreen) => {
       if (targetScreen && navigation?.navigate) {
@@ -587,6 +602,130 @@ export default function MyCircle({ navigation }) {
   );
 
   const savedSectionLoading = savedLoading && !savedReady;
+
+  // Description: Build unified data structure for single FlatList rendering
+  const feedSections = useMemo(() => {
+    const sections = [];
+
+    // Upcoming Events Section
+    sections.push({
+      type: 'section-header',
+      id: 'upcoming-header',
+      title: '📅 Your Upcoming Events',
+      collapsible: false,
+    });
+
+    if (hasUpcomingEvents) {
+      sections.push({
+        type: 'carousel',
+        id: 'upcoming-carousel',
+        data: upcomingEvents,
+      });
+    } else {
+      sections.push({
+        type: 'empty',
+        id: 'upcoming-empty',
+        message: 'Attend or host meetups to see them here.',
+      });
+    }
+
+    // Friend Activities Section
+    sections.push({
+      type: 'section-header',
+      id: 'activities-header',
+      title: '👥 Friend Activities',
+      collapsible: true,
+      sectionKey: 'friendActivities',
+      collapsed: collapsedSections.friendActivities,
+    });
+
+    if (!collapsedSections.friendActivities) {
+      if (friendActivities.length > 0) {
+        friendActivities.forEach((item, idx) => {
+          sections.push({
+            type: 'friend-activity',
+            id: `activity-${item.event.id}-${idx}`,
+            data: item,
+          });
+        });
+      } else {
+        sections.push({
+          type: 'empty',
+          id: 'activities-empty',
+          message: "Add friends to see what they're up to.",
+        });
+      }
+    }
+
+    // Saved Events Section
+    sections.push({
+      type: 'section-header',
+      id: 'saved-header',
+      title: '🔖 Saved',
+      collapsible: true,
+      sectionKey: 'saved',
+      collapsed: collapsedSections.saved,
+    });
+
+    if (!collapsedSections.saved) {
+      if (savedSectionLoading) {
+        sections.push({
+          type: 'loading',
+          id: 'saved-loading',
+        });
+      } else if (savedFeed.length > 0) {
+        savedFeed.forEach((item) => {
+          sections.push({
+            type: 'saved-event',
+            id: `saved-${item.event.id}`,
+            data: item,
+          });
+        });
+      } else {
+        sections.push({
+          type: 'empty',
+          id: 'saved-empty',
+          message: 'Tap the bookmark icon on events to keep them handy.',
+        });
+      }
+    }
+
+    // Friends Section
+    sections.push({
+      type: 'section-header',
+      id: 'friends-header',
+      title: 'Friends',
+      collapsible: true,
+      sectionKey: 'friends',
+      collapsed: collapsedSections.friends,
+    });
+
+    if (!collapsedSections.friends) {
+      if (friends.length > 0) {
+        sections.push({
+          type: 'friends-horizontal',
+          id: 'friends-list',
+          data: friends,
+        });
+      } else {
+        sections.push({
+          type: 'empty',
+          id: 'friends-empty',
+          message: 'Make connections to see your friends here.',
+        });
+      }
+    }
+
+    return sections;
+  }, [
+    hasUpcomingEvents,
+    upcomingEvents,
+    friendActivities,
+    savedFeed,
+    friends,
+    collapsedSections,
+    savedSectionLoading,
+  ]);
 
   const formatSavedEventDate = useCallback(
     (event) => {
@@ -712,35 +851,40 @@ export default function MyCircle({ navigation }) {
     </TouchableOpacity>
   );
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size='large' color='#4da6ff' />
-      </View>
-    );
-  }
+  const renderFeedItem = useCallback(
+    ({ item }) => {
+      switch (item.type) {
+        case 'section-header':
+          if (item.collapsible) {
+            return (
+              <TouchableOpacity
+                style={styles.sectionHeader}
+                onPress={() => toggleSection(item.sectionKey)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.sectionTitle}>{item.title}</Text>
+                <Ionicons
+                  name={item.collapsed ? 'chevron-down' : 'chevron-up'}
+                  size={20}
+                  color={theme.colors.textSecondary}
+                />
+              </TouchableOpacity>
+            );
+          }
+          return (
+            <View style={styles.sectionHeaderNonCollapsible}>
+              <Text style={styles.sectionTitle}>{item.title}</Text>
+            </View>
+          );
 
-  return (
-    <>
-      <ScrollView style={styles.pageContainer}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>My Circle</Text>
-          <Text style={styles.headerSubtitle}>
-            See what your friends are up to 🎉
-          </Text>
-        </View>
-
-        {/* Upcoming Events */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📅 Your Upcoming Events</Text>
-          {hasUpcomingEvents ? (
+        case 'carousel':
+          return (
             <FlatList
               horizontal
-              data={upcomingEvents}
+              data={item.data}
               renderItem={renderUpcomingCarouselItem}
               ItemSeparatorComponent={renderCarouselSeparator}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(event) => event.id}
               showsHorizontalScrollIndicator={false}
               snapToInterval={snapInterval}
               snapToAlignment='start'
@@ -752,88 +896,97 @@ export default function MyCircle({ navigation }) {
                 { paddingLeft: sidePadding, paddingRight: sidePadding },
               ]}
             />
-          ) : (
-            <Text style={styles.emptyState}>
-              Attend or host meetups to see them here.
-            </Text>
-          )}
-        </View>
+          );
 
-        {/* Friend Activities */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>👥 Friend Activities</Text>
-          {friendActivities.length > 0 ? (
-            <FlatList
-              data={friendActivities}
-              renderItem={renderFriendActivity}
-              keyExtractor={(item, i) => item.event.id + i}
-              scrollEnabled={false}
-            />
-          ) : (
-            <Text style={styles.emptyState}>
-              Add friends to see what they're up to.
-            </Text>
-          )}
-        </View>
+        case 'friend-activity':
+          return renderFriendActivity({ item: item.data });
 
-        {/* Saved Events */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🔖 Saved</Text>
-          {savedSectionLoading ? (
-            <ActivityIndicator size='small' color='#4da6ff' />
-          ) : savedFeed.length > 0 ? (
-            <FlatList
-              data={savedFeed}
-              renderItem={renderSavedEvent}
-              keyExtractor={(item) => item.event.id}
-              scrollEnabled={false}
-            />
-          ) : (
-            <Text style={styles.emptyState}>
-              Tap the bookmark icon on events to keep them handy.
-            </Text>
-          )}
-        </View>
+        case 'saved-event':
+          return renderSavedEvent({ item: item.data });
 
-        {/* Friends Quick Scroll */}
-        <View style={styles.section}>
-          <View style={styles.friendsHeader}>
-            <Text style={styles.sectionTitle}>Friends</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAll}>+ See All</Text>
-            </TouchableOpacity>
-          </View>
-          {friends.length > 0 ? (
+        case 'friends-horizontal':
+          return (
             <FlatList
               horizontal
-              data={friends}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => (
+              data={item.data}
+              keyExtractor={(friend) => friend.id}
+              renderItem={({ item: friend }) => (
                 <TouchableOpacity
                   style={styles.friendAvatarWrapper}
-                  onPress={() => navigateToOtherUserProfile(item.id)}
+                  onPress={() => navigateToOtherUserProfile(friend.id)}
                 >
                   <Image
                     source={{
                       uri:
-                        item.profileImage || 'https://via.placeholder.com/50',
+                        friend.profileImage || 'https://via.placeholder.com/50',
                     }}
                     style={styles.friendQuickAvatar}
                   />
                   <Text style={styles.friendNameText}>
-                    {item.firstName || 'Friend'}
+                    {friend.firstName || 'Friend'}
                   </Text>
                 </TouchableOpacity>
               )}
               showsHorizontalScrollIndicator={false}
             />
-          ) : (
-            <Text style={styles.emptyState}>
-              Make connections to see your friends here.
-            </Text>
-          )}
-        </View>
-      </ScrollView>
+          );
+
+        case 'empty':
+          return <Text style={styles.emptyState}>{item.message}</Text>;
+
+        case 'loading':
+          return (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size='small' color='#4da6ff' />
+            </View>
+          );
+
+        default:
+          return null;
+      }
+    },
+    [
+      renderUpcomingCarouselItem,
+      renderCarouselSeparator,
+      renderFriendActivity,
+      renderSavedEvent,
+      snapInterval,
+      sidePadding,
+      theme.colors.textSecondary,
+      toggleSection,
+    ]
+  );
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size='large' color='#4da6ff' />
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: theme.colors.background }]}
+      edges={['top', 'left', 'right']}
+    >
+      <View style={styles.topBar}>
+        <Text style={styles.headerTitle}>My Circle</Text>
+        <Text style={styles.headerSubtitle}>
+          See what your friends are up to 🎉
+        </Text>
+      </View>
+      <FlatList
+        data={feedSections}
+        renderItem={renderFeedItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={true}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        windowSize={11}
+        initialNumToRender={8}
+      />
 
       {selectedEvent && (
         <EventPopUpCard
@@ -841,22 +994,32 @@ export default function MyCircle({ navigation }) {
           onClose={() => setSelectedEvent(null)}
         />
       )}
-    </>
+    </SafeAreaView>
   );
 }
 
 // Description: Create theme-aware styles for MyCircle
 const createStyles = (theme) =>
   StyleSheet.create({
+    safeArea: {
+      flex: 1,
+    },
+    topBar: {
+      paddingTop: 12,
+      paddingBottom: 16,
+      paddingHorizontal: 16,
+      alignItems: 'center',
+      backgroundColor: theme.colors.card,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border,
+    },
     pageContainer: {
       flex: 1,
       backgroundColor: theme.colors.background,
-      padding: 16,
     },
-    header: {
-      alignItems: 'center',
-      marginTop: 35,
-      marginBottom: 20,
+    contentContainer: {
+      paddingHorizontal: 16,
+      paddingBottom: 32,
     },
     headerTitle: {
       fontSize: 28,
@@ -871,11 +1034,24 @@ const createStyles = (theme) =>
     section: {
       marginBottom: 24,
     },
+    sectionHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+      marginTop: 24,
+    },
+    sectionHeaderNonCollapsible: {
+      marginBottom: 12,
+      marginTop: 24,
+    },
     sectionTitle: {
       fontWeight: '700',
       fontSize: 18,
-      marginBottom: 12,
       color: theme.colors.text,
+    },
+    loadingContainer: {
+      paddingVertical: 12,
     },
     emptyState: {
       color: theme.colors.textSecondary,

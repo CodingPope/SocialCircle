@@ -494,6 +494,16 @@ export default function EventPopUpCard({
       Alert.alert('Sign in required', 'Log in to save events for later.');
       return;
     }
+
+    // Description: Prevent users from saving their own events
+    if (isOwner) {
+      Alert.alert(
+        'Cannot save your own event',
+        'You can always find your events in the My Circle tab under "Your Upcoming Events".'
+      );
+      return;
+    }
+
     if (saveBusy) return;
 
     setSaveBusy(true);
@@ -533,6 +543,7 @@ export default function EventPopUpCard({
     activeEventId,
     event,
     isEventSaved,
+    isOwner,
     liveEvent,
     saveBusy,
     source,
@@ -578,9 +589,9 @@ export default function EventPopUpCard({
       >
         {/* Full-bleed header image */}
         <View style={styles.headerFullBleed}>
-          {liveEvent.imageUri || liveEvent.imageUrl ? (
+          {typeof liveEvent.imageUrl === 'string' && liveEvent.imageUrl ? (
             <Image
-              source={{ uri: liveEvent.imageUri || liveEvent.imageUrl }}
+              source={{ uri: liveEvent.imageUrl }}
               style={styles.headerImage}
               resizeMode='cover'
             />
