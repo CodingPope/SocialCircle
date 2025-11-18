@@ -47,8 +47,12 @@ import { trackCardClick } from '../../../lib/analytics';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { filterBlockedEvents } from '../utils/blockUtils';
+import {
+  useDiscoveryLocationStore,
+  DEFAULT_DISCOVERY_RADIUS_METERS,
+} from '../stores/discoveryLocationStore';
 
 function toMillis(value) {
   if (!value) return 0;
@@ -77,13 +81,18 @@ const TAB_TO_TIMEFRAME = {
   'This Week': InterestTimeframes.WEEK,
 };
 
+const ALL_LABEL = 'All';
+const PINNED_INTERESTS_LIMIT = 12;
+
+const arraysEqual = (a = [], b = []) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+
 export default function DiscoveryScreen() {
   const [popupEvent, setPopupEvent] = useState(null);
   const [activeTab, setActiveTab] = useState('Hot');
   const [selectedInterest, setSelectedInterest] = useState(null);
   const [events, setEvents] = useState([]);
   const [posts, setPosts] = useState([]);
-  const [userLocation, setUserLocation] = useState(null);
   const [userCity, setUserCity] = useState('');
   const [userInterests, setUserInterests] = useState([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -93,6 +102,7 @@ export default function DiscoveryScreen() {
 
   const chipScrollViewRef = useRef(null);
   const scrollViewRef = useRef(null);
+  const hasRefreshedInterestsOnFocusRef = useRef(false);
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
   const user = useUserStore((s) => s.user);
   const personalizationEnabled = !!user?.analyticsOptIn;
@@ -110,6 +120,30 @@ export default function DiscoveryScreen() {
   const [createPostFabLayout, setCreatePostFabLayout] = useState(null);
   const createPostFabRef = useRef(null);
   const createPostLayoutRef = useRef(null);
+  const gpsLocation = useDiscoveryLocationStore((state) => state.gpsLocation);
+  const overrideCoords = useDiscoveryLocationStore(
+    (state) => state.override?.coords || null
+  );
+  const overrideRadius = useDiscoveryLocationStore(
+    (state) => state.override?.radiusMeters || null
+  );
+  const gpsRadiusMeters = useDiscoveryLocationStore(
+    (state) => state.gpsRadiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS
+  );
+  const setGpsLocation = useDiscoveryLocationStore(
+    (state) => state.setGpsLocation
+  );
+  const userLocation = useMemo(
+    () => overrideCoords || gpsLocation,
+    [overrideCoords, gpsLocation]
+  );
+  const discoveryRadius = useMemo(
+    () =>
+      overrideRadius ||
+      gpsRadiusMeters ||
+      DEFAULT_DISCOVERY_RADIUS_METERS,
+    [overrideRadius, gpsRadiusMeters]
+  );
 
   const sanitizeInterests = useCallback((list = []) => {
     if (!Array.isArray(list)) return [];
@@ -201,6 +235,23 @@ export default function DiscoveryScreen() {
     [pinnedInterestsKey, sanitizeInterests]
   );
 
+  const applyInterestState = useCallback(
+    (orderedInterests = [], pinnedSnapshot = []) => {
+      setUserInterests((prev) => {
+        if (arraysEqual(prev, orderedInterests)) {
+          return prev;
+        }
+        return orderedInterests;
+      });
+      setSelectedInterest((prev) => {
+        if (prev === ALL_LABEL) return prev;
+        return orderedInterests.includes(prev) ? prev : null;
+      });
+      persistPinnedSnapshot(pinnedSnapshot);
+    },
+    [persistPinnedSnapshot]
+  );
+
   useEffect(() => {
     // Description: Clear discovery selections when the authenticated user changes
     setUserInterests([]);
@@ -209,6 +260,50 @@ export default function DiscoveryScreen() {
     setPosts([]);
     setLastDoc(null);
   }, [user?.uid]);
+
+  useEffect(() => {
+    hasRefreshedInterestsOnFocusRef.current = false;
+  }, [personalizationEnabled, user?.uid]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!personalizationEnabled || !user?.uid) {
+        return () => {};
+      }
+
+      if (!hasRefreshedInterestsOnFocusRef.current) {
+        hasRefreshedInterestsOnFocusRef.current = true;
+        return () => {};
+      }
+
+      let isActive = true;
+
+      (async () => {
+        try {
+          const [interests, pinned] = await Promise.all([
+            fetchUserInterests(),
+            loadPinnedInterests(),
+          ]);
+          if (!isActive) return;
+          const { orderedInterests, pinnedSnapshot } =
+            mergeInterestsWithPinned(interests, pinned);
+          applyInterestState(orderedInterests, pinnedSnapshot);
+        } catch (error) {
+          console.error('Failed to refresh interests on focus:', error);
+        }
+      })();
+
+      return () => {
+        isActive = false;
+      };
+    }, [
+      personalizationEnabled,
+      user?.uid,
+      loadPinnedInterests,
+      mergeInterestsWithPinned,
+      applyInterestState,
+    ])
+  );
 
   const blockKey = useMemo(() => {
     const blocked = Array.isArray(user?.blocked)
@@ -219,9 +314,6 @@ export default function DiscoveryScreen() {
       : '';
     return `${blocked}|${blockedBy}`;
   }, [user?.blocked, user?.blockedBy]);
-
-  const ALL_LABEL = 'All';
-  const PINNED_INTERESTS_LIMIT = 12;
 
   const feedItems = useMemo(() => {
     const eventItems = (events || []).map((event) => ({
@@ -491,7 +583,6 @@ export default function DiscoveryScreen() {
         // If personalization is disabled, don't request location or interests here
         if (!personalizationEnabled) {
           if (!isMounted) return;
-          setUserLocation(null);
           setUserCity('');
           setUserInterests([]);
           const generic = await fetchGenericEvents(20);
@@ -513,12 +604,13 @@ export default function DiscoveryScreen() {
 
         const location = await Location.getCurrentPositionAsync({});
         if (!isMounted) return;
-        setUserLocation(location.coords);
+        setGpsLocation({ coords: location.coords });
 
         const geocode = await Location.reverseGeocodeAsync(location.coords);
         if (!isMounted) return;
         const city = geocode[0]?.city || '';
         setUserCity(city);
+        setGpsLocation({ coords: location.coords, label: city });
 
         const interests = await fetchUserInterests();
         const pinned = await loadPinnedInterests();
@@ -528,13 +620,7 @@ export default function DiscoveryScreen() {
         );
 
         if (!isMounted) return;
-        setUserInterests(orderedInterests);
-        setSelectedInterest((prev) => {
-          if (prev === ALL_LABEL) return prev;
-          return orderedInterests.includes(prev) ? prev : null;
-        });
-
-        persistPinnedSnapshot(pinnedSnapshot);
+        applyInterestState(orderedInterests, pinnedSnapshot);
       } catch (error) {
         console.error('Error initializing user data:', error);
       }
@@ -550,10 +636,11 @@ export default function DiscoveryScreen() {
     loadPinnedInterests,
     mergeInterestsWithPinned,
     pinnedInterestsKey,
-    persistPinnedSnapshot,
+    applyInterestState,
     enrichEventsWithHosts,
     user,
     user?.uid,
+    setGpsLocation,
   ]);
 
   useEffect(() => {
@@ -594,19 +681,13 @@ export default function DiscoveryScreen() {
         ]);
 
         if (!isMounted) return;
-        setUserLocation(location.coords);
+        setGpsLocation({ coords: location.coords });
 
         const { orderedInterests, pinnedSnapshot } = mergeInterestsWithPinned(
           interests,
           pinned
         );
-        setUserInterests(orderedInterests);
-        setSelectedInterest((prev) => {
-          if (prev === ALL_LABEL) return prev;
-          return orderedInterests.includes(prev) ? prev : null;
-        });
-
-        persistPinnedSnapshot(pinnedSnapshot);
+        applyInterestState(orderedInterests, pinnedSnapshot);
 
         const cachedEvents = await AsyncStorage.getItem('hotEvents');
         if (cachedEvents && isMounted) {
@@ -621,10 +702,20 @@ export default function DiscoveryScreen() {
           }
         }
 
-        const newEvents = await fetchHotEvents(
-          orderedInterests,
-          location.coords
-        );
+        const locationStoreState = useDiscoveryLocationStore.getState();
+        const coordsForFetch =
+          locationStoreState.override?.coords || location.coords;
+        const radiusForFetch =
+          locationStoreState.override?.radiusMeters ||
+          locationStoreState.gpsRadiusMeters ||
+          DEFAULT_DISCOVERY_RADIUS_METERS;
+        const newEvents = coordsForFetch
+          ? await fetchHotEvents(
+              orderedInterests,
+              coordsForFetch,
+              radiusForFetch
+            )
+          : [];
         if (!isMounted) return;
         const filteredEvents = newEvents.filter((event) => !event.isDeleted);
         const visibleEvents = filterBlockedEvents(filteredEvents, user);
@@ -647,10 +738,11 @@ export default function DiscoveryScreen() {
     loadPinnedInterests,
     mergeInterestsWithPinned,
     pinnedInterestsKey,
-    persistPinnedSnapshot,
+    applyInterestState,
     enrichEventsWithHosts,
     user,
     user?.uid,
+    setGpsLocation,
   ]);
 
   useEffect(() => {
@@ -682,6 +774,7 @@ export default function DiscoveryScreen() {
     userLocation,
     personalizationEnabled,
     userInterests,
+    discoveryRadius,
   ]);
 
   async function loadEvents(reset = false) {
@@ -713,12 +806,22 @@ export default function DiscoveryScreen() {
     let fetchedPosts = [];
 
     if (activeTab === 'Hot') {
-      newEvents = await fetchHotEvents(userInterests, userLocation);
+      newEvents = await fetchHotEvents(
+        userInterests,
+        userLocation,
+        discoveryRadius
+      );
     } else if (activeTab === 'New') {
       if (selectedInterest === ALL_LABEL) {
         const results = await Promise.all(
           (userInterests || []).map((i) =>
-            fetchNewEvents(i, userLocation, reset ? null : lastDoc)
+            fetchNewEvents(
+              i,
+              userLocation,
+              reset ? null : lastDoc,
+              undefined,
+              discoveryRadius
+            )
           )
         );
         newEvents = results.flatMap((r) => r.events || []);
@@ -727,7 +830,9 @@ export default function DiscoveryScreen() {
         const result = await fetchNewEvents(
           selectedInterest,
           userLocation,
-          reset ? null : lastDoc
+          reset ? null : lastDoc,
+          undefined,
+          discoveryRadius
         );
         newEvents = result.events;
         setLastDoc(result.lastDoc);
@@ -736,7 +841,13 @@ export default function DiscoveryScreen() {
       if (selectedInterest === ALL_LABEL) {
         const results = await Promise.all(
           (userInterests || []).map((i) =>
-            fetchTodayEvents(i, userLocation, reset ? null : lastDoc)
+            fetchTodayEvents(
+              i,
+              userLocation,
+              reset ? null : lastDoc,
+              undefined,
+              discoveryRadius
+            )
           )
         );
         newEvents = results.flatMap((r) => r.events || []);
@@ -745,7 +856,9 @@ export default function DiscoveryScreen() {
         const result = await fetchTodayEvents(
           selectedInterest,
           userLocation,
-          reset ? null : lastDoc
+          reset ? null : lastDoc,
+          undefined,
+          discoveryRadius
         );
         newEvents = result.events;
         setLastDoc(result.lastDoc);
@@ -754,7 +867,13 @@ export default function DiscoveryScreen() {
       if (selectedInterest === ALL_LABEL) {
         const results = await Promise.all(
           (userInterests || []).map((i) =>
-            fetchThisWeekEvents(i, userLocation, reset ? null : lastDoc)
+            fetchThisWeekEvents(
+              i,
+              userLocation,
+              reset ? null : lastDoc,
+              undefined,
+              discoveryRadius
+            )
           )
         );
         newEvents = results.flatMap((r) => r.events || []);
@@ -764,7 +883,9 @@ export default function DiscoveryScreen() {
         const result = await fetchThisWeekEvents(
           selectedInterest,
           userLocation,
-          reset ? null : lastDoc
+          reset ? null : lastDoc,
+          undefined,
+          discoveryRadius
         );
         newEvents = result.events;
         setLastDoc(result.lastDoc);

@@ -92,7 +92,18 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   const [requestingFollow, setRequestingFollow] = useState(false);
   const [sharedEvents, setSharedEvents] = useState(false); // Track if shared events exist
   const [ratingModalVisible, setRatingModalVisible] = useState(false); // Modal for rating
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [blockBusy, setBlockBusy] = useState(false);
+  const openRatingModal = useCallback(() => {
+    setSelectedRating(0);
+    setRatingSubmitting(false);
+    setRatingModalVisible(true);
+  }, []);
+  const closeRatingModal = useCallback(() => {
+    setRatingModalVisible(false);
+    setSelectedRating(0);
+    setRatingSubmitting(false);
+  }, []);
 
   const EDGE_SWIPE_START_THRESHOLD = 30;
 
@@ -730,6 +741,11 @@ export default function OtherUserProfileScreen({ route, navigation }) {
   };
 
   const handleRateUser = async (rating) => {
+    if (!rating || rating < 1 || rating > 5) {
+      Alert.alert('Invalid rating', 'Please select between 1 and 5 stars.');
+      return;
+    }
+    setRatingSubmitting(true);
     try {
       // Use callable directly to satisfy security rules and validate mutual events
       const fn = functions.httpsCallable('rateUser');
@@ -740,14 +756,16 @@ export default function OtherUserProfileScreen({ route, navigation }) {
       setUser(updatedUser);
 
       setRatingModalVisible(false);
+      setSelectedRating(0);
       Alert.alert('Success', 'Rating updated successfully!');
     } catch (err) {
       logger.error('Error rating user:', err);
       const msg = err?.message || 'Failed to rate user.';
       Alert.alert('Error', msg);
+    } finally {
+      setRatingSubmitting(false);
     }
   };
-
   // Proxy join press (kept for future customization); actual checks happen inside PostCard
   const handleJoinPress = () => {};
 
@@ -840,7 +858,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
             {sharedEvents && !viewerBlocksTarget && !viewerIsBlocked && (
               <TouchableOpacity
                 style={[styles.followButton, { backgroundColor: '#FFD700' }]}
-                onPress={() => setRatingModalVisible(true)}
+                onPress={openRatingModal}
                 activeOpacity={0.8}
               >
                 <Text style={[styles.followButtonText, { color: '#333' }]}>
@@ -969,6 +987,66 @@ export default function OtherUserProfileScreen({ route, navigation }) {
           })
         )}
       </ScrollView>
+      <Modal
+        animationType='fade'
+        transparent
+        visible={ratingModalVisible}
+        onRequestClose={closeRatingModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.ratingModal}>
+            <Text style={styles.modalTitle}>Rate {fullName}</Text>
+            <View style={styles.starRow}>
+              {[1, 2, 3, 4, 5].map((value) => (
+                <TouchableOpacity
+                  key={value}
+                  onPress={() => setSelectedRating(value)}
+                  accessibilityRole='button'
+                  accessibilityLabel={`${value} star${value !== 1 ? 's' : ''}`}
+                >
+                  <MaterialIcons
+                    name={selectedRating >= value ? 'star' : 'star-border'}
+                    size={36}
+                    color='#FFD700'
+                    style={styles.star}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.selectedRatingText}>
+              {selectedRating > 0
+                ? `${selectedRating} star${selectedRating !== 1 ? 's' : ''}`
+                : 'Select a rating'}
+            </Text>
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={[
+                  styles.cancelButton,
+                  ratingSubmitting && { opacity: 0.6 },
+                ]}
+                onPress={closeRatingModal}
+                disabled={ratingSubmitting}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  (!selectedRating || ratingSubmitting) && { opacity: 0.6 },
+                ]}
+                disabled={!selectedRating || ratingSubmitting}
+                onPress={() => handleRateUser(selectedRating)}
+              >
+                {ratingSubmitting ? (
+                  <ActivityIndicator color='#fff' />
+                ) : (
+                  <Text style={styles.submitButtonText}>Submit</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <PopupMenu
         visible={menuVisible}
         onClose={() => setMenuVisible(false)}

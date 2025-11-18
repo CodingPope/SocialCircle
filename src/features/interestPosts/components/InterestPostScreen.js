@@ -116,6 +116,7 @@ export default function InterestPostScreen() {
   const user = useUserStore((state) => state.user);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
   const insets = useSafeAreaInsets();
   const { postId, initialPost } = route.params || {};
 
@@ -379,6 +380,7 @@ export default function InterestPostScreen() {
                 placeholderTextColor={theme.colors.textSecondary}
                 multiline
                 maxLength={300}
+                keyboardAppearance={keyboardAppearance}
               />
             </View>
             <TouchableOpacity

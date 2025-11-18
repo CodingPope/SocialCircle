@@ -8,7 +8,10 @@ import {
   ActivityIndicator,
   StyleSheet,
   Image,
+  ScrollView,
+  useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from '../../../../firebase/config';
 import {
   doc,
@@ -66,159 +69,74 @@ const extractAppleProfileFields = (appleCredential, firebaseUser) => {
 // Toggle visibility for the business login tab on the auth screen.
 const ENABLE_BUSINESS_ACCOUNT_SWITCH = false;
 
-const HERO_COPY = {
-  login: {
-    eyebrow: 'Back again?',
-    title: 'Pick up where you left off',
-    subtitle:
-      'Dive into new circles, RSVP to fresh experiences, and keep the conversation flowing.',
-  },
-  signup: {
-    eyebrow: 'New to SocialCircle',
-    title: 'Design your social life',
-    subtitle:
-      'Tell us what you are into and we will curate people, places, and plans that match.',
-  },
-  business: {
-    eyebrow: 'Partner access',
-    title: 'Host unforgettable gatherings',
-    subtitle:
-      'Showcase your venue, publish lineups, and keep your community engaged in real time.',
-  },
-};
-
-const HERO_STATS = [
-  { value: '1.2K+', label: 'Weekly hangouts' },
-  { value: '320+', label: 'Communities near you' },
-  { value: '4.8 ★', label: 'Host satisfaction' },
-];
-
-const BUSINESS_STATS = [
-  { value: '$42K', label: 'Avg. host revenue' },
-  { value: '24H', label: 'Approval turnaround' },
-  { value: '98%', label: 'Booking retention' },
-];
-
 const createStyles = (theme) => {
-  const { colors, radii, spacing } = theme;
+  const { colors, radii, spacing, mode } = theme;
+  const isDark = mode === 'dark';
+  const cardBackground = isDark ? 'rgba(6, 11, 26, 0.94)' : colors.neutral100;
+  const cardBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
+  const primaryText = isDark ? '#F7FAFF' : colors.neutral900;
+  const secondaryText = isDark ? 'rgba(255,255,255,0.72)' : colors.neutral600;
+  const softSurface = isDark ? 'rgba(255,255,255,0.08)' : colors.neutral200;
+  const pillActive = isDark ? 'rgba(10, 18, 48, 0.95)' : colors.neutral100;
+  const inputBackground = isDark ? 'rgba(8, 13, 32, 0.9)' : colors.neutral50;
+  const inputBorder = isDark ? 'rgba(255,255,255,0.08)' : colors.neutral300;
+  const inputText = isDark ? '#F4F7FF' : colors.neutral900;
+  const linkColor = isDark ? '#85A6FF' : colors.primary;
+  const accentBlue = isDark ? '#4D7BFF' : colors.primary;
+
   return StyleSheet.create({
     container: {
       flex: 1,
+      backgroundColor: isDark ? '#020617' : colors.background,
     },
     overlay: {
-      flex: 1,
-      paddingTop: spacing.xl,
-      paddingBottom: spacing.lg,
+      flexGrow: 1,
+      justifyContent: 'flex-start',
       paddingHorizontal: spacing.lg,
-      gap: spacing.xl,
-    },
-    heroBlock: {
-      borderRadius: radii.xl,
-      padding: spacing.lg,
-      backgroundColor: 'rgba(8, 3, 18, 0.35)',
-      borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.1)',
-    },
-    logoRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: spacing.md,
       gap: spacing.md,
     },
-    heroLogo: {
-      width: 56,
-      height: 56,
-      borderRadius: radii.xl,
+    heroBlock: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 0,
+      paddingBottom: spacing.lg,
+      width: '100%',
+      maxWidth: 420,
+      alignSelf: 'center',
     },
-    heroBrand: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.neutral50,
+    heroLogo: {
+      width: 200,
+      height: 200,
     },
     heroTagline: {
-      color: colors.neutral200,
-      fontSize: 13,
-    },
-    heroBadge: {
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.xs,
-      borderRadius: radii.lg,
-      backgroundColor: 'rgba(255,255,255,0.1)',
-      marginBottom: spacing.sm,
-      gap: spacing.xs,
-    },
-    heroBadgeText: {
-      color: colors.neutral100,
-      fontSize: 12,
-      letterSpacing: 1,
-      textTransform: 'uppercase',
-    },
-    heroTitle: {
-      fontSize: 32,
-      fontWeight: '700',
-      color: colors.neutral50,
-      marginBottom: spacing.xs,
-    },
-    heroSubtitle: {
-      color: colors.neutral200,
-      fontSize: 15,
-      lineHeight: 22,
-      marginBottom: spacing.lg,
-    },
-    heroStatsRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      gap: spacing.sm,
-    },
-    statCard: {
-      flex: 1,
-      borderRadius: radii.lg,
-      padding: spacing.sm,
-      backgroundColor: 'rgba(255,255,255,0.08)',
-    },
-    statValue: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.neutral50,
-    },
-    statLabel: {
-      fontSize: 12,
-      color: colors.neutral200,
-      marginTop: spacing.xs / 2,
+      color: primaryText,
+      fontSize: 16,
+      letterSpacing: 0.5,
     },
     card: {
-      backgroundColor: colors.neutral100,
-      borderRadius: radii.xl,
-      padding: spacing.lg,
-      shadowColor: '#0E1335',
-      shadowOpacity: 0.15,
-      shadowRadius: 20,
-      shadowOffset: { width: 0, height: 12 },
-      elevation: 8,
-    },
-    sectionEyebrow: {
-      fontSize: 12,
-      textTransform: 'uppercase',
-      letterSpacing: 1,
-      color: colors.neutral500,
-      marginBottom: spacing.xs,
+      backgroundColor: cardBackground,
+      borderRadius: 32,
+      padding: spacing.xl,
+      borderWidth: 1,
+      borderColor: cardBorder,
+      shadowColor: isDark ? '#050914' : '#0E1335',
+      shadowOpacity: 0.35,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 16 },
+      elevation: 12,
+      width: '100%',
+      maxWidth: 420,
+      alignSelf: 'center',
     },
     cardTitle: {
-      fontSize: 24,
+      fontSize: 32,
       fontWeight: '700',
-      color: colors.neutral900,
-    },
-    cardSubtitle: {
-      fontSize: 15,
-      color: colors.neutral600,
+      color: primaryText,
       marginBottom: spacing.lg,
     },
     accountSwitchContainer: {
       flexDirection: 'row',
-      backgroundColor: colors.neutral200,
+      backgroundColor: softSurface,
       padding: spacing.xs,
       borderRadius: radii.xl,
       marginBottom: spacing.md,
@@ -231,7 +149,7 @@ const createStyles = (theme) => {
       alignItems: 'center',
     },
     accountSwitchButtonActive: {
-      backgroundColor: colors.neutral100,
+      backgroundColor: pillActive,
       shadowColor: '#000',
       shadowOpacity: 0.08,
       shadowOffset: { width: 0, height: 2 },
@@ -241,21 +159,15 @@ const createStyles = (theme) => {
     accountSwitchText: {
       fontSize: 14,
       fontWeight: '600',
-      color: colors.neutral600,
+      color: secondaryText,
     },
     accountSwitchTextActive: {
-      color: colors.primary,
-    },
-    accountSwitchHelper: {
-      fontSize: 13,
-      color: colors.neutral500,
-      marginBottom: spacing.sm,
-      textAlign: 'center',
+      color: primaryText,
     },
     modeSwitch: {
       flexDirection: 'row',
       borderRadius: radii.xl,
-      backgroundColor: colors.neutral200,
+      backgroundColor: softSurface,
       padding: spacing.xs,
       marginBottom: spacing.lg,
       gap: spacing.xs,
@@ -267,25 +179,25 @@ const createStyles = (theme) => {
       alignItems: 'center',
     },
     modeOptionActive: {
-      backgroundColor: colors.neutral100,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
+      backgroundColor: pillActive,
+      shadowColor: '#01030A',
+      shadowOpacity: 0.15,
       shadowOffset: { width: 0, height: 2 },
-      shadowRadius: 4,
+      shadowRadius: 6,
       elevation: 2,
     },
     modeOptionText: {
       fontSize: 14,
       fontWeight: '600',
-      color: colors.neutral600,
+      color: secondaryText,
     },
     modeOptionTextActive: {
-      color: colors.primary,
+      color: primaryText,
     },
     businessLabel: {
       fontSize: 12,
       fontWeight: '700',
-      color: colors.secondary,
+      color: secondaryText,
       textTransform: 'uppercase',
       letterSpacing: 1,
       marginBottom: spacing.xs,
@@ -295,57 +207,53 @@ const createStyles = (theme) => {
     },
     inputLabel: {
       fontSize: 13,
-      color: colors.neutral500,
+      color: secondaryText,
       marginBottom: spacing.xs / 2,
     },
     input: {
       borderWidth: 1,
-      borderColor: colors.neutral300,
+      borderColor: inputBorder,
       borderRadius: radii.lg,
       padding: spacing.md,
       fontSize: 16,
-      color: colors.neutral900,
-      backgroundColor: colors.neutral50,
+      color: inputText,
+      backgroundColor: inputBackground,
     },
     appleButton: {
       width: '100%',
-      height: 44,
-      marginTop: spacing.sm,
+      height: 50,
+      borderRadius: radii.lg,
+      overflow: 'hidden',
     },
     buttonSpacing: {
-      marginTop: spacing.sm,
+      marginTop: spacing.md,
       width: '100%',
     },
-    inlineActions: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: spacing.md,
-    },
     linkText: {
-      color: colors.primary,
+      color: linkColor,
       fontSize: 13,
       fontWeight: '600',
     },
     subtleLinkText: {
-      color: colors.neutral500,
-      fontSize: 13,
+      color: secondaryText,
+      fontSize: 14,
       fontWeight: '600',
+      textAlign: 'center',
     },
     dividerRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginVertical: spacing.md,
+      marginVertical: spacing.lg,
       gap: spacing.sm,
     },
     dividerLine: {
       flex: 1,
       height: 1,
-      backgroundColor: colors.neutral200,
+      backgroundColor: softSurface,
     },
     dividerLabel: {
       fontSize: 12,
-      color: colors.neutral500,
+      color: secondaryText,
       letterSpacing: 1,
       textTransform: 'uppercase',
     },
@@ -354,7 +262,8 @@ const createStyles = (theme) => {
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
-      borderColor: colors.neutral300,
+      borderColor: softSurface,
+      backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.neutral50,
       borderRadius: radii.lg,
       paddingVertical: spacing.md,
       gap: spacing.sm,
@@ -365,13 +274,30 @@ const createStyles = (theme) => {
     socialButtonText: {
       fontSize: 15,
       fontWeight: '600',
-      color: colors.neutral900,
+      color: primaryText,
     },
-    helperCopy: {
-      textAlign: 'center',
-      color: colors.neutral500,
-      fontSize: 13,
-      marginTop: spacing.lg,
+    primaryActionButton: {
+      backgroundColor: accentBlue,
+      borderRadius: radii.pill,
+      paddingVertical: spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#101a3c',
+      shadowOpacity: 0.35,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
+    },
+    primaryActionButtonText: {
+      color: '#F8FBFF',
+    },
+    forgotPasswordButton: {
+      alignSelf: 'flex-start',
+      marginTop: -spacing.xs,
+      marginBottom: spacing.sm,
+    },
+    secondaryModeLink: {
+      marginTop: spacing.sm,
     },
   });
 };
@@ -395,38 +321,55 @@ export default function AuthScreen({ navigation, route }) {
   const setProfileComplete = useUserStore((state) => state.setProfileComplete);
   const setRole = useSessionRole((s) => s.setRole);
   const setNextBusinessRoute = useSessionRole((s) => s.setNextBusinessRoute);
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const heroCopy = useMemo(
-    () =>
-      businessMode ? HERO_COPY.business : HERO_COPY[mode] || HERO_COPY.login,
-    [businessMode, mode]
+  const placeholderColor =
+    theme.mode === 'dark' ? 'rgba(255,255,255,0.5)' : theme.colors.neutral500;
+  const accentColor =
+    theme.mode === 'dark' ? '#4D7BFF' : theme.colors.secondary;
+  const googleIconColor =
+    theme.mode === 'dark' ? '#F7FAFF' : theme.colors.neutral900;
+  const googleIconMutedColor =
+    theme.mode === 'dark' ? 'rgba(255,255,255,0.45)' : theme.colors.neutral500;
+  const heroSize = useMemo(() => {
+    const scaled = screenWidth * 0.45;
+    return Math.min(220, Math.max(160, scaled));
+  }, [screenWidth]);
+  const heroLogoDynamicStyle = useMemo(
+    () => ({
+      width: heroSize,
+      height: heroSize,
+      marginBottom: -heroSize * 0.1,
+    }),
+    [heroSize]
   );
-  const heroStats = businessMode ? BUSINESS_STATS : HERO_STATS;
-  const cardTitle = useMemo(() => {
-    if (businessMode) {
-      return mode === 'login'
-        ? 'Welcome back, host'
-        : 'List your venue in minutes';
-    }
-    return mode === 'login' ? 'Welcome back' : 'Create your profile';
-  }, [businessMode, mode]);
-  const cardSubtitle = useMemo(() => {
-    if (businessMode) {
-      return mode === 'login'
-        ? 'Track events, respond to requests, and keep your community engaged.'
-        : 'Share your brand details so we can fast-track your review.';
-    }
-    return mode === 'login'
-      ? 'Sign in to catch new drops, RSVPs, and chats tailored to you.'
-      : 'It takes less than a minute to tell us what you are into.';
-  }, [businessMode, mode]);
-  const inlineModeLabel =
-    mode === 'login' ? 'Need an account? Sign up' : 'Back to login';
-  const supportEmail = businessMode
-    ? 'partners@socialcircle.app'
-    : 'support@socialcircle.app';
+  const heroTaglineDynamicStyle = useMemo(
+    () => ({
+      marginTop: -heroSize * 0.2,
+      marginBottom: -heroSize * 0.08,
+    }),
+    [heroSize]
+  );
+  const overlayInsetStyle = useMemo(
+    () => ({
+      paddingTop: Math.max(theme.spacing.lg, insets.top + theme.spacing.sm),
+      paddingBottom: Math.max(
+        theme.spacing.xl,
+        insets.bottom + theme.spacing.lg
+      ),
+    }),
+    [
+      insets.bottom,
+      insets.top,
+      theme.spacing.lg,
+      theme.spacing.sm,
+      theme.spacing.xl,
+    ]
+  );
+  const cardTitle = mode === 'login' ? 'Welcome back' : 'Create account';
   const googleDisabled = !googleRequest;
   const handleAccountModeChange = useCallback(
     (nextBusiness) => {
@@ -896,194 +839,167 @@ export default function AuthScreen({ navigation, route }) {
 
   return (
     <AnimatedGradientBackground style={styles.container} variant='onboarding'>
-      <View style={{ flex: 1 }}>
-        <View style={styles.overlay}>
-          <LoadingOverlay visible={loading} />
+      <ScrollView
+        contentContainerStyle={[styles.overlay, overlayInsetStyle]}
+        keyboardShouldPersistTaps='handled'
+        showsVerticalScrollIndicator={false}
+      >
+        <LoadingOverlay visible={loading} />
 
-          <View style={styles.heroBlock}>
-            <View style={styles.logoRow}>
-              <Image
-                source={require('../../../../../assets/SocialCircleLogoClear.png')}
-                style={styles.heroLogo}
-                resizeMode='contain'
-              />
-              <View>
-                <Text style={styles.heroBrand}>SocialCircle</Text>
-                <Text style={styles.heroTagline}>IRL plans, curated daily</Text>
-              </View>
+        <View style={styles.heroBlock}>
+          <Image
+            source={require('../../../../../assets/SocialCircleLogoClear.png')}
+            style={[styles.heroLogo, heroLogoDynamicStyle]}
+            resizeMode='contain'
+          />
+          <Text style={[styles.heroTagline, heroTaglineDynamicStyle]}>
+            Find Your Circle
+          </Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{cardTitle}</Text>
+
+          {showBusinessAccountSwitch ? (
+            <View style={styles.accountSwitchContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.accountSwitchButton,
+                  !businessMode && styles.accountSwitchButtonActive,
+                ]}
+                onPress={() => handleAccountModeChange(false)}
+              >
+                <Text
+                  style={[
+                    styles.accountSwitchText,
+                    !businessMode && styles.accountSwitchTextActive,
+                  ]}
+                >
+                  I&apos;m here to attend
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.accountSwitchButton,
+                  businessMode && styles.accountSwitchButtonActive,
+                ]}
+                onPress={() => handleAccountModeChange(true)}
+              >
+                <Text
+                  style={[
+                    styles.accountSwitchText,
+                    businessMode && styles.accountSwitchTextActive,
+                  ]}
+                >
+                  I manage a business
+                </Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.heroBadge}>
-              <Ionicons name='sparkles-outline' size={16} color='#F5F3FF' />
-              <Text style={styles.heroBadgeText}>{heroCopy.eyebrow}</Text>
-            </View>
-            <Text style={styles.heroTitle}>{heroCopy.title}</Text>
-            <Text style={styles.heroSubtitle}>{heroCopy.subtitle}</Text>
-            <View style={styles.heroStatsRow}>
-              {heroStats.map((stat) => (
-                <View key={stat.label} style={styles.statCard}>
-                  <Text style={styles.statValue}>{stat.value}</Text>
-                  <Text style={styles.statLabel}>{stat.label}</Text>
-                </View>
-              ))}
-            </View>
+          ) : null}
+
+          <View style={styles.modeSwitch}>
+            <TouchableOpacity
+              style={[
+                styles.modeOption,
+                mode === 'login' && styles.modeOptionActive,
+              ]}
+              onPress={() => setMode('login')}
+            >
+              <Text
+                style={[
+                  styles.modeOptionText,
+                  mode === 'login' && styles.modeOptionTextActive,
+                ]}
+              >
+                Sign in
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.modeOption,
+                mode === 'signup' && styles.modeOptionActive,
+              ]}
+              onPress={() => setMode('signup')}
+            >
+              <Text
+                style={[
+                  styles.modeOptionText,
+                  mode === 'signup' && styles.modeOptionTextActive,
+                ]}
+              >
+                Sign up
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionEyebrow}>
-              {businessMode ? 'Business portal' : 'Member access'}
-            </Text>
-            <Text style={styles.cardTitle}>{cardTitle}</Text>
-            <Text style={styles.cardSubtitle}>{cardSubtitle}</Text>
+          {businessMode ? (
+            <Text style={styles.businessLabel}>business login</Text>
+          ) : null}
 
-            {showBusinessAccountSwitch ? (
-              <View style={styles.accountSwitchContainer}>
-                <TouchableOpacity
-                  style={[
-                    styles.accountSwitchButton,
-                    !businessMode && styles.accountSwitchButtonActive,
-                  ]}
-                  onPress={() => handleAccountModeChange(false)}
-                >
-                  <Text
-                    style={[
-                      styles.accountSwitchText,
-                      !businessMode && styles.accountSwitchTextActive,
-                    ]}
-                  >
-                    I&apos;m here to attend
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.accountSwitchButton,
-                    businessMode && styles.accountSwitchButtonActive,
-                  ]}
-                  onPress={() => handleAccountModeChange(true)}
-                >
-                  <Text
-                    style={[
-                      styles.accountSwitchText,
-                      businessMode && styles.accountSwitchTextActive,
-                    ]}
-                  >
-                    I manage a business
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Email</Text>
+            <TextInput
+              placeholder='you@example.com'
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize='none'
+              keyboardType='email-address'
+              autoCorrect={false}
+              spellCheck={false}
+              textContentType='emailAddress'
+              autoComplete='email'
+              style={styles.input}
+              placeholderTextColor={placeholderColor}
+              keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
+            />
+          </View>
 
-            <Text style={styles.accountSwitchHelper}>
-              {businessMode
-                ? 'Log in to manage your company profile, events, and team.'
-                : 'Discover and join events happening around you.'}
-            </Text>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Password</Text>
+            <TextInput
+              placeholder='••••••••'
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              textContentType='password'
+              autoComplete='password'
+              autoCorrect={false}
+              spellCheck={false}
+              style={styles.input}
+              placeholderTextColor={placeholderColor}
+              keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
+            />
+          </View>
 
-            <View style={styles.modeSwitch}>
-              <TouchableOpacity
-                style={[
-                  styles.modeOption,
-                  mode === 'login' && styles.modeOptionActive,
-                ]}
-                onPress={() => setMode('login')}
-              >
-                <Text
-                  style={[
-                    styles.modeOptionText,
-                    mode === 'login' && styles.modeOptionTextActive,
-                  ]}
-                >
-                  Sign in
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.modeOption,
-                  mode === 'signup' && styles.modeOptionActive,
-                ]}
-                onPress={() => setMode('signup')}
-              >
-                <Text
-                  style={[
-                    styles.modeOptionText,
-                    mode === 'signup' && styles.modeOptionTextActive,
-                  ]}
-                >
-                  Sign up
-                </Text>
-              </TouchableOpacity>
-            </View>
+          <TouchableOpacity
+            onPress={handlePasswordReset}
+            style={styles.forgotPasswordButton}
+          >
+            <Text style={styles.linkText}>Forgot password?</Text>
+          </TouchableOpacity>
 
-            {businessMode ? (
-              <Text style={styles.businessLabel}>business login</Text>
-            ) : null}
+          {loading ? (
+            <ActivityIndicator
+              size='large'
+              color={accentColor}
+              style={{ marginVertical: theme.spacing.md }}
+            />
+          ) : (
+            <Button
+              title={mode === 'login' ? 'Sign in' : 'Create account'}
+              onPress={handleSubmit}
+              style={[styles.buttonSpacing, styles.primaryActionButton]}
+              textStyle={styles.primaryActionButtonText}
+            />
+          )}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Email</Text>
-              <TextInput
-                placeholder='you@example.com'
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize='none'
-                keyboardType='email-address'
-                autoCorrect={false}
-                spellCheck={false}
-                textContentType='emailAddress'
-                autoComplete='email'
-                style={styles.input}
-                placeholderTextColor={theme.colors.neutral500}
-                keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
-              />
-            </View>
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerLabel}>OR</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
-              <TextInput
-                placeholder='••••••••'
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                textContentType='password'
-                autoComplete='password'
-                autoCorrect={false}
-                spellCheck={false}
-                style={styles.input}
-                placeholderTextColor={theme.colors.neutral500}
-                keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
-              />
-            </View>
-
-            <View style={styles.inlineActions}>
-              <TouchableOpacity onPress={handlePasswordReset}>
-                <Text style={styles.linkText}>Forgot password?</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}
-              >
-                <Text style={styles.subtleLinkText}>{inlineModeLabel}</Text>
-              </TouchableOpacity>
-            </View>
-
-            {loading ? (
-              <ActivityIndicator
-                size='large'
-                color={theme.colors.secondary}
-                style={{ marginVertical: theme.spacing.md }}
-              />
-            ) : (
-              <Button
-                title={mode === 'login' ? 'Sign in' : 'Create account'}
-                onPress={handleSubmit}
-                style={styles.buttonSpacing}
-              />
-            )}
-
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerLabel}>Quick options</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            {mode === 'login' ? (
+          {/* {mode === 'login' ? (
               <TouchableOpacity
                 style={[
                   styles.socialButton,
@@ -1096,9 +1012,7 @@ export default function AuthScreen({ navigation, route }) {
                   name='logo-google'
                   size={18}
                   color={
-                    googleDisabled
-                      ? theme.colors.neutral500
-                      : theme.colors.neutral900
+                    googleDisabled ? googleIconMutedColor : googleIconColor
                   }
                 />
                 <Text style={styles.socialButtonText}>
@@ -1113,32 +1027,29 @@ export default function AuthScreen({ navigation, route }) {
                 <Ionicons
                   name='time-outline'
                   size={18}
-                  color={theme.colors.neutral500}
+                  color={googleIconMutedColor}
                 />
                 <Text style={styles.socialButtonText}>
                   Google sign up coming soon
                 </Text>
               </TouchableOpacity>
-            )}
+            )} */}
 
-            {appleAvailable && (
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={
-                  AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
-                }
-                buttonStyle={
-                  AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-                }
-                cornerRadius={8}
-                style={styles.appleButton}
-                onPress={handleAppleSignIn}
-              />
-            )}
-
-            <Text style={styles.helperCopy}>Need a hand? {supportEmail}</Text>
-          </View>
+          {appleAvailable && (
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={
+                AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+              }
+              buttonStyle={
+                AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+              }
+              cornerRadius={12}
+              style={styles.appleButton}
+              onPress={handleAppleSignIn}
+            />
+          )}
         </View>
-      </View>
+      </ScrollView>
     </AnimatedGradientBackground>
   );
 }

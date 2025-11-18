@@ -52,6 +52,8 @@ import {
   onSnapshot,
   writeBatch,
   serverTimestamp,
+  orderBy,
+  limit,
 } from '../../../firebase/firestoreCompat';
 import PostCard from './PostCard';
 import InterestPostCard from '../../interestPosts/components/InterestPostCard';
@@ -69,6 +71,7 @@ import {
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import VerificationModal from '../../profile/components/VerificationModal';
+import { useFocusEffect } from '@react-navigation/native';
 
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -546,11 +549,13 @@ export default function ProfileScreen({ navigation }) {
     (Array.isArray(user.createdEvents) ? user.createdEvents.length : 0) +
     (Array.isArray(user.attendedEvents) ? user.attendedEvents.length : 0);
 
-  // --- Refresh handler ---
-  const onRefresh = useCallback(async () => {
-    if (!user?.uid) return;
-    setRefreshing(true);
-
+  const refreshProfileData = useCallback(async () => {
+    if (!user?.uid) {
+      setInterestPosts([]);
+      setUserEvents({ created: [], attending: [], attended: [] });
+      setEnhancedEvents([]);
+      return;
+    }
     try {
       // Refresh user data
       const data = await getUserData(user.uid);
@@ -634,10 +639,24 @@ export default function ProfileScreen({ navigation }) {
       }
     } catch (error) {
       console.error('Error refreshing data:', error);
+    }
+  }, [groupEvents, user?.uid]);
+
+  // --- Refresh handler for pull-to-refresh ---
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshProfileData();
     } finally {
       setRefreshing(false);
     }
-  }, [user?.uid]);
+  }, [refreshProfileData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshProfileData();
+    }, [refreshProfileData])
+  );
 
   // Description: Sync local state with user prop changes from store
   useEffect(() => {
@@ -792,6 +811,54 @@ export default function ProfileScreen({ navigation }) {
     fetchUserEvents();
     return () => {
       isMounted = false;
+    };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setInterestPosts([]);
+      return;
+    }
+    const postsRef = collection(db, 'interestPosts');
+    const postsQuery = query(
+      postsRef,
+      where('creatorId', '==', user.uid),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    );
+
+    const unsubscribe = onSnapshot(
+      postsQuery,
+      (snapshot) => {
+        const posts = snapshot.docs
+          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .filter((post) => post?.isDeleted !== true);
+        setInterestPosts(posts);
+      },
+      (error) => {
+        if (error?.code === 'permission-denied') {
+          setInterestPosts([]);
+          try {
+            unsubscribe && unsubscribe();
+          } catch {}
+          return;
+        }
+        console.warn(
+          '[ProfileScreen] interest posts listener error:',
+          error?.message || error
+        );
+      }
+    );
+
+    try {
+      if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
+      global.unsubscribeAllListeners.push(unsubscribe);
+    } catch {}
+
+    return () => {
+      try {
+        unsubscribe && unsubscribe();
+      } catch {}
     };
   }, [user?.uid]);
 

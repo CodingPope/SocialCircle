@@ -75,6 +75,7 @@ export default function NameDobScreen({ navigation }) {
   const setUser = useUserStore((state) => state.setUser);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
   // State for name fields
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -202,6 +203,7 @@ export default function NameDobScreen({ navigation }) {
             maxLength={30}
             autoCapitalize='words'
             textContentType='givenName'
+            keyboardAppearance={keyboardAppearance}
           />
           {/* Description: Last name input with maxLength and validation */}
           <TextInput
@@ -218,6 +220,7 @@ export default function NameDobScreen({ navigation }) {
             maxLength={30}
             autoCapitalize='words'
             textContentType='familyName'
+            keyboardAppearance={keyboardAppearance}
           />
 
           <TouchableOpacity style={styles.input} onPress={showDatePicker}>

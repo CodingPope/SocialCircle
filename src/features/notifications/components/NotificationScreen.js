@@ -85,21 +85,27 @@ const NotificationCard = memo(
             }
             if (requesterId) {
               // Prefer snippet store (batched, cached)
+              let snippetHydrated = false;
               try {
                 const map = await ensureSnippets([requesterId]);
                 const s = map.get(requesterId);
-                if (mounted && s)
+                if (mounted && s) {
+                  const [first, ...rest] = (s.name || '').split(' ');
                   setRequester({
                     profileImage: s.photoURL,
                     avatarURL: null,
                     photoURL: s.photoURL,
-                    firstName: null,
-                    lastName: null,
+                    displayName: s.name,
+                    name: s.name,
+                    firstName: first || null,
+                    lastName: rest.length ? rest.join(' ') : null,
                     rating: s.rating || null,
                   });
+                  snippetHydrated = true;
+                }
               } catch {}
 
-              if (!requester) {
+              if (!snippetHydrated && !requester) {
                 // Fallback
                 promises.push(
                   db

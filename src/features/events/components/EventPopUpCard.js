@@ -588,19 +588,15 @@ export default function EventPopUpCard({
         }}
       >
         {/* Full-bleed header image */}
-        <View style={styles.headerFullBleed}>
-          {typeof liveEvent.imageUrl === 'string' && liveEvent.imageUrl ? (
+        {typeof liveEvent.imageUrl === 'string' && liveEvent.imageUrl ? (
+          <View style={styles.headerFullBleed}>
             <Image
               source={{ uri: liveEvent.imageUrl }}
               style={styles.headerImage}
               resizeMode='cover'
             />
-          ) : (
-            <View style={styles.headerImagePlaceholder}>
-              <Text style={styles.placeholderText}>No image</Text>
-            </View>
-          )}
-        </View>
+          </View>
+        ) : null}
 
         {/* Title + share */}
         <View style={styles.titleRow}>
@@ -882,14 +878,6 @@ const createStyles = (theme) =>
       width: '100%',
       aspectRatio: 16 / 9,
     },
-    headerImagePlaceholder: {
-      width: '100%',
-      aspectRatio: 16 / 9,
-      backgroundColor: theme.colors.backgroundSecondary,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
     // Typography + layout
     title: {
       fontSize: 24,

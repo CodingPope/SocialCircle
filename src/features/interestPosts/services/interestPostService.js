@@ -18,7 +18,7 @@ import {
   where,
 } from '../../../firebase/firestoreCompat';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { auth, db, storage } from '../../../firebase/config';
+import { auth, db, storage, getTimestampNow } from '../../../firebase/config';
 import {
   interpretStorageError,
   logStorageDiagnostic,
@@ -142,7 +142,7 @@ export async function createInterestPost({ content, interestId, media }) {
   if (!interestId) throw new Error('Interest is required');
 
   const creatorSnapshot = await fetchUserSnapshot(user.uid);
-  const localCreatedAt = Timestamp.now();
+  const localCreatedAt = getTimestampNow();
   const baseDoc = {
     creatorId: user.uid,
     creatorSnapshot,

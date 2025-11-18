@@ -172,6 +172,7 @@ const createStyles = (theme) => {
 export default function ManageInterestsScreen({ navigation }) {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
+  const setUserStore = useUserStore((state) => state.setUser);
   const [categories, setCategories] = useState([]);
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -181,8 +182,12 @@ export default function ManageInterestsScreen({ navigation }) {
   const [filterText, setFilterText] = useState('');
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
 
   useEffect(() => {
+    if (!user?.uid) return;
+    const userId = user.uid;
+
     const fetchCategoriesAndUserInterests = async () => {
       try {
         // Description: Helper to normalize interest names for deduplication
@@ -261,7 +266,7 @@ export default function ManageInterestsScreen({ navigation }) {
         setCategories(categoriesWithSpecials);
 
         // Fetch user's selected interests
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        const userDoc = await getDoc(doc(db, 'users', userId));
         if (userDoc.exists) {
           const userData = userDoc.data();
           setSelected(userData.interests || []); // Prepopulate selected interests
@@ -276,7 +281,7 @@ export default function ManageInterestsScreen({ navigation }) {
     };
 
     fetchCategoriesAndUserInterests();
-  }, []);
+  }, [user?.uid]);
 
   const fadeIn = () => {
     fadeAnim.setValue(0);
@@ -304,8 +309,18 @@ export default function ManageInterestsScreen({ navigation }) {
         return;
       }
 
+      if (!user?.uid) {
+        Alert.alert('Unable to update interests', 'Please sign in again.');
+        setLoading(false);
+        return;
+      }
+
       // Update user's selected interests in Firestore
       await updateDoc(doc(db, 'users', user.uid), { interests: selected });
+
+      if (typeof setUserStore === 'function' && user) {
+        setUserStore({ ...user, interests: [...selected] });
+      }
 
       Alert.alert('Success', 'Your interests have been updated.');
       navigation.goBack(); // Navigate back to the profile page
@@ -407,6 +422,7 @@ export default function ManageInterestsScreen({ navigation }) {
             value={filterText}
             onChangeText={setFilterText}
             placeholderTextColor={theme.colors.neutral600}
+            keyboardAppearance={keyboardAppearance}
           />
         )}
 

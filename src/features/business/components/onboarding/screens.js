@@ -20,6 +20,7 @@ import {
   BUSINESS_ONBOARDING_STAGES,
 } from '../../stores/businessOnboardingStore';
 import { useAuth } from '../../../auth/context/AuthContext';
+import { useThemeStore } from '../../../../store/themeStore';
 
 const STAGE_SEQUENCE = [
   BUSINESS_ONBOARDING_STAGES.BASICS,
@@ -996,6 +997,9 @@ export function ReviewScreen() {
 }
 
 function InputBlock({ label, required, ...props }) {
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
+
   return (
     <View style={{ marginBottom: 16 }}>
       <Text
@@ -1019,12 +1023,16 @@ function InputBlock({ label, required, ...props }) {
           fontSize: 15,
           backgroundColor: '#FFF',
         }}
+        keyboardAppearance={keyboardAppearance}
       />
     </View>
   );
 }
 
 function TextBlock({ label, ...props }) {
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
+
   return (
     <View style={{ marginBottom: 16 }}>
       <Text
@@ -1051,12 +1059,16 @@ function TextBlock({ label, ...props }) {
           textAlignVertical: 'top',
           minHeight: 120,
         }}
+        keyboardAppearance={keyboardAppearance}
       />
     </View>
   );
 }
 
 function InputInline({ label, style, ...props }) {
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
+
   return (
     <View style={[{ flex: 1, marginRight: 12 }, style]}>
       <Text
@@ -1079,6 +1091,7 @@ function InputInline({ label, style, ...props }) {
           fontSize: 15,
           backgroundColor: '#FFF',
         }}
+        keyboardAppearance={keyboardAppearance}
       />
     </View>
   );

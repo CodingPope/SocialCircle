@@ -8,9 +8,12 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import { useThemeStore } from '../../../store/themeStore';
 
 export default function BioSection({ bio, setBio, onSaveBio }) {
   const [editing, setEditing] = useState(false);
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
 
   return (
     <View style={styles.container}>
@@ -22,6 +25,7 @@ export default function BioSection({ bio, setBio, onSaveBio }) {
             value={bio}
             onChangeText={setBio}
             multiline
+            keyboardAppearance={keyboardAppearance}
           />
           <TouchableOpacity
             style={styles.button}

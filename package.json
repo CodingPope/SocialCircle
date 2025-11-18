@@ -8,6 +8,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "ios:device": "expo run:ios --device",
+    "ios:prep-archive": "cd ios && pod install && cd .. && open ios/SocialCircle.xcworkspace",
     "web": "expo start --web",
     "test": "jest",
     "seed:categories": "node scripts/replaceCategories.js",

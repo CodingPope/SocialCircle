@@ -1,4 +1,4 @@
-import { db, Timestamp } from '../../../firebase/config';
+import { db, Timestamp, getTimestampNow } from '../../../firebase/config';
 import { geohashQueryBounds, distanceBetween } from 'geofire-common';
 import { getWithTTL } from '../utils/ttlCache';
 
@@ -37,7 +37,7 @@ export async function fetchHotEvents(
             .where('interest', 'in', interestChunk)
             .where('status', '==', 'active')
             .where('isDeleted', '==', false)
-            .where('date', '>=', Timestamp.now());
+            .where('date', '>=', getTimestampNow());
           promises.push(queryRef.get());
         }
       }
@@ -164,7 +164,7 @@ export async function fetchThisWeekEvents(
 
     const center = [userLocation.latitude, userLocation.longitude];
     const bounds = geohashQueryBounds(center, radiusInM);
-    const now = Timestamp.now();
+    const now = getTimestampNow();
     const weekFromNow = Timestamp.fromMillis(
       Date.now() + 7 * 24 * 60 * 60 * 1000
     );
@@ -313,7 +313,7 @@ export async function fetchTodayEvents(
  */
 export async function fetchGenericEvents(pageSize = 20) {
   try {
-    const now = Timestamp.now();
+    const now = getTimestampNow();
     const snap = await db
       .collection('events')
       .where('status', '==', 'active')

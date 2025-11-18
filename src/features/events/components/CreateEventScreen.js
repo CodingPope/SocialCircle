@@ -30,7 +30,13 @@ import {
   getDocs,
   getDoc,
 } from '../../../firebase/firestoreCompat';
-import { db, storage, auth, authInstance } from '../../../firebase/config';
+import {
+  db,
+  storage,
+  auth,
+  authInstance,
+  getTimestampNow,
+} from '../../../firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import { updateEventCount } from '../../../firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
@@ -114,16 +120,22 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
   const [ageRange, setAgeRange] = useState([18, 99]);
   const [privacyIndex, setPrivacyIndex] = useState(0);
-  const segments = [
-    'Public',
-    'RSVP',
-    `${user.sex === 'female' ? 'Women' : 'Men'} Only`,
-  ];
-  const privacyValues = [
-    'public',
-    'rsvp',
-    `${user.sex === 'female' ? 'female-only' : 'male-only'}`,
-  ];
+
+  // Description: Build privacy options based on user's sex (male, female, nonbinary)
+  const getGenderOnlyLabel = () => {
+    if (user.sex === 'female') return 'Women Only';
+    if (user.sex === 'male') return 'Men Only';
+    return 'Same Gender Only'; // nonbinary or other
+  };
+
+  const getGenderOnlyValue = () => {
+    if (user.sex === 'female') return 'female-only';
+    if (user.sex === 'male') return 'male-only';
+    return 'nonbinary-only';
+  };
+
+  const segments = ['Public', 'RSVP', getGenderOnlyLabel()];
+  const privacyValues = ['public', 'rsvp', getGenderOnlyValue()];
   const [placeInput, setPlaceInput] = useState('');
 
   const [capacity, setCapacity] = useState('');
@@ -236,14 +248,33 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     if (!selectedInterest) return Alert.alert('Select an interest');
 
     const privacyValue = privacyValues[privacyIndex];
+    // Description: Validate that gender-restricted events match the user's sex
     if (
-      (privacyValue === 'female-only' && user.gender !== 'female') ||
-      (privacyValue === 'male-only' && user.gender !== 'male')
+      (privacyValue === 'female-only' && user.sex !== 'female') ||
+      (privacyValue === 'male-only' && user.sex !== 'male') ||
+      (privacyValue === 'nonbinary-only' && user.sex !== 'nonbinary')
     ) {
-      return Alert.alert('Gender privacy mismatch');
+      return Alert.alert(
+        'Gender privacy mismatch',
+        'You can only create gender-restricted events for your own gender.'
+      );
     }
 
     const eventLocation = manualLocation || location;
+    // Defensive: Ensure eventLocation is valid
+    if (
+      !eventLocation ||
+      typeof eventLocation.latitude !== 'number' ||
+      Number.isNaN(eventLocation.latitude) ||
+      typeof eventLocation.longitude !== 'number' ||
+      Number.isNaN(eventLocation.longitude)
+    ) {
+      return Alert.alert(
+        'Invalid location',
+        'Could not determine a valid event location. Please try again.'
+      );
+    }
+
     const geohash = geohashForLocation([
       eventLocation.latitude,
       eventLocation.longitude,
@@ -264,7 +295,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       businessId: null,
       locationId: null,
       date: Timestamp.fromDate(date),
-      createdAt: Timestamp.now(),
+      createdAt: getTimestampNow(),
       ageRange,
       capacity: capacity ? parseInt(capacity, 10) : null,
       privacy: privacyValue,
@@ -309,7 +340,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       }
 
       // Description: Fire-and-forget background task for image upload + user doc updates
-      (async () => {
+      const _backgroundEventPostCreate = async () => {
         try {
           // Wait for the event document to be readable by security rules (avoid storage.get() race)
           const waitForEventDoc = async (id, attempts = 12, delayMs = 750) => {
@@ -336,9 +367,11 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
           }
 
           // Extra delay to avoid any propagation timing issues before Storage rule get() lookup
-          await new Promise((res) => setTimeout(res, 500));
+          // Wait longer to allow Firestore rules to propagate
+          await new Promise((res) => setTimeout(res, 1500));
 
           // If user selected an image, upload now to owner-scoped path so storage rules allow it
+
           if (imageUri) {
             try {
               const resp = await fetch(imageUri);
@@ -368,10 +401,10 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                   } catch (e) {
                     lastErr = e;
                     console.warn(
-                      `Upload attempt ${attempt} failed:`,
+                      `Upload attempt ${attempt} failed for user ${user?.uid} event ${docRef.id}:`,
                       e?.code || e
                     );
-                    await new Promise((r) => setTimeout(r, 500 * attempt));
+                    await new Promise((r) => setTimeout(r, 1000 * attempt));
                   }
                 }
 
@@ -382,13 +415,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                       `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
                     );
                     await altRef.putFile(imageUri, { contentType });
-                    downloadUrl = await altRef.getDownloadURL();
                   } catch (altErr) {
-                    logStorageDiagnostic('event-image-fallback', {
-                      code: altErr?.code,
-                      message: altErr?.message,
-                      path: `profileImages/${user.uid}/${docRef.id}`,
-                    });
                     console.warn('Fallback upload also failed:', altErr);
                   }
                 }
@@ -464,7 +491,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             bgErr
           );
         }
-      })();
+      };
+      _backgroundEventPostCreate();
     } catch (e) {
       console.error('Create event failed', e?.code || '', e?.message || e);
       // Only surface error for creation step (addDoc). If we got here, addDoc likely failed
@@ -562,7 +590,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             <Image source={{ uri: imageUri }} style={styles.preview} />
           ) : (
             <View style={styles.previewPlaceholder}>
-              <Text>No Image</Text>
+              <Text style={styles.noImageText}>No Image</Text>
             </View>
           )}
           <TouchableOpacity
@@ -592,7 +620,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             value={description}
             onChangeText={setDescription}
             placeholder="What's your event about?"
-            placeholderTextColor='grey'
+            placeholderTextColor={theme.colors.textSecondary}
             multiline
             keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
           />
@@ -600,7 +628,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
           {/* Date & Time */}
           <Text style={styles.label}>Date & Time</Text>
           <TouchableOpacity style={styles.input} onPress={showDatePicker}>
-            <Text>
+            <Text style={styles.dateTimeText}>
               {date.toLocaleString('en-US', {
                 dateStyle: 'medium',
                 timeStyle: 'short',
@@ -616,8 +644,8 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             minimumDate={new Date(Date.now() + MIN_MILLIS)}
             maximumDate={new Date(Date.now() + MAX_MILLIS)}
             minuteInterval={MINUTE_INCREMENT}
-            themeVariant='light' // Explicitly set theme to light
-            textColor='#000' // Ensure text is visible
+            isDarkModeEnabled={themeMode === 'dark'}
+            textColor={themeMode === 'dark' ? '#fff' : '#000'}
           />
 
           {/* Address Input */}
@@ -636,11 +664,17 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 textInput: [styles.input, styles.flex],
                 container: { flex: 1 },
                 listView: {
-                  backgroundColor: '#fff',
+                  backgroundColor: theme.colors.card,
                   elevation: 5,
                   position: 'absolute',
                   top: 55,
                   maxHeight: 200,
+                },
+                row: {
+                  backgroundColor: theme.colors.card,
+                },
+                description: {
+                  color: theme.colors.text,
                 },
               }}
               textInputProps={{
@@ -711,9 +745,9 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
                 setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
               }
               style={styles.segment}
-              backgroundColor='#f0f0f0'
-              tintColor='#007AFF'
-              fontStyle={{ color: '#333' }}
+              backgroundColor={theme.isDark ? '#334155' : '#f0f0f0'}
+              tintColor={theme.colors.primary}
+              fontStyle={{ color: theme.colors.text }}
               activeFontStyle={{ color: '#fff' }}
             />
           ) : (
@@ -824,6 +858,10 @@ const createStyles = (theme) =>
       borderRadius: 8,
       marginBottom: 10,
     },
+    noImageText: {
+      color: theme.colors.textSecondary,
+      fontSize: 16,
+    },
     photoBtn: {
       padding: 10,
       backgroundColor: theme.colors.primary,
@@ -847,6 +885,10 @@ const createStyles = (theme) =>
       backgroundColor: theme.colors.card,
     },
     textArea: { height: 80, textAlignVertical: 'top' },
+    dateTimeText: {
+      color: theme.colors.text,
+      fontSize: 16,
+    },
     row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
     flex: { flex: 1 },
     pinLocationText: {

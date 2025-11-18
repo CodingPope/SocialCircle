@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { useThemeStore } from '../../../store/themeStore';
 
 const TextInputComponent = ({
   label,
@@ -11,6 +12,9 @@ const TextInputComponent = ({
   editable = true,
   style, // additional style overrides from parent
 }) => {
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
+
   return (
     <View style={[styles.container, style]}>
       <Text style={styles.label}>{label}</Text>
@@ -23,6 +27,7 @@ const TextInputComponent = ({
         multiline={multiline}
         keyboardType={keyboardType}
         editable={editable}
+        keyboardAppearance={keyboardAppearance}
       />
     </View>
   );

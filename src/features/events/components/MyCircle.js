@@ -44,6 +44,7 @@ import {
 } from '../../../lib/analytics';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
+import EventThumbnail from './EventThumbnail';
 
 export default function MyCircle({ navigation }) {
   // Description: Get current user from Zustand userStore
@@ -751,8 +752,6 @@ export default function MyCircle({ navigation }) {
       if (!item?.event?.id) return null;
       const { event } = item;
       const isUnsaving = !!unsavingMap[event.id];
-      const previewImage =
-        event.imageUrl || event.cardImage || 'https://via.placeholder.com/60';
       const hostLabel = event.hostName ? `Hosted by ${event.hostName}` : null;
       const interestLabel =
         (item.record?.interest && item.record.interest.trim()) ||
@@ -765,7 +764,12 @@ export default function MyCircle({ navigation }) {
             onPress={() => handleSavedEventPress(event)}
             activeOpacity={0.82}
           >
-            <Image source={{ uri: previewImage }} style={styles.savedImage} />
+            <EventThumbnail
+              event={event}
+              size={60}
+              borderRadius={14}
+              style={styles.savedImage}
+            />
             <View style={{ flex: 1 }}>
               <Text style={styles.savedTitle} numberOfLines={1}>
                 {event.title || 'Untitled Event'}
@@ -842,10 +846,10 @@ export default function MyCircle({ navigation }) {
             : item.event.date?.toLocaleDateString?.() || 'Date TBD'}
         </Text>
       </View>
-      <Image
-        source={{
-          uri: item.event.imageUrl || 'https://via.placeholder.com/60',
-        }}
+      <EventThumbnail
+        event={item.event}
+        size={50}
+        borderRadius={8}
         style={styles.activityEventImage}
       />
     </TouchableOpacity>
@@ -879,23 +883,25 @@ export default function MyCircle({ navigation }) {
 
         case 'carousel':
           return (
-            <FlatList
-              horizontal
-              data={item.data}
-              renderItem={renderUpcomingCarouselItem}
-              ItemSeparatorComponent={renderCarouselSeparator}
-              keyExtractor={(event) => event.id}
-              showsHorizontalScrollIndicator={false}
-              snapToInterval={snapInterval}
-              snapToAlignment='start'
-              decelerationRate='fast'
-              bounces={false}
-              overScrollMode='never'
-              contentContainerStyle={[
-                styles.carouselContent,
-                { paddingLeft: sidePadding, paddingRight: sidePadding },
-              ]}
-            />
+            <View style={styles.carouselWrapper}>
+              <FlatList
+                horizontal
+                data={item.data}
+                renderItem={renderUpcomingCarouselItem}
+                ItemSeparatorComponent={renderCarouselSeparator}
+                keyExtractor={(event) => event.id}
+                showsHorizontalScrollIndicator={false}
+                snapToInterval={snapInterval}
+                snapToAlignment='start'
+                decelerationRate='fast'
+                bounces={false}
+                overScrollMode='never'
+                contentContainerStyle={[
+                  styles.carouselContent,
+                  { paddingLeft: sidePadding, paddingRight: sidePadding },
+                ]}
+              />
+            </View>
           );
 
         case 'friend-activity':
@@ -1064,6 +1070,20 @@ const createStyles = (theme) =>
     carouselCard: {
       flexShrink: 0,
     },
+    carouselWrapper: {
+      backgroundColor: theme.isDark ? 'rgba(255,255,255,0.04)' : '#EEF2FF',
+      borderRadius: 28,
+      paddingVertical: 14,
+      marginBottom: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.isDark
+        ? 'rgba(255,255,255,0.06)'
+        : 'rgba(59,130,246,0.25)',
+      shadowColor: '#000',
+      shadowOpacity: theme.isDark ? 0.35 : 0.08,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 10 },
+    },
     activityCard: {
       flexDirection: 'row',
       backgroundColor: theme.colors.card,
@@ -1100,9 +1120,6 @@ const createStyles = (theme) =>
       marginTop: 2,
     },
     activityEventImage: {
-      width: 50,
-      height: 50,
-      borderRadius: 8,
       marginLeft: 10,
       backgroundColor: theme.colors.backgroundSecondary,
     },
@@ -1124,9 +1141,6 @@ const createStyles = (theme) =>
       flex: 1,
     },
     savedImage: {
-      width: 60,
-      height: 60,
-      borderRadius: 14,
       marginRight: 12,
       backgroundColor: theme.colors.backgroundSecondary,
     },

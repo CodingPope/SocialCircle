@@ -286,6 +286,7 @@ function InterestsScreen({ navigation }) {
   const [filterText, setFilterText] = useState('');
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -574,6 +575,7 @@ function InterestsScreen({ navigation }) {
               placeholderTextColor='rgba(255,255,255,0.6)'
               value={filterText}
               onChangeText={setFilterText}
+              keyboardAppearance={keyboardAppearance}
             />
           )}
 

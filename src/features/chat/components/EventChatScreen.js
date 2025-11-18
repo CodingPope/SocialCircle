@@ -763,6 +763,11 @@ const EventChatScreen = () => {
       );
       return;
     }
+    if (!eventId || !userId) {
+      console.warn('acceptRequest missing params', { eventId, userId });
+      Alert.alert('Action failed', 'Missing event or user id.');
+      return;
+    }
     try {
       const accept = functions.httpsCallable('acceptRsvpRequest');
       await accept({ eventId, userId });
@@ -789,6 +794,11 @@ const EventChatScreen = () => {
         'Action unavailable',
         'Cannot modify requests for archived or ended events.'
       );
+      return;
+    }
+    if (!eventId || !userId) {
+      console.warn('declineRequest missing params', { eventId, userId });
+      Alert.alert('Action failed', 'Missing event or user id.');
       return;
     }
     try {
@@ -1962,12 +1972,12 @@ const EventChatScreen = () => {
                   {requesters.length > 0 ? (
                     requesters.map((requester) => (
                       <TouchableOpacity
-                        key={requester.userId}
+                        key={requester.id}
                         style={styles.requestItem}
                         onPress={() => {
                           setIsModalVisible(false);
-                          if (requester?.userId)
-                            navigateToOtherUserProfile(requester.userId);
+                          if (requester?.id)
+                            navigateToOtherUserProfile(requester.id);
                         }}
                       >
                         <Image
@@ -1989,17 +1999,13 @@ const EventChatScreen = () => {
                         <View style={styles.requestActions}>
                           <TouchableOpacity
                             style={styles.acceptButton}
-                            onPress={() =>
-                              handleAcceptRequest(requester.userId)
-                            }
+                            onPress={() => handleAcceptRequest(requester.id)}
                           >
                             <Text style={styles.acceptButtonText}>Accept</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.declineButton}
-                            onPress={() =>
-                              handleDeclineRequest(requester.userId)
-                            }
+                            onPress={() => handleDeclineRequest(requester.id)}
                           >
                             <Text style={styles.declineButtonText}>
                               Decline
@@ -2139,6 +2145,8 @@ const EventChatScreen = () => {
               onConfirm={handleEditDateConfirm}
               onCancel={() => setIsEditDatePickerVisible(false)}
               date={editDate || toDateOrNull(event?.date) || new Date()}
+              isDarkModeEnabled={themeMode === 'dark'}
+              textColor={theme.colors.text}
             />
           </View>
         </Modal>
