@@ -14,7 +14,28 @@ import {
   Animated,
   ActivityIndicator,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { AttendeeBubbleRow } from '../../features/events';
+import { getCategoryConfig } from '../../config/categoryPins';
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const adjustHexColor = (hex, amount = 0) => {
+  if (typeof hex !== 'string') return '#E5E7EB';
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return '#E5E7EB';
+
+  const num = parseInt(normalized, 16);
+  const factor = clamp(amount, -1, 1);
+  const adjust = (shift) => {
+    const base = (num >> shift) & 0xff;
+    return clamp(Math.round(base + factor * 255), 0, 255);
+  };
+  const r = adjust(16);
+  const g = adjust(8);
+  const b = adjust(0);
+  const toHex = (value) => value.toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
 
 // Description: Floating preview bubble for an event blip with micro-animations and pointer.
 // Props:
@@ -43,6 +64,23 @@ export default function BlipPreview({
   const [joinFeedback, setJoinFeedback] = useState(null);
   const joinFeedbackTimeoutRef = useRef(null);
   const lastJoinMessageRef = useRef(null);
+
+  const fallbackInitial = useMemo(() => {
+    const source = (event?.title || event?.interest || '').trim();
+    return source ? source.charAt(0).toUpperCase() : '🎉';
+  }, [event?.title, event?.interest]);
+
+  const categoryConfig = useMemo(() => getCategoryConfig(event || {}), [event]);
+  const placeholderEmoji = categoryConfig?.emoji || fallbackInitial;
+  const placeholderColor = categoryConfig?.color || '#E5E7EB';
+  const placeholderGradientStart = useMemo(
+    () => adjustHexColor(placeholderColor, 0.18),
+    [placeholderColor]
+  );
+  const placeholderGradientEnd = useMemo(
+    () => adjustHexColor(placeholderColor, -0.12),
+    [placeholderColor]
+  );
 
   // --- Derived membership/request state like EventPopUpCard ---
   const attendees = Array.isArray(event?.attendees) ? event.attendees : [];
@@ -126,7 +164,6 @@ export default function BlipPreview({
 
   // --- Micro-animations (unchanged) ---
   const appear = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     // Gentle entrance
@@ -156,26 +193,6 @@ export default function BlipPreview({
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!happeningNow) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 0,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [pulse, happeningNow]);
 
   const showJoinFeedback = useCallback((payload) => {
     const normalized =
@@ -216,24 +233,6 @@ export default function BlipPreview({
         scale: appear.interpolate({
           inputRange: [0, 1],
           outputRange: [0.98, 1],
-        }),
-      },
-      {
-        scale: pulse.interpolate({
-          inputRange: [0, 1],
-          outputRange: [1, 1.02],
-        }),
-      },
-    ],
-  };
-
-  const pointerPulseStyle = {
-    opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }),
-    transform: [
-      {
-        scale: pulse.interpolate({
-          inputRange: [0, 1],
-          outputRange: [1, 1.08],
         }),
       },
     ],
@@ -319,27 +318,61 @@ export default function BlipPreview({
 
   return (
     <Animated.View style={[style, styles.wrapper, animatedStyle]}>
+      {/* Teardrop pointer under the card to anchor to the blip */}
+      <View
+        style={[
+          styles.pointerContainer,
+          pointerX != null ? { left: pointerX - 6 } : null,
+        ]}
+        pointerEvents='none'
+      >
+        <View style={styles.pointerShadow} />
+        <Animated.View style={styles.pointer} />
+      </View>
+
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={() => onPress?.(event)}
-        style={[
-          styles.container,
-          !thumb && styles.containerNoImage,
-          { width: '100%' },
-        ]}
+        style={[styles.container, { width: '100%' }]}
       >
-        {thumb ? <Image source={{ uri: thumb }} style={styles.thumb} /> : null}
         <View
-          style={{
-            flex: 1,
-            marginLeft: thumb ? 12 : 0,
-            minWidth: 0,
-            paddingVertical: thumb ? 6 : 8,
-          }}
+          style={[
+            styles.thumbWrapper,
+            !thumb && styles.thumbWrapperFallback,
+            !thumb && { backgroundColor: placeholderColor },
+          ]}
         >
-          <Text numberOfLines={1} style={styles.title}>
-            {title}
-          </Text>
+          {thumb ? (
+            <Image
+              source={{ uri: thumb }}
+              style={styles.thumbImage}
+              resizeMode='cover'
+            />
+          ) : (
+            <LinearGradient
+              colors={[placeholderGradientStart, placeholderGradientEnd]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.thumbGradient}
+            >
+              <View style={styles.thumbBadgeOuter}>
+                <View
+                  style={[
+                    styles.thumbBadgeInner,
+                    { borderColor: placeholderGradientStart },
+                  ]}
+                >
+                  <Text style={styles.thumbEmoji}>{placeholderEmoji}</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          )}
+        </View>
+        <View style={styles.infoPanelWrapper}>
+          <View style={styles.infoPanel}>
+            <Text numberOfLines={1} style={styles.title}>
+              {title}
+            </Text>
           {/* Meta chips: when, distance, interest (removed attendees count chip) */}
           <View style={styles.metaRow}>
             <View
@@ -402,83 +435,62 @@ export default function BlipPreview({
             )}
           </View>
 
-          <View style={styles.actionsRow}>
-            {Array.isArray(event?.attendees) && event.attendees.length > 0 ? (
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <AttendeeBubbleRow
-                  attendees={event.attendees}
-                  snippets={event.attendeeSnippets || null}
-                />
-              </View>
-            ) : (
-              <View style={{ flex: 1 }} />
-            )}
-            <TouchableOpacity
-              onPress={(e) => {
-                // Some environments (native wrappers, forwarded events) may call
-                // this handler without a proper event object. Defensive guard to
-                // avoid "cannot read property 'stopPropagation' of undefined"
-                // errors that can surface in dev/TestFlight builds.
-                try {
-                  e?.stopPropagation?.();
-                } catch (err) {
-                  // If stopPropagation throws for any reason, swallow it and
-                  // continue to the primary action. We don't want this micro
-                  // interaction to crash the app in production.
-                  // eslint-disable-next-line no-console
-                  console.warn('[BlipPreview] stopPropagation failed', err);
-                }
-
-                handlePrimaryAction();
-              }}
-              style={[
-                styles.btn,
-                isMember
-                  ? styles.btnMember
-                  : isRSVP
-                  ? styles.btnRSVP
-                  : styles.btnJoin,
-                buttonDisabled && styles.btnDisabled,
-              ]}
-              disabled={buttonDisabled}
-            >
-              {joinLoading ? (
-                <ActivityIndicator size='small' color='#fff' />
+            <View style={styles.actionsRow}>
+              {Array.isArray(event?.attendees) && event.attendees.length > 0 ? (
+                <View style={{ flex: 1, marginRight: 6 }}>
+                  <AttendeeBubbleRow
+                    attendees={event.attendees}
+                    snippets={event.attendeeSnippets || null}
+                  />
+                </View>
               ) : (
-                <Text style={styles.btnText}>{buttonLabel}</Text>
+                <View style={{ flex: 1 }} />
               )}
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                onPress={(e) => {
+                  try {
+                    e?.stopPropagation?.();
+                  } catch (err) {
+                    console.warn('[BlipPreview] stopPropagation failed', err);
+                  }
 
-          {joinFeedback && (
-            <View
-              style={[
-                styles.joinFeedbackContainer,
-                joinFeedback.tone === 'success' && styles.joinFeedbackSuccess,
-                joinFeedback.tone === 'error' && styles.joinFeedbackError,
-              ]}
-            >
-              <Text style={styles.joinFeedbackText}>
-                {joinFeedback.message}
-              </Text>
+                  handlePrimaryAction();
+                }}
+                style={[
+                  styles.btn,
+                  isMember
+                    ? styles.btnMember
+                    : isRSVP
+                    ? styles.btnRSVP
+                    : styles.btnJoin,
+                  buttonDisabled && styles.btnDisabled,
+                ]}
+                disabled={buttonDisabled}
+              >
+                {joinLoading ? (
+                  <ActivityIndicator size='small' color='#fff' />
+                ) : (
+                  <Text style={styles.btnText}>{buttonLabel}</Text>
+                )}
+              </TouchableOpacity>
             </View>
-          )}
+
+            {joinFeedback && (
+              <View
+                style={[
+                  styles.joinFeedbackContainer,
+                  joinFeedback.tone === 'success' && styles.joinFeedbackSuccess,
+                  joinFeedback.tone === 'error' && styles.joinFeedbackError,
+                ]}
+              >
+                <Text style={styles.joinFeedbackText}>
+                  {joinFeedback.message}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
       </TouchableOpacity>
-
-      {/* Teardrop pointer under the card to anchor to the blip */}
-      <View
-        style={[
-          styles.pointerContainer,
-          pointerX != null ? { left: pointerX - 6 } : null,
-        ]}
-        pointerEvents='none'
-      >
-        <View style={styles.pointerShadow} />
-        <Animated.View
-          style={[styles.pointer, happeningNow && pointerPulseStyle]}
-        />
-      </View>
     </Animated.View>
   );
 }
@@ -493,34 +505,95 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#fff',
     borderRadius: 14,
-    // Fill image to the curved edges: remove left/vertical padding and clip
     paddingLeft: 0,
-    paddingRight: 8,
+    paddingRight: 0,
     paddingVertical: 0,
-    overflow: 'hidden',
     shadowColor: '#000',
     shadowOpacity: 0.15,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 3,
+    zIndex: 1,
   },
-  containerNoImage: {
-    paddingLeft: 12,
-    paddingVertical: 8,
-  },
-  // Larger, edge-to-edge left image
-  thumb: {
-    width: 104,
-    height: '100%',
+  thumbWrapper: {
+    width: 84,
+    alignSelf: 'stretch',
+    minHeight: 84,
     backgroundColor: '#eee',
     borderTopLeftRadius: 14,
     borderBottomLeftRadius: 14,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  thumbFallback: { backgroundColor: '#E5E7EB' },
+  thumbWrapperFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbGradient: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumbBadgeOuter: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  thumbBadgeInner: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  thumbEmoji: {
+    fontSize: 26,
+    textShadowColor: 'rgba(0,0,0,0.2)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1.5,
+  },
+  infoPanelWrapper: {
+    flex: 1,
+    marginLeft: 0,
+  },
+  infoPanel: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 8,
+    paddingRight: 10,
+    paddingLeft: 12,
+    backgroundColor: '#FDFDFC',
+    borderTopRightRadius: 14,
+    borderBottomRightRadius: 14,
+    shadowColor: '#8C9EFF',
+    shadowOpacity: 0.16,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: 'rgba(17,24,39,0.05)',
+  },
   title: { fontSize: 15, fontWeight: '800', color: '#111827' },
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 3, marginTop: 4 },
   chip: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 12,
   },
@@ -533,9 +606,9 @@ const styles = StyleSheet.create({
   chipTextHeat: { color: '#B45309' },
   actionsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   btn: {
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 12,
-    borderRadius: 10,
+    borderRadius: 9,
   },
   btnJoin: { backgroundColor: '#10B981' },
   btnRSVP: { backgroundColor: '#3B82F6' },
@@ -567,12 +640,13 @@ const styles = StyleSheet.create({
     top: '100%',
     // pull the pointer down so the teardrop touches the map marker blip
     // pull the pointer down so the teardrop touches the map marker blip
-    marginTop: 0,
+    marginTop: -6,
     width: 12,
     height: 12,
     alignItems: 'center',
     justifyContent: 'flex-start',
     // no default translateX; computed from pointerX
+    zIndex: 0,
   },
   pointerShadow: {
     position: 'absolute',

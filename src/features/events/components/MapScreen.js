@@ -45,6 +45,7 @@ import BlipPreview from '../../../components/map/BlipPreview';
 import { CategoryMarker } from '../../../components/map/CategoryMarker';
 import { Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEventStore } from '../stores/eventStore';
 import {
   useDiscoveryLocationStore,
@@ -60,15 +61,21 @@ import { useThemeStore } from '../../../store/themeStore';
 import { darkMapStyle, lightMapStyle } from '../../../config/mapStyles';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const PREVIEW_WIDTH = Math.min(300, SCREEN_W - 16); // slightly narrower preview for smaller overall footprint
-const PREVIEW_HEIGHT = 100; // reduced height estimate to position card a bit closer to the blip
-const POINTER_HEIGHT = 10; // must match BlipPreview triangle height
-const POINTER_MARGIN = 4; // distance between card and pointer
-const MARKER_VISUAL_OFFSET = 6; // reduced offset so preview card sits closer to the marker
+const PREVIEW_WIDTH = Math.min(284, SCREEN_W - 16); // tighter footprint
+const PREVIEW_HEIGHT = 118; // matches polished card height
+const POINTER_HEIGHT = 12; // must match BlipPreview triangle height
+const POINTER_MARGIN = -2; // allow card to sit closer to the marker
+const MARKER_VISUAL_OFFSET = 6; // approximate radius of the map blip so the bubble sits on top
+const PREVIEW_VERTICAL_GAP = 16; // slight cushion between marker and card
+const PREVIEW_BUBBLE_CENTER = 88; // px from card left where the bubble naturally sits
+const PREVIEW_BUBBLE_WINDOW = 18; // allowable drift before re-centering
+const PREVIEW_TOP_CHROME = 52; // search bar + filter bar height
 const PREVIEW_IDLE_DELAY_MS = 1000;
 const PREVIEW_COOLDOWN_MS = 5000;
 const MIN_ANCHOR_DIST = 110; // px separation between previews
 const MAX_EVENT_PREVIEWS = 1; // limit to a single event preview; reserve space for ads later
+const BADGE_ANCHOR_OFFSET = 10; // horizontal shift when attendee badge shows
+const BADGE_VERTICAL_OFFSET = 12; // vertical lift when badge is visible
 
 const GOOGLE_PLACES_API_KEY = GOOGLE_MAPS_API_KEY;
 
@@ -132,6 +139,7 @@ export default function MapScreen() {
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const insets = useSafeAreaInsets();
   const mapAppearance = useMemo(
     () => ({
       customStyle: themeMode === 'dark' ? darkMapStyle : lightMapStyle,
@@ -1014,27 +1022,57 @@ export default function MapScreen() {
           const pt = await mapRef.current.pointForCoordinate(ev.location);
           if (!pt || typeof pt.x !== 'number' || typeof pt.y !== 'number')
             continue;
-          // keep off-screen margins and avoid under search bar area
-          const minTop = 70 + 44 + 8; // search bar top + height + spacing
-          const left = clamp(
-            pt.x - PREVIEW_WIDTH / 2,
-            8,
-            SCREEN_W - PREVIEW_WIDTH - 8
-          );
-          // Place card so that pointer apex lands on top of the blip (account for marker visual height)
+          const attendeeCount = Array.isArray(ev?.attendees)
+            ? ev.attendees.length
+            : typeof ev?.attendeesCount === 'number'
+            ? ev.attendeesCount
+            : 0;
+          const badgeOffsetX = attendeeCount > 0 ? BADGE_ANCHOR_OFFSET : 0;
+          const badgeOffsetY = attendeeCount > 0 ? BADGE_VERTICAL_OFFSET : 0;
+          const anchorX = pt.x - badgeOffsetX;
+          const anchorY = pt.y;
+
+          const minTop = Math.max((insets?.top || 0) + PREVIEW_TOP_CHROME, 40);
+          const minLeft = 8;
+          const maxLeft = SCREEN_W - PREVIEW_WIDTH - 8;
+          let left = clamp(anchorX - PREVIEW_WIDTH / 2, minLeft, maxLeft);
+          let pointerX = anchorX - left;
+          const bubbleMin = PREVIEW_BUBBLE_CENTER - PREVIEW_BUBBLE_WINDOW;
+          const bubbleMax = PREVIEW_BUBBLE_CENTER + PREVIEW_BUBBLE_WINDOW;
+
+          if (pointerX < bubbleMin) {
+            const shift = Math.min(bubbleMin - pointerX, left - minLeft);
+            if (shift > 0) {
+              left -= shift;
+              pointerX = anchorX - left;
+            }
+          } else if (pointerX > bubbleMax) {
+            const shift = Math.min(pointerX - bubbleMax, maxLeft - left);
+            if (shift > 0) {
+              left += shift;
+              pointerX = anchorX - left;
+            }
+          }
+
+          const markerOffsetY = MARKER_VISUAL_OFFSET + badgeOffsetY;
           const idealTop =
-            pt.y -
+            anchorY -
             (PREVIEW_HEIGHT +
               POINTER_MARGIN +
               POINTER_HEIGHT +
-              MARKER_VISUAL_OFFSET);
-          const top = clamp(idealTop, minTop, SCREEN_H - PREVIEW_HEIGHT - 100);
+              markerOffsetY);
+          const top = clamp(
+            idealTop + PREVIEW_VERTICAL_GAP,
+            minTop,
+            SCREEN_H - PREVIEW_HEIGHT - 100
+          );
+          const pointerXClamped = clamp(pointerX, 6, PREVIEW_WIDTH - 6);
 
           // avoid overlapping by anchor distance
           let ok = true;
           for (const a of anchors) {
-            const dx = pt.x - a.x;
-            const dy = pt.y - a.y;
+            const dx = anchorX - a.x;
+            const dy = anchorY - a.y;
             if (Math.sqrt(dx * dx + dy * dy) < MIN_ANCHOR_DIST) {
               ok = false;
               break;
@@ -1042,20 +1080,19 @@ export default function MapScreen() {
           }
           if (!ok) continue;
 
-          anchors.push({ x: pt.x, y: pt.y });
+          anchors.push({ x: anchorX, y: anchorY });
           const miles = milesBetween(
             { latitude, longitude },
             { latitude: ev.location.latitude, longitude: ev.location.longitude }
           );
           const distanceText =
             typeof miles === 'number' ? `${miles.toFixed(1)} mi` : '';
-          const pointerX = clamp(pt.x - left, 6, PREVIEW_WIDTH - 6); // pointer offset inside card
           items.push({
             id: ev.id,
             event: ev,
             style: { position: 'absolute', width: PREVIEW_WIDTH, left, top },
             distanceText,
-            pointerX,
+            pointerX: pointerXClamped,
           });
         } catch (e) {
           // skip failures
@@ -1074,7 +1111,7 @@ export default function MapScreen() {
     } catch (e) {
       // ignore
     }
-  }, [filteredEvents, region, mapReady]);
+  }, [filteredEvents, region, mapReady, insets]);
 
   const handlePreviewPress = useCallback((ev) => {
     try {

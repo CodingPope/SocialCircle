@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { createImagePickerOptions } from '../../../utils/imagePicker';
 import { createInterestPost } from '../services/interestPostService';
 import { fetchUserInterests } from '../../profile/services/userQueries';
 import { useUserStore } from '../../profile/stores/userStore';
@@ -100,11 +101,9 @@ export default function CreateInterestPostModal({
       if (status !== 'granted') {
         return Alert.alert('Permission needed', 'Please allow gallery access.');
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-      });
+      const result = await ImagePicker.launchImageLibraryAsync(
+        createImagePickerOptions({ quality: 0.85 })
+      );
       if (!result.canceled && result.assets?.length) {
         const asset = result.assets[0];
         setMedia({

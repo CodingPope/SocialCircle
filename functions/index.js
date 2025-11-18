@@ -3094,7 +3094,7 @@ exports.updateCategoriesHttp = onRequest(
       }
 
       // Load categories from the JSON file
-      const allCategories = require('./categories.json');
+      const allCategories = require('../src/features/events/constants/categoriesData.json');
 
       // Add new categories
       logger.info('Adding new categories...');
@@ -3414,7 +3414,8 @@ exports.updateCategories = onCall(
       let writes = 0;
 
       const allCategories =
-        data?.categories || require('../scripts/categories.json');
+        data?.categories ||
+        require('../src/features/events/constants/categoriesData.json');
 
       for (const category of allCategories) {
         const docRef = categoriesRef.doc(category.id);

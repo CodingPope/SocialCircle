@@ -11,9 +11,12 @@ admin.initializeApp({
 const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 
-// Load categories data
-const categoriesData = require('./categories.json');
+// Load categories from the centralized source
+const categoriesData = require('../src/features/events/constants/categoriesData.json');
 
+/**
+ * Description: Updates all categories in Firestore from categoriesData.json
+ */
 async function updateCategories() {
   try {
     const categoriesRef = db.collection('categories');
