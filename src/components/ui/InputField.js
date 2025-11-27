@@ -1,5 +1,6 @@
 import React from 'react';
 import { TextInput, StyleSheet } from 'react-native';
+import { useThemeStore } from '../../store/themeStore';
 
 export default function InputField({
   value,
@@ -7,6 +8,9 @@ export default function InputField({
   placeholder,
   style,
 }) {
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
+
   return (
     <TextInput
       style={[styles.input, style]}
@@ -14,6 +18,7 @@ export default function InputField({
       onChangeText={onChangeText}
       placeholder={placeholder}
       placeholderTextColor='#999'
+      keyboardAppearance={keyboardAppearance}
     />
   );
 }

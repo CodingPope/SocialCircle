@@ -7,6 +7,7 @@ import {
   TextInput,
 } from 'react-native';
 import Modal from 'react-native-modal';
+import { useThemeStore } from '../../../store/themeStore';
 
 const ReportModal = ({
   isVisible,
@@ -17,6 +18,8 @@ const ReportModal = ({
   onRemove,
 }) => {
   const [reportReason, setReportReason] = useState('');
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
 
   const handleReport = () => {
     if (reportReason.trim()) {
@@ -41,6 +44,7 @@ const ReportModal = ({
           value={reportReason}
           onChangeText={setReportReason}
           style={styles.input}
+          keyboardAppearance={keyboardAppearance}
         />
         <TouchableOpacity style={styles.optionButton} onPress={handleReport}>
           <Text style={styles.optionText}>Report</Text>

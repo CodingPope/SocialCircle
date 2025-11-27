@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Alert,
   Image,
@@ -23,6 +29,7 @@ import { useUserStore } from '../../profile/stores/userStore';
 import smileDefault from '../../../../assets/smileDefault.png';
 import { sharePost } from '../../../services/share';
 import { useTheme } from '../../../theme';
+import EditInterestPostModal from './EditInterestPostModal';
 
 function toDate(value) {
   if (!value) return null;
@@ -34,22 +41,40 @@ function toDate(value) {
 }
 
 export default function InterestPostCard({
-  post,
+  post: initialPost,
   onPress,
   onCommentCreated,
   onDeleted,
+  onUpdated,
   style,
   enableInlineComposer = true,
 }) {
   const user = useUserStore((state) => state.user);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
   const [menuVisible, setMenuVisible] = useState(false);
   const [commentVisible, setCommentVisible] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
-  const [commentCount, setCommentCount] = useState(post?.commentCount || 0);
+  const [post, setPost] = useState(initialPost);
+  const [commentCount, setCommentCount] = useState(initialPost?.commentCount || 0);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isLocallyDeleted, setIsLocallyDeleted] = useState(
+    initialPost?.isDeleted === true
+  );
   const inputRef = useRef(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+
+  useEffect(() => {
+    if (isLocallyDeleted) return;
+    setPost(initialPost);
+  }, [initialPost, isLocallyDeleted]);
+
+  useEffect(() => {
+    if (isLocallyDeleted) return;
+    setCommentCount(initialPost?.commentCount || 0);
+  }, [initialPost?.commentCount, initialPost?.id, isLocallyDeleted]);
 
   const isOwner = user?.uid && post?.creatorId === user.uid;
 
@@ -92,14 +117,20 @@ export default function InterestPostCard({
   }, [post?.id, user?.uid]);
 
   const handleDelete = useCallback(async () => {
+    if (!post?.id || isDeleting) return;
+    setIsDeleting(true);
+    setIsLocallyDeleted(true);
     try {
       await deleteInterestPost(post.id);
-      Alert.alert('Post deleted', 'Your post has been removed.');
       onDeleted?.(post.id);
+      Alert.alert('Post deleted', 'Your post has been removed.');
     } catch (error) {
+      setIsLocallyDeleted(false);
       Alert.alert('Delete failed', error?.message || 'Unable to delete post.');
+    } finally {
+      setIsDeleting(false);
     }
-  }, [onDeleted, post?.id]);
+  }, [isDeleting, onDeleted, post?.id]);
 
   const toggleComposer = useCallback(() => {
     if (!enableInlineComposer) {
@@ -146,6 +177,34 @@ export default function InterestPostCard({
   const avatarSource = post?.creatorSnapshot?.avatarUrl
     ? { uri: post.creatorSnapshot.avatarUrl }
     : smileDefault;
+
+  const popupExtraActions = useMemo(() => {
+    if (!isOwner) return [];
+    return [
+      {
+        key: 'edit-post',
+        label: 'Edit Post',
+        onPress: () => setEditModalVisible(true),
+      },
+    ];
+  }, [isOwner]);
+
+  const handlePostUpdated = useCallback(
+    (updatedPost) => {
+      if (updatedPost) {
+        setPost(updatedPost);
+        if (typeof updatedPost?.commentCount === 'number') {
+          setCommentCount(updatedPost.commentCount);
+        }
+      }
+      onUpdated?.(updatedPost);
+    },
+    [onUpdated]
+  );
+
+  if (isLocallyDeleted) {
+    return null;
+  }
 
   return (
     <TouchableOpacity
@@ -237,6 +296,7 @@ export default function InterestPostCard({
               placeholderTextColor={theme.colors.textSecondary}
               multiline
               maxLength={500}
+              keyboardAppearance={keyboardAppearance}
             />
             <TouchableOpacity
               style={[
@@ -263,6 +323,14 @@ export default function InterestPostCard({
         onDelete={handleDelete}
         eventId={post?.id}
         targetType='post'
+        extraActions={popupExtraActions}
+      />
+
+      <EditInterestPostModal
+        visible={editModalVisible}
+        post={post}
+        onClose={() => setEditModalVisible(false)}
+        onUpdated={handlePostUpdated}
       />
     </TouchableOpacity>
   );

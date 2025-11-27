@@ -76,6 +76,7 @@ const InterestSelector = ({
   const [loading, setLoading] = useState(true);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
 
   useEffect(() => {
     const fetchActivities = async () => {
@@ -200,6 +201,7 @@ const InterestSelector = ({
           value={effectiveSearch}
           onChangeText={setEffectiveSearch}
           placeholderTextColor={theme.colors.neutral600}
+          keyboardAppearance={keyboardAppearance}
         />
         {effectiveSearch.length > 0 && (
           <TouchableOpacity

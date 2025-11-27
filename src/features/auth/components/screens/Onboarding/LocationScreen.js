@@ -100,6 +100,7 @@ export default function LocationScreen({ navigation }) {
   const setUser = useUserStore((state) => state.setUser);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.isDark ? 'dark' : 'light';
 
   const computeCoarseHash5 = (lat, lng) => {
     try {
@@ -288,6 +289,7 @@ export default function LocationScreen({ navigation }) {
               autoCapitalize='words'
               returnKeyType='next'
               placeholderTextColor={theme.colors.neutral600}
+              keyboardAppearance={keyboardAppearance}
             />
             <TextInput
               placeholder='ZIP (optional)'
@@ -297,6 +299,7 @@ export default function LocationScreen({ navigation }) {
               keyboardType='number-pad'
               returnKeyType='done'
               placeholderTextColor={theme.colors.neutral600}
+              keyboardAppearance={keyboardAppearance}
             />
             {manualSaving ? (
               <ActivityIndicator size='small' color={theme.colors.primary} />

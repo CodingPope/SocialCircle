@@ -25,6 +25,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useUserStore } from '../../../profile';
+import { useThemeStore } from '../../../../store/themeStore';
 import {
   registerForPushTokenAsync,
   initPushForUser,
@@ -61,6 +62,8 @@ export default function LoginScreen({ navigation }) {
   const [error, setError] = useState('');
   const [showReset, setShowReset] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const themeMode = useThemeStore((state) => state.mode);
+  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
 
   // Set up Google sign-in hook at the top level
   // Use platform-specific client ID
@@ -327,6 +330,7 @@ export default function LoginScreen({ navigation }) {
                   onChangeText={setEmail}
                   autoCapitalize='none'
                   keyboardType='email-address'
+                  keyboardAppearance={keyboardAppearance}
                 />
               </View>
             </View>
@@ -347,6 +351,7 @@ export default function LoginScreen({ navigation }) {
                   secureTextEntry
                   value={password}
                   onChangeText={setPassword}
+                  keyboardAppearance={keyboardAppearance}
                 />
               </View>
             </View>
@@ -450,6 +455,7 @@ export default function LoginScreen({ navigation }) {
                     onChangeText={setResetEmail}
                     autoCapitalize='none'
                     keyboardType='email-address'
+                    keyboardAppearance={keyboardAppearance}
                   />
                 </View>
               </View>

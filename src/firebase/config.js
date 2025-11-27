@@ -380,6 +380,49 @@ export const FieldValue = firestore.FieldValue;
 export const Timestamp = firestore.Timestamp;
 export const GeoPoint = firestore.GeoPoint;
 export const serverTimestamp = () => firestore.FieldValue.serverTimestamp();
+let loggedTimestampFallback = false;
+export const getTimestampNow = () => {
+  try {
+    if (
+      firestore.Timestamp &&
+      typeof firestore.Timestamp.now === 'function'
+    ) {
+      return firestore.Timestamp.now();
+    }
+  } catch (error) {
+    if (!loggedTimestampFallback) {
+      logger.warn(
+        '[Firebase] Timestamp.now unavailable, falling back to fromDate:',
+        error?.message || error
+      );
+      loggedTimestampFallback = true;
+    }
+  }
+  if (
+    firestore.Timestamp &&
+    typeof firestore.Timestamp.fromDate === 'function'
+  ) {
+    if (!loggedTimestampFallback) {
+      logger.warn(
+        '[Firebase] Timestamp.now missing, using fromDate fallback'
+      );
+      loggedTimestampFallback = true;
+    }
+    return firestore.Timestamp.fromDate(new Date());
+  }
+  const now = Date.now();
+  if (!loggedTimestampFallback) {
+    logger.warn(
+      '[Firebase] Timestamp helpers missing, constructing plain timestamp'
+    );
+    loggedTimestampFallback = true;
+  }
+  return {
+    seconds: Math.floor(now / 1000),
+    nanoseconds: (now % 1000) * 1e6,
+    toDate: () => new Date(now),
+  };
+};
 export const arrayUnion = (...values) =>
   firestore.FieldValue.arrayUnion(...values);
 export const arrayRemove = (...values) =>

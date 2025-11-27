@@ -19,7 +19,7 @@
         "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}",
         "usesNonExemptEncryption": false
       },
-      "buildNumber": "1",
+      "buildNumber": "2",
       "useFrameworks": "dynamic",
       "entitlements": {
         "com.apple.developer.applesignin": ["Default"],
