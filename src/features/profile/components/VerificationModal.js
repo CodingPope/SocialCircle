@@ -1,572 +1,225 @@
-// src/features/profile/components/VerificationModal.js
-// Description: User verification modal - email and phone verification options
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
-  StyleSheet,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-} from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import Modal from 'react-native-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import {
-  requestEmailVerification,
-  verifyEmailCode,
-  requestPhoneVerification,
-  verifyPhoneCode,
-} from '../../../firebase/config';
+import { auth, db } from '../../../firebase/config';
+import { doc, updateDoc, serverTimestamp } from '../../../firebase/firestoreCompat';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { useUserStore } from '../stores/userStore';
+
+const COOLDOWN_SECONDS = 60;
+const POLL_INTERVAL_MS = 5000;
 
 export default function VerificationModal({ isVisible, onClose, onSuccess }) {
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
   const user = useUserStore((state) => state.user);
+  const setUser = useUserStore((state) => state.setUser);
 
-  const [step, setStep] = useState('choose'); // 'choose', 'email-input', 'phone-input', 'email-code', 'phone-code'
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [code, setCode] = useState('');
+  const [status, setStatus] = useState('idle');
+  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sentTo, setSentTo] = useState('');
-  const [remainingTime, setRemainingTime] = useState(0);
+  const [cooldown, setCooldown] = useState(0);
 
-  // Timer for resend cooldown
-  useEffect(() => {
-    if (remainingTime <= 0) return;
-    const timer = setTimeout(() => setRemainingTime(remainingTime - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [remainingTime]);
-
-  // Reset state when modal closes
   useEffect(() => {
     if (!isVisible) {
-      setStep('choose');
-      setPhoneNumber('');
-      setCode('');
-      setSentTo('');
-      setRemainingTime(0);
+      setStatus('idle');
+      setMessage('');
+      setCooldown(0);
+      setLoading(false);
     }
   }, [isVisible]);
 
-  const handleEmailVerification = async () => {
-    setLoading(true);
-    try {
-      const result = await requestEmailVerification();
-      console.log('📧 Email verification result:', result);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((prev) => Math.max(prev - 1, 0)), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
 
-      if (result.alreadyVerified) {
-        Alert.alert('Already Verified', 'Your account is already verified!');
+  const markVerified = useCallback(async () => {
+    try {
+      const uid = auth().currentUser?.uid || user?.uid;
+      if (!uid) return;
+      const verification = {
+        status: 'verified',
+        method: 'email',
+        verifiedAt: serverTimestamp(),
+      };
+      await updateDoc(doc(db, 'users', uid), { verification });
+      setUser({ ...(user || {}), verification });
+    } catch (err) {
+      console.warn('[VerificationModal] failed to update Firestore', err);
+    }
+  }, [setUser, user]);
+
+  const checkVerification = useCallback(async () => {
+    try {
+      const current = auth().currentUser;
+      if (!current) return false;
+      await current.reload();
+      if (auth().currentUser?.emailVerified) {
+        await markVerified();
+        setStatus('verified');
+        setMessage('Email verified! You are all set.');
         onSuccess?.();
-        onClose();
-        return;
-      }
-      setSentTo(result.email || user?.email || 'your email');
-      setStep('email-code');
-      setRemainingTime(60); // 60 second cooldown
-
-      // DEVELOPMENT ONLY: Show the code in an alert
-      if (result.devCode) {
-        console.log('🔑 Showing dev code alert:', result.devCode);
-        Alert.alert(
-          '🔑 Development Mode',
-          `Your verification code is:\n\n${result.devCode}\n\n(In production, this would be sent via email)`,
-          [{ text: 'OK' }]
-        );
-      } else {
-        console.warn('⚠️ No devCode in result:', result);
+        onClose?.();
+        return true;
       }
     } catch (err) {
-      const message = err?.message || 'Failed to send verification email';
-      Alert.alert('Error', message);
-      console.error('Email verification error:', err);
-    } finally {
-      setLoading(false);
+      console.warn('[VerificationModal] reload failed', err);
     }
-  };
+    return false;
+  }, [markVerified, onClose, onSuccess]);
 
-  const handlePhoneRequest = async () => {
-    if (!phoneNumber.trim()) {
-      Alert.alert('Error', 'Please enter a phone number');
-      return;
-    }
+  useEffect(() => {
+    if (!isVisible || status !== 'sent') return;
+    const interval = setInterval(() => {
+      checkVerification();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [checkVerification, isVisible, status]);
 
-    // Basic phone validation
-    const cleaned = phoneNumber.replace(/\D/g, '');
-    if (cleaned.length < 10) {
-      Alert.alert('Error', 'Please enter a valid phone number');
+  const handleSendLink = useCallback(async () => {
+    const current = auth().currentUser;
+    if (!current || !current.email) {
+      setMessage('Please sign in again to verify your email.');
       return;
     }
 
     setLoading(true);
     try {
-      const result = await requestPhoneVerification(phoneNumber);
-      console.log('📱 Phone verification result:', result);
-
-      if (result.alreadyVerified) {
-        Alert.alert('Already Verified', 'Your account is already verified!');
-        onSuccess?.();
-        onClose();
-        return;
-      }
-      setSentTo(phoneNumber);
-      setStep('phone-code');
-      setRemainingTime(60);
-
-      // DEVELOPMENT ONLY: Show the code in an alert
-      if (result.devCode) {
-        console.log('🔑 Showing dev code alert:', result.devCode);
-        Alert.alert(
-          '🔑 Development Mode',
-          `Your verification code is:\n\n${result.devCode}\n\n(In production, this would be sent via SMS)`,
-          [{ text: 'OK' }]
-        );
-      } else {
-        console.warn('⚠️ No devCode in result:', result);
-      }
+      await current.sendEmailVerification();
+      setStatus('sent');
+      setCooldown(COOLDOWN_SECONDS);
+      setMessage(`We sent a verification link to ${current.email}.`);
     } catch (err) {
-      const message = err?.message || 'Failed to send verification code';
-      Alert.alert('Error', message);
-      console.error('Phone verification error:', err);
+      setMessage(err?.message || 'Failed to send verification link.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleVerifyEmailCode = async () => {
-    if (!code.trim() || code.length !== 6) {
-      Alert.alert('Error', 'Please enter the 6-digit code');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await verifyEmailCode(code);
-      if (result.verified) {
-        Alert.alert(
-          '✅ Verified!',
-          'Your account has been verified successfully.',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                onSuccess?.();
-                onClose();
-              },
-            },
-          ]
-        );
-      }
-    } catch (err) {
-      const message = err?.message || 'Invalid code';
-      Alert.alert('Verification Failed', message);
-      setCode(''); // Clear code on failure
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyPhoneCode = async () => {
-    if (!code.trim() || code.length !== 6) {
-      Alert.alert('Error', 'Please enter the 6-digit code');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const result = await verifyPhoneCode(code);
-      if (result.verified) {
-        Alert.alert(
-          '✅ Verified!',
-          'Your account has been verified successfully.',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                onSuccess?.();
-                onClose();
-              },
-            },
-          ]
-        );
-      }
-    } catch (err) {
-      const message = err?.message || 'Invalid code';
-      Alert.alert('Verification Failed', message);
-      setCode('');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const renderChooseMethod = () => (
-    <View style={styles.container}>
-      <Text style={[styles.title, { color: theme.colors.text }]}>
-        Get Verified
-      </Text>
-      <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
-        Verified accounts help build trust in our community. Choose your
-        verification method:
-      </Text>
-
-      {/* Email Verification */}
-      <TouchableOpacity
-        style={[
-          styles.methodCard,
-          { backgroundColor: theme.colors.backgroundSecondary },
-        ]}
-        onPress={handleEmailVerification}
-        disabled={loading}
-      >
-        <View style={styles.methodIcon}>
-          <Ionicons name='mail' size={28} color={theme.colors.primary} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.methodTitle, { color: theme.colors.text }]}>
-            Email Verification
-          </Text>
-          <Text
-            style={[styles.methodDesc, { color: theme.colors.textSecondary }]}
-          >
-            We'll send a code to {user?.email || 'your email'}
-          </Text>
-        </View>
-        <Ionicons
-          name='chevron-forward'
-          size={24}
-          color={theme.colors.textSecondary}
-        />
-      </TouchableOpacity>
-
-      {/* Phone Verification */}
-      <TouchableOpacity
-        style={[
-          styles.methodCard,
-          { backgroundColor: theme.colors.backgroundSecondary },
-        ]}
-        onPress={() => setStep('phone-input')}
-        disabled={loading}
-      >
-        <View style={styles.methodIcon}>
-          <Ionicons
-            name='phone-portrait'
-            size={28}
-            color={theme.colors.primary}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.methodTitle, { color: theme.colors.text }]}>
-            Phone Verification
-          </Text>
-          <Text
-            style={[styles.methodDesc, { color: theme.colors.textSecondary }]}
-          >
-            Verify with your phone number (SMS)
-          </Text>
-        </View>
-        <Ionicons
-          name='chevron-forward'
-          size={24}
-          color={theme.colors.textSecondary}
-        />
-      </TouchableOpacity>
-
-      {loading && (
-        <ActivityIndicator
-          size='large'
-          color={theme.colors.primary}
-          style={{ marginTop: 20 }}
-        />
-      )}
-    </View>
-  );
-
-  const renderPhoneInput = () => (
-    <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => setStep('choose')}
-      >
-        <Ionicons name='arrow-back' size={24} color={theme.colors.primary} />
-      </TouchableOpacity>
-
-      <Text style={[styles.title, { color: theme.colors.text }]}>
-        Phone Verification
-      </Text>
-      <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
-        Enter your phone number to receive a verification code via SMS.
-      </Text>
-
-      <TextInput
-        style={[
-          styles.input,
-          {
-            backgroundColor: theme.colors.inputBackground,
-            color: theme.colors.text,
-            borderColor: theme.colors.border,
-          },
-        ]}
-        placeholder='(555) 123-4567'
-        placeholderTextColor={theme.colors.textSecondary}
-        value={phoneNumber}
-        keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
-        onChangeText={setPhoneNumber}
-        keyboardType='phone-pad'
-        autoFocus
-      />
-
-      <TouchableOpacity
-        style={[
-          styles.button,
-          { backgroundColor: theme.colors.primary },
-          loading && { opacity: 0.6 },
-        ]}
-        onPress={handlePhoneRequest}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color='#fff' />
-        ) : (
-          <Text style={styles.buttonText}>Send Code</Text>
-        )}
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderCodeInput = (type) => (
-    <View style={styles.container}>
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => setStep('choose')}
-      >
-        <Ionicons name='arrow-back' size={24} color={theme.colors.primary} />
-      </TouchableOpacity>
-
-      <Text style={[styles.title, { color: theme.colors.text }]}>
-        Enter Verification Code
-      </Text>
-      <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
-        We sent a 6-digit code to {sentTo}
-      </Text>
-
-      <TextInput
-        style={[
-          styles.input,
-          styles.codeInput,
-          {
-            backgroundColor: theme.colors.inputBackground,
-            color: theme.colors.text,
-            borderColor: theme.colors.border,
-          },
-        ]}
-        placeholder='000000'
-        placeholderTextColor={theme.colors.textSecondary}
-        value={code}
-        onChangeText={setCode}
-        keyboardAppearance={themeMode === 'dark' ? 'dark' : 'light'}
-        keyboardType='number-pad'
-        maxLength={6}
-        autoFocus
-      />
-
-      <TouchableOpacity
-        style={[
-          styles.button,
-          { backgroundColor: theme.colors.primary },
-          loading && { opacity: 0.6 },
-        ]}
-        onPress={
-          type === 'email' ? handleVerifyEmailCode : handleVerifyPhoneCode
-        }
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color='#fff' />
-        ) : (
-          <Text style={styles.buttonText}>Verify</Text>
-        )}
-      </TouchableOpacity>
-
-      {/* Resend button */}
-      <TouchableOpacity
-        style={styles.resendButton}
-        onPress={
-          type === 'email' ? handleEmailVerification : handlePhoneRequest
-        }
-        disabled={remainingTime > 0 || loading}
-      >
-        <Text
-          style={[
-            styles.resendText,
-            {
-              color:
-                remainingTime > 0
-                  ? theme.colors.textSecondary
-                  : theme.colors.primary,
-            },
-          ]}
-        >
-          {remainingTime > 0
-            ? `Resend code in ${remainingTime}s`
-            : 'Resend code'}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+  }, []);
 
   return (
-    <Modal
-      isVisible={isVisible}
-      onBackdropPress={onClose}
-      onSwipeComplete={onClose}
-      swipeDirection='down'
-      style={styles.modal}
-      backdropOpacity={0.5}
-    >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
+    <Modal isVisible={isVisible} onBackdropPress={onClose} onBackButtonPress={onClose}>
+      <View
+        style={[
+          styles.container,
+          { backgroundColor: theme.colors.backgroundSecondary },
+        ]}
       >
-        <View
+        <View style={styles.headerRow}>
+          <Ionicons name='mail' size={24} color={theme.colors.primary} />
+          <Text style={[styles.title, { color: theme.colors.text }]}>
+            Verify your email
+          </Text>
+        </View>
+        <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
+          We’ll send a verification link to {user?.email || 'your email'}.
+          Open it, tap the link, and we’ll verify automatically.
+        </Text>
+
+        {message ? (
+          <View style={styles.messageCard}>
+            <Text style={[styles.messageText, { color: theme.colors.text }]}>
+              {message}
+            </Text>
+          </View>
+        ) : null}
+
+        <TouchableOpacity
           style={[
-            styles.modalContent,
-            { backgroundColor: theme.colors.background },
+            styles.primaryButton,
+            { backgroundColor: theme.colors.primary },
+            (cooldown > 0 || loading) && styles.disabledButton,
           ]}
+          onPress={handleSendLink}
+          disabled={cooldown > 0 || loading}
         >
-          <View style={styles.dragHandle} />
+          {loading ? (
+            <ActivityIndicator color='#fff' />
+          ) : (
+            <Text style={styles.primaryButtonText}>
+              {status === 'sent' ? 'Resend link' : 'Send verification link'}
+              {cooldown > 0 ? ` (${cooldown}s)` : ''}
+            </Text>
+          )}
+        </TouchableOpacity>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps='handled'
+        {status === 'sent' && (
+          <TouchableOpacity
+            style={[
+              styles.secondaryButton,
+              {
+                borderColor: theme.colors.border,
+                backgroundColor: themeMode === 'dark' ? '#0f172a' : '#f8fafc',
+              },
+            ]}
+            onPress={checkVerification}
+            disabled={loading}
           >
-            {step === 'choose' && renderChooseMethod()}
-            {step === 'phone-input' && renderPhoneInput()}
-            {step === 'email-code' && renderCodeInput('email')}
-            {step === 'phone-code' && renderCodeInput('phone')}
-          </ScrollView>
-
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text
-              style={[styles.closeText, { color: theme.colors.textSecondary }]}
-            >
-              Cancel
+            <Text style={[styles.secondaryButtonText, { color: theme.colors.text }]}>
+              I’ve verified – check again
             </Text>
           </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+        )}
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  modal: {
-    justifyContent: 'flex-end',
-    margin: 0,
-  },
-  keyboardView: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 40,
-    maxHeight: '90%',
-  },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#ccc',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
   container: {
-    paddingVertical: 10,
+    borderRadius: 16,
+    padding: 20,
   },
-  backButton: {
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 15,
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  methodCard: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    gap: 12,
+    marginBottom: 10,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  subtitle: {
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  messageCard: {
+    padding: 12,
     borderRadius: 12,
+    backgroundColor: 'rgba(59,130,246,0.1)',
     marginBottom: 12,
   },
-  methodIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+  messageText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  primaryButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
+    marginBottom: 12,
   },
-  methodTitle: {
-    fontSize: 17,
+  primaryButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  secondaryButton: {
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  secondaryButtonText: {
     fontWeight: '600',
-    marginBottom: 4,
-  },
-  methodDesc: {
     fontSize: 14,
   },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  codeInput: {
-    fontSize: 32,
-    fontWeight: '600',
-    textAlign: 'center',
-    letterSpacing: 8,
-  },
-  button: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  resendButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  resendText: {
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  closeButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  closeText: {
-    fontSize: 16,
-    fontWeight: '500',
+  disabledButton: {
+    opacity: 0.6,
   },
 });
+

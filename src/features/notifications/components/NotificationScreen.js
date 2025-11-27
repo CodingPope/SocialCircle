@@ -30,6 +30,7 @@ import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import { db, functions } from '../../../firebase/config';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
+import displayNameFromUser from '../utils/displayName';
 
 // --- Helpers ---
 const TypeIcon = ({ type, styles }) => {
@@ -45,22 +46,6 @@ const TypeIcon = ({ type, styles }) => {
     <View style={[styles.iconWrap, { backgroundColor: `${icon.color}1A` }]}>
       <MaterialCommunityIcons name={icon.name} size={22} color={icon.color} />
     </View>
-  );
-};
-
-const getPreferredName = (user) => {
-  if (!user) return null;
-  const first =
-    typeof user.firstName === 'string' ? user.firstName.trim() : '';
-  const last = typeof user.lastName === 'string' ? user.lastName.trim() : '';
-  const combined = `${first} ${last}`.trim();
-  if (combined.length) return combined;
-  return (
-    user.displayName ||
-    user.name ||
-    user.username ||
-    user.userName ||
-    null
   );
 };
 
@@ -285,28 +270,45 @@ const NotificationCard = memo(
       }
     };
 
-    const resolvedName =
-      getPreferredName(requester) ||
-      item.userName ||
-      item.fromUserName ||
-      item.requesterName ||
-      item.actorName ||
-      null;
+    const fallbackActor = useMemo(
+      () => ({
+        displayName:
+          item.requesterName ||
+          item.fromUserName ||
+          item.userName ||
+          item.actorName ||
+          null,
+        firstName: item.requesterFirstName || null,
+        lastName: item.requesterLastName || null,
+      }),
+      [
+        item.requesterName,
+        item.fromUserName,
+        item.userName,
+        item.actorName,
+        item.requesterFirstName,
+        item.requesterLastName,
+      ]
+    );
+
+    const actorName = useMemo(
+      () => displayNameFromUser(requester || fallbackActor),
+      [fallbackActor, requester]
+    );
 
     const Subtitle = () => {
       if (item.type === 'rsvp_request') {
-        const name = resolvedName || 'Someone';
         return (
           <Text style={styles.subtitleTxt} numberOfLines={2}>
-            {name} requested to join your event
+            {actorName} requested to join your event
           </Text>
         );
       }
 
       const baseMessage = item.message || 'You have a new notification';
       const messageText =
-        resolvedName && /\bsomeone\b/i.test(baseMessage)
-          ? baseMessage.replace(/\bsomeone\b/gi, resolvedName)
+        actorName !== 'Someone' && /\bsomeone\b/i.test(baseMessage)
+          ? baseMessage.replace(/\bsomeone\b/gi, actorName)
           : baseMessage;
 
       return (

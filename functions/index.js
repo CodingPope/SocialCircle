@@ -117,6 +117,21 @@ function normalizeSexMetric(value) {
   return 'other';
 }
 
+function buildUserDisplayName(user = {}) {
+  if (!user || typeof user !== 'object') return 'Someone';
+  if (typeof user.displayName === 'string' && user.displayName.trim()) {
+    return user.displayName.trim();
+  }
+  if (typeof user.name === 'string' && user.name.trim()) {
+    return user.name.trim();
+  }
+  const first =
+    typeof user.firstName === 'string' ? user.firstName.trim() : '';
+  const last = typeof user.lastName === 'string' ? user.lastName.trim() : '';
+  const combined = [first, last].filter(Boolean).join(' ');
+  return combined || 'Someone';
+}
+
 async function createShortDynamicLink({ link, title, description, imageUrl }) {
   if (!SHARE_CONFIG.apiKey || !SHARE_CONFIG.domainUriPrefix) return null;
 
@@ -619,7 +634,7 @@ exports.onMessageCreateNotify = onDocumentCreated(
     // 3) Fetch tokens and sender info
     const senderSnap = await db.doc(`users/${senderId}`).get();
     const senderData = senderSnap.exists ? senderSnap.data() : {};
-    const senderName = senderData.displayName || senderData.name || 'Someone';
+    const senderName = buildUserDisplayName(senderData);
 
     const userRefs = [...targetUids].map((uid) => db.doc(`users/${uid}`));
     const userSnaps = await db.getAll(...userRefs);
@@ -798,13 +813,20 @@ exports.onNotificationCreatedPush = onDocumentCreated(
         (optIn === undefined || optIn === true);
       if (!canPush) return;
 
+      const actorName =
+        notif.requesterName ||
+        notif.fromUserName ||
+        notif.userName ||
+        notif.senderName ||
+        'Someone';
+
       // Build title/body based on notification type
       let title = 'Social Circle';
       let body = 'You have a new notification';
       switch (notif.type) {
         case 'rsvp_request':
           title = 'RSVP Request';
-          body = 'Someone requested to join your event';
+          body = `${actorName} requested to join your event`;
           break;
         case 'request_accepted':
           title = 'Request Accepted';
@@ -827,6 +849,10 @@ exports.onNotificationCreatedPush = onDocumentCreated(
           ) {
             body = notif.message.trim();
           }
+      }
+
+      if (actorName !== 'Someone' && /\bsomeone\b/i.test(body)) {
+        body = body.replace(/\bsomeone\b/gi, actorName);
       }
 
       const data = {
@@ -1031,7 +1057,7 @@ exports.rsvpEvent = onCall(
           const eventData = eventSnap.data();
           const userSnap = await userRef.get();
           const userData = userSnap.exists ? userSnap.data() : {};
-          const userName = userData.displayName || userData.name || 'Someone';
+          const userName = buildUserDisplayName(userData);
 
           await db.collection('notifications').add({
             type: 'event_joined',
@@ -1042,6 +1068,7 @@ exports.rsvpEvent = onCall(
             linkType: 'event',
             linkId: eventId,
             message: `${userName} joined ${eventData?.title || 'your event'}`,
+            userName,
             read: false,
           });
         }
@@ -1311,6 +1338,7 @@ exports.requestToJoinEvent = onCall(
         });
 
         const ownerId = ev.ownerId;
+        const requesterName = buildUserDisplayName(userDoc);
         if (ownerId) {
           tx.set(notifRef.doc(), {
             type: 'rsvp_request',
@@ -1318,9 +1346,10 @@ exports.requestToJoinEvent = onCall(
             eventId,
             requesterId: uid,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            message: 'New RSVP request',
+            message: `${requesterName} requested to join your event`,
             linkType: 'event',
             linkId: eventId,
+            requesterName,
             read: false,
           });
         }
@@ -1453,7 +1482,7 @@ exports.acceptRsvpRequest = onCall(
       const eventData = eventSnap.data();
       const userSnap = await userRef.get();
       const userData = userSnap.exists ? userSnap.data() : {};
-      const userName = userData.displayName || userData.name || 'Someone';
+      const userName = buildUserDisplayName(userData);
 
       await db.collection('notifications').add({
         type: 'event_joined',
@@ -1464,6 +1493,7 @@ exports.acceptRsvpRequest = onCall(
         linkType: 'event',
         linkId: eventId,
         message: `${userName} joined ${eventData?.title || 'your event'}`,
+        userName,
         read: false,
       });
     } catch (e) {

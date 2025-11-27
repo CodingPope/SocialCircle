@@ -82,6 +82,8 @@ export default function EventPopUpCard({
   const [joinLoading, setJoinLoading] = useState(false);
   const [joinFeedback, setJoinFeedback] = useState(null);
   const [saveBusy, setSaveBusy] = useState(false);
+  const [optimisticAttendeeDelta, setOptimisticAttendeeDelta] = useState(0);
+  const optimisticEventIdRef = useRef(null);
 
   const snapPoints = useMemo(() => {
     const topOffsetPercent = Math.min(
@@ -124,6 +126,8 @@ export default function EventPopUpCard({
     setJoinFeedback(null);
     setJoinLoading(false);
     lastJoinMessageRef.current = null;
+    optimisticEventIdRef.current = null;
+    setOptimisticAttendeeDelta(0);
   }, [liveEvent?.id]);
 
   useEffect(() => {
@@ -297,6 +301,11 @@ export default function EventPopUpCard({
   const attendees = Array.isArray(liveEvent?.attendees)
     ? liveEvent.attendees
     : [];
+  const attendeeCountDisplay =
+    attendees.length +
+    (optimisticEventIdRef.current === liveEvent?.id
+      ? optimisticAttendeeDelta
+      : 0);
   const requests = Array.isArray(liveEvent?.requests) ? liveEvent.requests : [];
   const isOwner = liveEvent?.ownerId === user?.uid;
   const isAttendee = attendees.includes(user?.uid);
@@ -326,11 +335,88 @@ export default function EventPopUpCard({
     </View>
   );
 
+  const resetOptimisticJoin = useCallback(() => {
+    optimisticEventIdRef.current = null;
+    setOptimisticAttendeeDelta(0);
+  }, []);
+
+  const verifyMembershipAndNavigate = useCallback(
+    async (fallbackMessage = null) => {
+      if (!liveEvent?.id || !user?.uid) return false;
+      try {
+        const snap = await getDoc(doc(db, 'events', liveEvent.id));
+        if (snap.exists()) {
+          const data = snap.data();
+          const attendeeList = Array.isArray(data?.attendees)
+            ? data.attendees
+            : [];
+          const isMemberNow =
+            data?.ownerId === user.uid ||
+            data?.hostId === user.uid ||
+            attendeeList.includes(user.uid);
+          if (isMemberNow) {
+            onClose && onClose();
+            setTimeout(() => {
+              navigation.navigate('EventChat', {
+                eventId: liveEvent.id,
+                locationName: address,
+              });
+            }, 50);
+            return true;
+          }
+        }
+        showJoinFeedback({
+          message:
+            fallbackMessage ||
+            'Join is processing. Please try again in a moment.',
+          tone: 'info',
+        });
+        return false;
+      } catch (err) {
+        console.error('[EventPopUpCard] membership verify failed:', err);
+        showJoinFeedback({
+          message:
+            fallbackMessage ||
+            'Unable to open chat right now. Please try again shortly.',
+          tone: 'error',
+        });
+        return false;
+      } finally {
+        resetOptimisticJoin();
+      }
+    },
+    [
+      address,
+      liveEvent?.id,
+      navigation,
+      onClose,
+      resetOptimisticJoin,
+      showJoinFeedback,
+      user?.uid,
+    ]
+  );
+
   const handleActionButton = useCallback(async () => {
     if (!user || !liveEvent?.id || joinLoading) return;
 
     setJoinLoading(true);
     lastJoinMessageRef.current = null;
+
+    const privacyMode = (liveEvent?.privacy || 'public').toLowerCase();
+    const capacityRemaining =
+      typeof liveEvent?.capacity === 'number'
+        ? liveEvent.capacity - attendees.length
+        : null;
+    const canOptimisticallyJoin =
+      !isMember &&
+      privacyMode === 'public' &&
+      !isReadOnly &&
+      (capacityRemaining === null || capacityRemaining > 0);
+
+    if (canOptimisticallyJoin) {
+      optimisticEventIdRef.current = liveEvent.id;
+      setOptimisticAttendeeDelta(1);
+    }
 
     try {
       const res = await joinEvent({
@@ -350,45 +436,42 @@ export default function EventPopUpCard({
       const capturedMessage = lastJoinMessageRef.current;
       lastJoinMessageRef.current = null;
 
-      // Owner or attendee -> navigate after closing sheet
       if (res?.status === 'owner' || res?.status === 'already-attending') {
-        onClose && onClose();
-        setTimeout(() => {
-          navigation.navigate('EventChat', {
-            eventId: liveEvent.id,
-            locationName: address,
-          });
-        }, 50);
+        await verifyMembershipAndNavigate(
+          capturedMessage || res?.message || 'Opening chat...'
+        );
         return;
       }
 
       if (res?.status === 'joined') {
-        onClose && onClose();
-        setTimeout(() => {
-          navigation.navigate('EventChat', {
-            eventId: liveEvent.id,
-            locationName: address,
-          });
-        }, 50);
+        await verifyMembershipAndNavigate(
+          capturedMessage || res?.message || 'Opening chat...'
+        );
         return;
       }
 
       if (res?.status === 'requested') {
         setRequestPendingLocal(true);
         showJoinFeedback({
-          message: 'Request sent. We will notify you once the host responds.',
+          message:
+            res?.message ||
+            capturedMessage ||
+            'Request sent. We will notify you once the host responds.',
           tone: 'success',
         });
+        resetOptimisticJoin();
         return;
       }
 
       if (res?.status === 'waitlisted') {
         showJoinFeedback({
           message:
+            res?.message ||
             capturedMessage ||
             'Added to the waitlist. We will reach out if a spot opens.',
           tone: 'info',
         });
+        resetOptimisticJoin();
         return;
       }
 
@@ -409,6 +492,7 @@ export default function EventPopUpCard({
         tone: 'error',
       });
     } finally {
+      resetOptimisticJoin();
       setJoinLoading(false);
     }
   }, [
@@ -419,6 +503,11 @@ export default function EventPopUpCard({
     address,
     onClose,
     showJoinFeedback,
+    attendees.length,
+    isMember,
+    isReadOnly,
+    verifyMembershipAndNavigate,
+    resetOptimisticJoin,
   ]);
 
   const handleReport = async () => {
@@ -668,7 +757,7 @@ export default function EventPopUpCard({
             <View style={styles.chip}>
               <Ionicons name='person-add' size={14} color='#111827' />
               <Text style={styles.chipText}>
-                {attendees.length}/{liveEvent.capacity}
+                {attendeeCountDisplay}/{liveEvent.capacity}
               </Text>
             </View>
           )}
@@ -777,8 +866,8 @@ export default function EventPopUpCard({
         {/* Capacity text */}
         <Text style={styles.capacityText}>
           {typeof liveEvent.capacity === 'number' && liveEvent.capacity > 0
-            ? `${attendees.length} / ${liveEvent.capacity} joined`
-            : `${attendees.length} joined`}
+            ? `${attendeeCountDisplay} / ${liveEvent.capacity} joined`
+            : `${attendeeCountDisplay} joined`}
         </Text>
 
         {/* CTAs */}

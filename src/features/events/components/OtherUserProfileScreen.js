@@ -63,6 +63,7 @@ import {
   blockUser as blockUserService,
   unblockUser as unblockUserService,
 } from '../../profile/services/blockService';
+import displayNameFromUser from '../../notifications/utils/displayName';
 
 export default function OtherUserProfileScreen({ route, navigation }) {
   const { userId } = route.params;
@@ -654,16 +655,12 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     } finally {
       setRequestingFollow(false);
     }
+    const actorName = displayNameFromUser(currentUser);
     // Fire-and-forget notification (do not fail the follow UX)
     sendNotification('friend_request', userId, {
       fromUserId: currentUser.uid,
-      fromUserName:
-        `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() ||
-        currentUser.displayName ||
-        'Someone',
-      message: `${
-        currentUser.firstName || currentUser.displayName || 'Someone'
-      } added you as a friend! Tap to view their profile.`,
+      fromUserName: actorName,
+      message: `${actorName} added you as a friend! Tap to view their profile.`,
       linkType: 'profile',
       linkId: currentUser.uid,
       read: false,

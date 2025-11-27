@@ -45,6 +45,7 @@ import {
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import EventThumbnail from './EventThumbnail';
+import { eventPassesGenderGate } from '../utils/genderUtils';
 
 export default function MyCircle({ navigation }) {
   // Description: Get current user from Zustand userStore

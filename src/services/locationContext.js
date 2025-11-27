@@ -2,6 +2,17 @@
 // Caches location to avoid excessive API calls; updates on app foreground
 import * as Location from 'expo-location';
 
+const isValidCoords = (coords) => {
+  if (!coords) return false;
+  const { latitude, longitude } = coords || {};
+  return (
+    typeof latitude === 'number' &&
+    typeof longitude === 'number' &&
+    !Number.isNaN(latitude) &&
+    !Number.isNaN(longitude)
+  );
+};
+
 let cachedLocation = null;
 let lastFetchTime = 0;
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes to keep location fresh
@@ -45,9 +56,33 @@ const HIGH_ACCURACY_SEQUENCE = (() => {
     : [{ label: 'Default', value: undefined }];
 })();
 
+const requestPermissionIfNeeded = async () => {
+  try {
+    const existing = await Location.getForegroundPermissionsAsync();
+    if (existing?.status === 'granted') return true;
+    if (existing?.canAskAgain === false) return false;
+  } catch {}
+  try {
+    const requested = await Location.requestForegroundPermissionsAsync();
+    return requested?.status === 'granted';
+  } catch {
+    return false;
+  }
+};
+
 // Description: Attempt to fetch current position with escalating accuracy until within acceptable radius
 async function getPositionWithEscalation({ force = false } = {}) {
   let lastError = null;
+
+  // Fast path: use last known to avoid hammering GPS when we just need coarse city
+  if (!force && Location.getLastKnownPositionAsync) {
+    try {
+      const lastKnown = await Location.getLastKnownPositionAsync();
+      if (isValidCoords(lastKnown?.coords)) {
+        return lastKnown;
+      }
+    } catch {}
+  }
 
   for (const { label, value } of HIGH_ACCURACY_SEQUENCE) {
     try {
@@ -60,15 +95,6 @@ async function getPositionWithEscalation({ force = false } = {}) {
 
       const accuracyRadius = position?.coords?.accuracy;
 
-      if (__DEV__) {
-        console.log(
-          `[locationContext] accuracy attempt ${label} -> radius: ${
-            typeof accuracyRadius === 'number'
-              ? `${accuracyRadius.toFixed(0)}m`
-              : 'unknown'
-          }`
-        );
-      }
 
       if (
         !accuracyRadius ||
@@ -82,13 +108,17 @@ async function getPositionWithEscalation({ force = false } = {}) {
       // Otherwise escalate to the next accuracy tier.
     } catch (error) {
       lastError = error;
-      if (__DEV__) {
-        console.warn(
-          `[locationContext] failed accuracy attempt ${label}`,
-          error?.message || error
-        );
-      }
     }
+  }
+
+  // As a final fallback, try the last known position even if accuracy attempts failed
+  if (Location.getLastKnownPositionAsync) {
+    try {
+      const lastKnown = await Location.getLastKnownPositionAsync();
+      if (isValidCoords(lastKnown?.coords)) {
+        return lastKnown;
+      }
+    } catch {}
   }
 
   if (lastError) {
@@ -104,28 +134,19 @@ export async function getCoarseLocation({ force = false } = {}) {
 
   // Return cached if fresh
   if (!force && cachedLocation && now - lastFetchTime < CACHE_DURATION_MS) {
-    if (__DEV__) {
-      console.log('[locationContext] using cached location:', cachedLocation);
-    }
     return cachedLocation;
   }
 
   try {
     const servicesEnabled = await Location.hasServicesEnabledAsync?.();
     if (servicesEnabled === false) {
-      if (__DEV__) {
-        console.warn('[locationContext] location services disabled');
-      }
       cachedLocation = null;
       return null;
     }
 
-    // Check permission first
-    const { status } = await Location.getForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      if (__DEV__) {
-        console.warn('[locationContext] location permission not granted');
-      }
+    // Check + request permission first
+    const granted = await requestPermissionIfNeeded();
+    if (!granted) {
       cachedLocation = null;
       return null;
     }
@@ -134,21 +155,9 @@ export async function getCoarseLocation({ force = false } = {}) {
     const position = await getPositionWithEscalation({ force });
 
     if (!position || !position.coords) {
-      if (__DEV__) {
-        console.warn(
-          '[locationContext] no position acquired after accuracy escalation'
-        );
-      }
       cachedLocation = null;
       lastFetchTime = 0;
       return null;
-    }
-
-    if (__DEV__) {
-      console.log('[locationContext] GPS coords:', {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-      });
     }
 
     // Guard: ignore simulator defaults (Cupertino / San Francisco) if force refresh requested
@@ -166,11 +175,6 @@ export async function getCoarseLocation({ force = false } = {}) {
           Math.abs(loc.lng - roundedLng) < 0.0002
       )
     ) {
-      if (__DEV__) {
-        console.warn(
-          '[locationContext] ignoring simulator default coordinates – provide a custom simulator location or test on device'
-        );
-      }
       cachedLocation = null;
       lastFetchTime = 0;
       return null;
@@ -189,21 +193,12 @@ export async function getCoarseLocation({ force = false } = {}) {
         country: geocode.country || geocode.isoCountryCode || null,
       };
       lastFetchTime = now;
-      if (__DEV__) {
-        console.log('[locationContext] geocoded location:', cachedLocation);
-      }
       return cachedLocation;
     }
 
     return null;
   } catch (error) {
     // Silent fail for permission denied, timeout, etc.
-    if (__DEV__) {
-      console.warn(
-        '[locationContext] failed to get location',
-        error?.message || error
-      );
-    }
     return null;
   }
 }

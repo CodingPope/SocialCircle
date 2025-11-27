@@ -290,6 +290,7 @@ export default function AuthScreen({ navigation, route }) {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [businessMode, setBusinessMode] = useState(!!route?.params?.business);
   const showBusinessAccountSwitch =
@@ -300,6 +301,26 @@ export default function AuthScreen({ navigation, route }) {
   const setNextBusinessRoute = useSessionRole((s) => s.setNextBusinessRoute);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const keyboardAppearance = theme.mode === 'dark' ? 'dark' : 'light';
+
+  const hydrateUserProfile = useCallback(
+    async (uid) => {
+      if (!uid) return null;
+      try {
+        const snap = await getDoc(doc(db, 'users', uid));
+        if (snap.exists) {
+          const data = snap.data() || {};
+          setUser({ uid, ...data });
+          setProfileComplete(isProfileComplete(data));
+          return data;
+        }
+      } catch (err) {
+        console.warn('[AuthScreen] hydrate user failed:', err?.message || err);
+      }
+      return null;
+    },
+    [setProfileComplete, setUser]
+  );
 
   const cardTitle = useMemo(() => {
     if (businessMode) {
@@ -312,6 +333,9 @@ export default function AuthScreen({ navigation, route }) {
     // Remove subtitles entirely for cleaner look
     return null;
   }, [businessMode, mode]);
+
+  const shouldShowConfirm =
+    mode === 'signup' && (password.length > 0 || confirmPassword.length > 0);
 
   const handleAccountModeChange = useCallback(
     (nextBusiness) => {
@@ -330,6 +354,10 @@ export default function AuthScreen({ navigation, route }) {
       setBusinessMode(!!route.params.business);
     }
   }, [route?.params?.business]);
+
+  useEffect(() => {
+    setConfirmPassword('');
+  }, [mode]);
 
   // Description: Reset session role to consumer when component mounts (unless in business mode)
   useEffect(() => {
@@ -436,8 +464,10 @@ export default function AuthScreen({ navigation, route }) {
             deviceToken: token || null,
             pushOptIn: !!token,
           });
+          await hydrateUserProfile(result.user.uid);
           if (token) initPushForUser(result.user.uid).catch(() => {});
         } else {
+          await hydrateUserProfile(result.user.uid);
           initPushForUser(result.user.uid).catch(() => {});
         }
       } catch (err) {
@@ -537,6 +567,7 @@ export default function AuthScreen({ navigation, route }) {
           } else {
             initPushForUser(result.user.uid).catch(() => {});
           }
+          await hydrateUserProfile(result.user.uid);
         })
         .catch((err) => {
           logAuthError(err, 'google-signin', {});
@@ -562,6 +593,11 @@ export default function AuthScreen({ navigation, route }) {
     const passwordValidation = validatePassword(password);
     if (!passwordValidation.isValid) {
       Alert.alert('Invalid Password', passwordValidation.message);
+      return;
+    }
+
+    if (mode === 'signup' && shouldShowConfirm && password !== confirmPassword) {
+      Alert.alert('Passwords do not match', 'Please re-enter your password.');
       return;
     }
 
@@ -831,40 +867,61 @@ export default function AuthScreen({ navigation, route }) {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email</Text>
-              <TextInput
-                placeholder='you@example.com'
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize='none'
+            <TextInput
+              placeholder='you@example.com'
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize='none'
                 keyboardType='email-address'
-                autoCorrect={false}
-                spellCheck={false}
-                textContentType='emailAddress'
-                autoComplete='email'
-                style={styles.input}
-                placeholderTextColor={theme.colors.neutral500}
-              />
-            </View>
+              autoCorrect={false}
+              spellCheck={false}
+              textContentType='emailAddress'
+              autoComplete='email'
+              style={styles.input}
+              placeholderTextColor={theme.colors.neutral500}
+              keyboardAppearance={keyboardAppearance}
+            />
+          </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Password</Text>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Password</Text>
               <TextInput
                 placeholder='••••••••'
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
                 textContentType='password'
-                autoComplete='password'
+              autoComplete='password'
+              autoCorrect={false}
+              spellCheck={false}
+              style={styles.input}
+              placeholderTextColor={theme.colors.neutral500}
+              keyboardAppearance={keyboardAppearance}
+            />
+          </View>
+
+          {shouldShowConfirm && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Confirm Password</Text>
+              <TextInput
+                placeholder='••••••••'
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry
+                textContentType='password'
+                autoComplete='password-new'
                 autoCorrect={false}
                 spellCheck={false}
                 style={styles.input}
                 placeholderTextColor={theme.colors.neutral500}
+                keyboardAppearance={keyboardAppearance}
               />
             </View>
+          )}
 
-            {mode === 'login' && (
-              <TouchableOpacity
-                style={styles.forgotPasswordLink}
+          {mode === 'login' && (
+            <TouchableOpacity
+              style={styles.forgotPasswordLink}
                 onPress={handlePasswordReset}
               >
                 <Text style={styles.linkText}>Forgot password?</Text>

@@ -1,11 +1,9 @@
-// src/lib/joinEvent.js
 // Description: Unified helper to join/request/waitlist an event with clear status returns.
 // Notes:
 // - Pure and dependency-injected: no direct store imports; callers pass stores and navigation.
 // - Centralizes messages via onShowMessage callback (no-op default).
-// - Navigates to Event Chat on successful direct join only.
+// - Returns statuses/messages without performing navigation side-effects. Callers decide UX.
 
-import { navigateToEventChat } from '../../../navigation/RootNavigation';
 import { getEventEndMs } from '../utils/dateUtils';
 import {
   event as trackEvent,
@@ -16,6 +14,16 @@ import { functions } from '../../../firebase/config';
 
 // Safe no-op
 const noop = () => {};
+const fireAndForget = (fn) => {
+  try {
+    const res = fn?.();
+    if (res && typeof res.then === 'function') {
+      res.catch(() => {});
+    }
+  } catch {
+    // Intentionally swallow
+  }
+};
 
 function isEventEnded(event) {
   const endMs = getEventEndMs(event);
@@ -48,15 +56,22 @@ function getPrivacy(event) {
 export async function joinEvent({
   event,
   user,
-  navigation = null,
+  navigation: _navigation = null,
   stores = {},
   options = {},
 }) {
   const onShowMessage = options.onShowMessage || noop;
   const requireLocation = !!options.requireLocation;
   const eventStore = stores?.eventStore || null;
-  const joinGraceMs =
-    typeof options.joinGraceMs === 'number' ? options.joinGraceMs : 8000;
+  const analyticsPayloadBase = {
+    event_id: event?.id || null,
+    capacity: typeof event?.capacity === 'number' ? event.capacity : 0,
+    attendee_count: Array.isArray(event?.attendees)
+      ? event.attendees.length
+      : 0,
+    interest: event?.interest || null,
+    category: event?.category || null,
+  };
 
   try {
     // Basic guards
@@ -111,15 +126,12 @@ export async function joinEvent({
     }
 
     // Tentative RSVP intent (fire-and-forget)
-    try {
-      await trackRsvpYes({
-        event_id: event.id,
-        capacity: typeof event.capacity === 'number' ? event.capacity : 0,
-        attendee_count: attendees.length,
-        interest: event?.interest,
-        category: event?.category,
-      });
-    } catch {}
+    fireAndForget(() =>
+      trackRsvpYes({
+        ...analyticsPayloadBase,
+        rsvp_type: 'intent',
+      })
+    );
 
     // Capacity enforcement
     if (isFull(event)) {
@@ -128,25 +140,25 @@ export async function joinEvent({
         try {
           await eventStore.joinWaitlist(event.id, uid);
           onShowMessage(
-            'Added to the waitlist. We will notify you if a spot opens.'
+            'You are on the waitlist. We will notify you if a spot opens.'
           );
-          try {
-            await trackEvent('waitlist_join', {
-              capacity: event?.capacity || 0,
-              attendee_count: Array.isArray(event?.attendees)
-                ? event.attendees.length
-                : 0,
-            });
-            await trackRsvpYes({
-              event_id: event.id,
-              capacity: typeof event.capacity === 'number' ? event.capacity : 0,
-              attendee_count: attendees.length,
+          fireAndForget(() =>
+            trackEvent('waitlist_join', {
+              ...analyticsPayloadBase,
+            })
+          );
+          fireAndForget(() =>
+            trackRsvpYes({
+              ...analyticsPayloadBase,
+              rsvp_type: 'waitlist',
               was_waitlisted: true,
-              interest: event?.interest,
-              category: event?.category,
-            });
-          } catch {}
-          return { status: 'waitlisted' };
+            })
+          );
+          return {
+            status: 'waitlisted',
+            message:
+              'Added to the waitlist. We will notify you if a spot opens.',
+          };
         } catch (e) {
           onShowMessage(
             'Event is full and waitlist failed. Please try again later.'
@@ -171,45 +183,42 @@ export async function joinEvent({
         await requestFn({ eventId: event.id });
       }
       onShowMessage("Request sent. You'll be notified if accepted.");
-      try {
-        await trackEvent('rsvp_request', { privacy });
-        await trackRsvpYes({ event_id: event.id });
-      } catch {}
-      return { status: 'requested' };
+      fireAndForget(() => trackEvent('rsvp_request', { privacy }));
+      fireAndForget(() =>
+        trackRsvpYes({
+          ...analyticsPayloadBase,
+          rsvp_type: 'request',
+        })
+      );
+      return {
+        status: 'requested',
+        message: 'Request sent. We will notify you once the host responds.',
+      };
     }
 
     // Public/direct RSVP
     if (typeof eventStore?.rsvpEvent === 'function') {
       await eventStore.rsvpEvent(event.id, uid);
-
-      // Navigate to chat on join
-      const params = {
-        eventId: event.id,
-        joinIntent: 'direct',
-        joinGraceMs,
-      };
-      if (navigation && typeof navigation.navigate === 'function') {
-        navigation.navigate('EventChat', params);
-      } else {
-        navigateToEventChat(event.id, params);
-      }
       onShowMessage('You joined the event!');
-      try {
-        await trackJoinEventSafe({
+      fireAndForget(() =>
+        trackJoinEventSafe({
           capacity: event?.capacity || 0,
           attendeeCount: Array.isArray(event?.attendees)
             ? event.attendees.length + 1
             : 1,
           privacy,
-        });
-        await trackJoinEvent({
-          event_id: event.id,
+        })
+      );
+      fireAndForget(() =>
+        trackJoinEvent({
+          ...analyticsPayloadBase,
           method: 'rsvp',
-          interest: event?.interest,
-          category: event?.category,
-        });
-      } catch {}
-      return { status: 'joined', nextRoute: { name: 'EventChat', params } };
+        })
+      );
+      return {
+        status: 'joined',
+        message: 'Joined! Opening the chat...',
+      };
     }
 
     onShowMessage('Join is currently unavailable. Please try again later.');

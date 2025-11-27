@@ -59,6 +59,11 @@ import { filterBlockedEvents } from '../utils/blockUtils';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { darkMapStyle, lightMapStyle } from '../../../config/mapStyles';
+import {
+  resolveLocationWithFallback,
+  ensureForegroundPermission,
+} from '../utils/locationResolver';
+import { eventPassesGenderGate } from '../utils/genderUtils';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const PREVIEW_WIDTH = Math.min(284, SCREEN_W - 16); // tighter footprint
@@ -608,17 +613,44 @@ export default function MapScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
+        const granted = await ensureForegroundPermission();
+        if (!granted) {
           Alert.alert(
-            'Permission Denied',
-            'Location permission is required to view events.'
+            'Location Required',
+            'Enable location permissions to view nearby events. You can allow access in Settings.'
           );
+          setInitialLoading(false);
           return;
         }
 
-        const location = await Location.getCurrentPositionAsync({});
+        const resolved = await resolveLocationWithFallback({
+          canUseDevice: true,
+          allowLastKnown: true,
+          locationOptions: {
+            accuracy: Location.Accuracy?.Balanced,
+            maximumAge: 15_000,
+            timeout: 15_000,
+            mayShowUserSettingsDialog: true,
+          },
+        });
+
         const storedOverride = useDiscoveryLocationStore.getState().override;
+        const gpsCoords = resolved?.coords || null;
+        const fallbackCoords =
+          gpsCoords ||
+          storedOverride?.coords ||
+          user?.location ||
+          null;
+
+        if (!fallbackCoords) {
+          Alert.alert(
+            'Location Unavailable',
+            'We could not determine your location. Make sure Location Services are enabled on your device.'
+          );
+          setInitialLoading(false);
+          return;
+        }
+
         const overrideRegion = storedOverride?.coords
           ? buildRegionFromContext(
               storedOverride.coords,
@@ -627,8 +659,7 @@ export default function MapScreen() {
           : null;
         const initialRegion =
           overrideRegion || {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
+            ...fallbackCoords,
             latitudeDelta: 0.0922 * 1.5,
             longitudeDelta: 0.0421 * 1.5,
           };
@@ -636,9 +667,16 @@ export default function MapScreen() {
         skipNextRegionSyncRef.current = true;
         setRegion(initialRegion);
         await fetchEventsInRegion(initialRegion, true);
-        setGpsLocation({ coords: location.coords });
+        if (gpsCoords) {
+          setGpsLocation({ coords: gpsCoords });
+        }
       } catch (error) {
         console.error('Error loading map data:', error);
+        Alert.alert(
+          'Location Error',
+          'Unable to load events without a location. Please check permissions and try again.'
+        );
+        setInitialLoading(false);
       }
     })();
   }, []);
@@ -728,6 +766,7 @@ export default function MapScreen() {
     const sourceEvents = filterBlockedEvents(events, user);
 
     let filtered = sourceEvents.filter((event) => {
+      if (!eventPassesGenderGate(event, user)) return false;
       const eventEnd = getEventEndMs(event);
       return eventEnd && eventEnd + 60 * 60 * 1000 > now;
     });
@@ -1571,6 +1610,7 @@ export default function MapScreen() {
             },
             placeholderTextColor: theme.colors.textSecondary,
             style: styles.searchInputStyle,
+            keyboardAppearance: themeMode === 'dark' ? 'dark' : 'light',
           }}
           onPress={(data, details = null) => handlePlaceSelect(data, details)}
           query={{
@@ -2154,28 +2194,6 @@ const createStyles = (theme) =>
       right: 0,
       bottom: 0,
       zIndex: 100,
-    },
-    debugOverlay: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      zIndex: 9999,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: theme.colors.overlay,
-    },
-    debugCard: {
-      width: 300,
-      padding: 16,
-      borderRadius: 12,
-      backgroundColor: theme.colors.surfaceElevated,
-      alignItems: 'center',
-      shadowColor: '#000',
-      shadowOpacity: theme.isDark ? 0.5 : 0.2,
-      shadowRadius: 6,
-      elevation: 8,
     },
     listViewOverlay: {
       position: 'absolute',

@@ -49,6 +49,7 @@ import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { useNavigation } from '@react-navigation/native';
 import { filterBlockedEvents } from '../utils/blockUtils';
+import { eventPassesGenderGate } from '../utils/genderUtils';
 import {
   useDiscoveryLocationStore,
   DEFAULT_DISCOVERY_RADIUS_METERS,
@@ -260,6 +261,17 @@ export default function DiscoveryScreen() {
       );
     },
     [pinnedInterestsKey, sanitizeInterests]
+  );
+
+  const filterVisibleEvents = useCallback(
+    (list = []) =>
+      filterBlockedEvents(
+        (Array.isArray(list) ? list : []).filter((event) =>
+          eventPassesGenderGate(event, user)
+        ),
+        user
+      ),
+    [user]
   );
 
   useEffect(() => {
@@ -499,7 +511,7 @@ export default function DiscoveryScreen() {
 
   useEffect(() => {
     setEvents((prev) => {
-      const filtered = filterBlockedEvents(prev, user);
+      const filtered = filterVisibleEvents(prev);
       if (
         filtered.length === prev.length &&
         filtered.every((event, idx) => event.id === prev[idx]?.id)
@@ -556,9 +568,8 @@ export default function DiscoveryScreen() {
           setUserInterests([]);
           const generic = await fetchGenericEvents(20);
           if (!isMounted) return;
-          const visibleGeneric = filterBlockedEvents(
-            generic.filter((e) => e.isDeleted !== true),
-            user
+          const visibleGeneric = filterVisibleEvents(
+            generic.filter((e) => e.isDeleted !== true)
           );
           const enrichedGeneric = await enrichEventsWithHosts(visibleGeneric);
           if (!isMounted) return;
@@ -628,7 +639,7 @@ export default function DiscoveryScreen() {
           if (cachedEvents && isMounted) {
             try {
               const parsed = JSON.parse(cachedEvents);
-              const visibleCached = filterBlockedEvents(parsed, user);
+              const visibleCached = filterVisibleEvents(parsed);
               const enrichedCached = await enrichEventsWithHosts(visibleCached);
               if (!isMounted) return;
               setEvents(enrichedCached);
@@ -639,7 +650,7 @@ export default function DiscoveryScreen() {
           const generic = await fetchGenericEvents(20);
           if (!isMounted) return;
           const filtered = generic.filter((e) => !e.isDeleted);
-          const visibleFresh = filterBlockedEvents(filtered, user);
+          const visibleFresh = filterVisibleEvents(filtered);
           const enrichedFresh = await enrichEventsWithHosts(visibleFresh);
           if (!isMounted) return;
           setEvents(enrichedFresh);
@@ -674,7 +685,7 @@ export default function DiscoveryScreen() {
         if (cachedEvents && isMounted) {
           try {
             const parsed = JSON.parse(cachedEvents);
-            const visibleCached = filterBlockedEvents(parsed, user);
+            const visibleCached = filterVisibleEvents(parsed);
             const enrichedCached = await enrichEventsWithHosts(visibleCached);
             if (!isMounted) return;
             setEvents(enrichedCached);
@@ -690,7 +701,7 @@ export default function DiscoveryScreen() {
         );
         if (!isMounted) return;
         const filteredEvents = newEvents.filter((event) => !event.isDeleted);
-        const visibleEvents = filterBlockedEvents(filteredEvents, user);
+        const visibleEvents = filterVisibleEvents(filteredEvents);
         const enrichedEvents = await enrichEventsWithHosts(visibleEvents);
         if (!isMounted) return;
         setEvents(enrichedEvents);
@@ -753,9 +764,8 @@ export default function DiscoveryScreen() {
   async function loadEvents(reset = false) {
     if (!personalizationEnabled) {
       const generic = await fetchGenericEvents(20);
-      const visibleGeneric = filterBlockedEvents(
-        generic.filter((e) => e.isDeleted !== true),
-        user
+      const visibleGeneric = filterVisibleEvents(
+        generic.filter((e) => e.isDeleted !== true)
       );
       const enrichedGeneric = await enrichEventsWithHosts(visibleGeneric);
       setEvents((prev) => {
@@ -765,7 +775,7 @@ export default function DiscoveryScreen() {
           (event, index, self) =>
             index === self.findIndex((candidate) => candidate.id === event.id)
         );
-        return filterBlockedEvents(uniqueById, user);
+        return filterVisibleEvents(uniqueById);
       });
       return;
     }
@@ -896,9 +906,8 @@ export default function DiscoveryScreen() {
       fetchedPosts = [];
     }
 
-    const visibleNewEvents = filterBlockedEvents(
-      (newEvents || []).filter((event) => event && event.isDeleted !== true),
-      user
+    const visibleNewEvents = filterVisibleEvents(
+      (newEvents || []).filter((event) => event && event.isDeleted !== true)
     );
     const enriched = await enrichEventsWithHosts(visibleNewEvents);
     setEvents((prevEvents) => {
@@ -908,7 +917,7 @@ export default function DiscoveryScreen() {
         (event, index, self) =>
           index === self.findIndex((e) => e.id === event.id)
       );
-      return filterBlockedEvents(uniqueById, user);
+      return filterVisibleEvents(uniqueById);
     });
 
     setPosts(fetchedPosts.filter((post) => post?.isDeleted !== true));
