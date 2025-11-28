@@ -108,7 +108,7 @@ if (fs.existsSync(appDelegatePath)) {
 }
 
 // Check 6: Firebase config file
-const firebaseConfigPath = path.join(__dirname, '../src/firebase/config.js');
+const firebaseConfigPath = path.join(__dirname, '../src/services/firebase/config.js');
 if (fs.existsSync(firebaseConfigPath)) {
   const config = fs.readFileSync(firebaseConfigPath, 'utf8');
   console.log('\n⚙️  Firebase JS Configuration:');

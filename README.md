@@ -481,7 +481,7 @@ npm run ios
 <summary><b>Firebase not connecting</b></summary>
 
 1. Verify `.env` file exists and contains `GOOGLE_MAPS_API_KEY`
-2. Check Firebase config in `src/firebase/config.js`
+2. Check Firebase config in `src/services/firebase/config.js`
 3. Ensure `GoogleService-Info.plist` is in `ios/SocialCircle/` folder
 4. For Android, check `google-services.json` in `android/app/`
 </details>

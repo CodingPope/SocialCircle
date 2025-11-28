@@ -7,7 +7,7 @@ export { default as LocationScreen } from './components/screens/Onboarding/Locat
 export { default as NameDobScreen } from './components/screens/Onboarding/NameDobScreen';
 export { default as SexScreen } from './components/screens/Onboarding/SexScreen';
 
-export * from './services/hydrateUserStore';
+export * from './api/hydrateUserStore';
 export * from './context/AuthContext';
 export * from './utils/onboardingRouter';
 export * from './utils/devDiagnostics';

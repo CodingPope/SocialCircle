@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db } from '../../../firebase/config';
+import { db } from '../../../services/firebase/config';
 
 // Description: Store for event categories, used for filtering and pin colors
 export const useCategoryStore = create((set) => ({

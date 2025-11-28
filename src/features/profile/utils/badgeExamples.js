@@ -5,7 +5,7 @@ Example usage of the badge system:
 
 1. Award a badge to a user (like when they complete an action):
    ```javascript
-   import { awardBadge } from '../services/badgeService';
+   import { awardBadge } from '../api/badgeService';
    
    // Award beta badge to new user
    await awardBadge(userId, 'beta', true); // true to set as current badge
@@ -26,14 +26,14 @@ Example usage of the badge system:
 
 3. Change user's displayed badge:
    ```javascript
-   import { setCurrentBadge } from '../services/badgeService';
+   import { setCurrentBadge } from '../api/badgeService';
    
    await setCurrentBadge(userId, 'earlybird');
    ```
 
 4. Get all user badges for display:
    ```javascript
-   import { getUserBadges } from '../services/badgeService';
+   import { getUserBadges } from '../api/badgeService';
    
    const badges = await getUserBadges(userId);
    badges.forEach(badge => {

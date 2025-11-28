@@ -22,8 +22,8 @@ import {
   doc,
   getDoc,
   onSnapshot, // live updates for event doc
-} from '../../../firebase/firestoreCompat';
-import { db, reportContent } from '../../../firebase/config';
+} from '../../../services/firebase/firestoreCompat';
+import { db, reportContent } from '../../../services/firebase/config';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
@@ -33,7 +33,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useEventStore } from '../stores/eventStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
-import joinEvent from '../services/joinEvent';
+import joinEvent from '../api/joinEventService';
 import { trackOpenEvent, trackReportContent } from '../../../lib/analytics';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import { shareEventDetails } from '../utils/shareUtils';
@@ -41,7 +41,7 @@ import { getBlockContext, isEventVisibleForUser } from '../utils/blockUtils';
 import {
   saveEventForUser,
   removeSavedEventForUser,
-} from '../services/savedEvents';
+} from '../api/savedEventsService';
 import { useSavedEventsStore } from '../stores/savedEventsStore';
 import {
   trackSaveEvent,
@@ -689,7 +689,11 @@ export default function EventPopUpCard({
 
         {/* Title + share */}
         <View style={styles.titleRow}>
-          <Text style={styles.title}>
+          <Text
+            style={styles.title}
+            numberOfLines={2}
+            ellipsizeMode={'tail'}
+          >
             {liveEvent.title || 'Untitled Event'}
           </Text>
           <View style={styles.titleActions}>
@@ -975,16 +979,22 @@ const createStyles = (theme) =>
       marginTop: 12,
       marginBottom: 6,
       color: theme.colors.text,
+      flex: 1, // allow the title to take available space but not push actions out
+      marginRight: 8,
+      // Limit wrapping so the title doesn't push action buttons offscreen
+      includeFontPadding: false,
     },
     titleRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 8,
+      justifyContent: 'flex-start',
     },
     titleActions: {
       flexDirection: 'row',
       alignItems: 'center',
+      // Ensure actions don't grow and remain tightly-sized
+      flexShrink: 0,
+      justifyContent: 'flex-end',
     },
     iconButton: {
       padding: 6,

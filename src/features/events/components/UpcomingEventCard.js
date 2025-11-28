@@ -13,7 +13,7 @@ import Avatar from '../../../components/ui/Avatar';
 import AttendeeBubbleRow from './AttendeeBubbleRow';
 import { shareEventDetails } from '../utils/shareUtils';
 import { useTheme } from '../../../theme';
-import { getCategoryConfig } from '../../../config/categoryPins';
+import { getCategoryConfig } from '../constants/categoryPins';
 
 // Description: Helper to adjust hex color brightness for gradient effect
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);

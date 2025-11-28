@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Image, Text, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getCategoryConfig } from '../../../config/categoryPins';
+import { getCategoryConfig } from '../constants/categoryPins';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 

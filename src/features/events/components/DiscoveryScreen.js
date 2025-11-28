@@ -25,7 +25,7 @@ import {
   fetchThisWeekEvents,
   fetchTodayEvents,
   fetchGenericEvents,
-} from '../services/discoveryQueries';
+} from '../api/discoveryService';
 import PostCard from './PostCard';
 import InterestPostCard from '../../interestPosts/components/InterestPostCard';
 import CreateInterestPostModal from '../../interestPosts/components/CreateInterestPostModal';
@@ -33,8 +33,8 @@ import {
   fetchInterestPostsByInterest,
   fetchInterestPostsForInterests,
   InterestTimeframes,
-} from '../../interestPosts/services/interestPostService';
-import { fetchUserInterests } from '../../profile/services/userQueries';
+} from '../../interestPosts/api/interestPostService';
+import { fetchUserInterests } from '../../profile/api/userQueries';
 import EventPopupCard from './EventPopUpCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
@@ -42,7 +42,7 @@ import { useUserStore } from '../../profile/stores/userStore';
 import {
   screen as trackScreen,
   event as trackEvent,
-} from '../../../services/analytics';
+} from '../../../services/analyticsService';
 import { trackCardClick } from '../../../lib/analytics';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../../../theme';

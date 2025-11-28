@@ -22,7 +22,7 @@ checks.push({
 });
 
 // Check 2: analytics.js includes location import
-const analyticsPath = path.join(__dirname, '../src/services/analytics.js');
+const analyticsPath = path.join(__dirname, '../src/services/analyticsService.js');
 const analyticsCode = fs.readFileSync(analyticsPath, 'utf8');
 const hasLocationImport = analyticsCode.includes("from './locationContext'");
 checks.push({
@@ -36,7 +36,7 @@ checks.push({
 // Check 3: locationContext.js exists
 const locationContextPath = path.join(
   __dirname,
-  '../src/services/locationContext.js'
+  '../src/services/locationContextService.js'
 );
 const locationContextExists = fs.existsSync(locationContextPath);
 checks.push({

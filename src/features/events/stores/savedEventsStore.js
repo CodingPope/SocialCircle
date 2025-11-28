@@ -1,7 +1,5 @@
 import { create } from 'zustand';
-import {
-  listenToSavedEvents,
-} from '../services/savedEvents';
+import { listenToSavedEvents } from '../api/savedEventsService';
 
 function toDate(value) {
   if (!value) return null;

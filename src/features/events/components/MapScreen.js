@@ -21,7 +21,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { db } from '../../../firebase/config';
+import { db } from '../../../services/firebase/config';
 import {
   collection,
   query,
@@ -29,7 +29,7 @@ import {
   where,
   doc,
   getDoc,
-} from '../../../firebase/firestoreCompat';
+} from '../../../services/firebase/firestoreCompat';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import CreateEventScreen from './CreateEventScreen';
@@ -40,9 +40,9 @@ import EventPopUpCard from './EventPopUpCard';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { Ionicons } from '@expo/vector-icons';
 // NEW: previews + markers
-import BlipMarker from '../../../components/map/BlipMarker';
-import BlipPreview from '../../../components/map/BlipPreview';
-import { CategoryMarker } from '../../../components/map/CategoryMarker';
+import BlipMarker from './map/BlipMarker';
+import BlipPreview from './map/BlipPreview';
+import { CategoryMarker } from './map/CategoryMarker';
 import { Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,12 +53,12 @@ import {
   MIN_DISCOVERY_RADIUS_METERS,
   MAX_DISCOVERY_RADIUS_METERS,
 } from '../stores/discoveryLocationStore';
-import joinEvent from '../services/joinEvent';
+import joinEvent from '../api/joinEventService';
 import { trackCardClick, trackOpenEvent } from '../../../lib/analytics';
 import { filterBlockedEvents } from '../utils/blockUtils';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
-import { darkMapStyle, lightMapStyle } from '../../../config/mapStyles';
+import { darkMapStyle, lightMapStyle } from '../constants/mapStyles';
 import {
   resolveLocationWithFallback,
   ensureForegroundPermission,

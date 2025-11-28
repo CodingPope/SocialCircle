@@ -16,7 +16,7 @@ import {
 } from '@react-navigation/native';
 import { navigationRef, navigate } from './src/navigation/RootNavigation';
 import { useUserStore, useSessionRole } from './src/features/profile';
-import { db, serverTimestamp } from './src/firebase/config';
+import { db, serverTimestamp } from './src/services/firebase/config';
 import AppNavigator from './src/navigation/AppNavigator';
 import * as Notifications from 'expo-notifications';
 import {
@@ -35,18 +35,18 @@ import {
   screen as analyticsScreen,
   event as analyticsEvent,
   deriveUserAnalyticsProps,
-} from './src/services/analytics';
+} from './src/services/analyticsService';
 import { AuthProvider } from './src/features/auth/context/AuthContext';
 
 // Initialize error reporting once at module load to capture early errors
 // Sentry temporarily disabled until __extends error is resolved
 import LoadingOverlay from './src/components/ui/LoadingOverlay'; // Added LoadingOverlay import
 import AnalyticsConsentPrompt from './src/components/analytics/AnalyticsConsentPrompt';
-import { recordDailySessionHeartbeat } from './src/services/sessionHeartbeat';
+import { recordDailySessionHeartbeat } from './src/services/sessionHeartbeatService';
 import {
   handleIncomingLink,
   shouldEnableDeepLinking,
-} from './src/services/deepLinking';
+} from './src/services/deepLinkingService';
 import { ThemeProvider, lightTheme, darkTheme } from './src/theme';
 import { useThemeStore } from './src/store/themeStore';
 
@@ -71,7 +71,7 @@ function AppContent() {
   const [appReady, setAppReady] = useState(false);
   const themeMode = useThemeStore((state) => state.mode);
   // Import onboarding router utility
-  const { getNextOnboardingStep } = require('./src/utils/onboardingRouter');
+  const { getNextOnboardingStep } = require('./src/features/auth/utils/onboardingRouter');
 
   // Description: Hide splash screen once app is ready
   useEffect(() => {

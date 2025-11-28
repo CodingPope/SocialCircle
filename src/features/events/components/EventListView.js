@@ -6,7 +6,7 @@ import BottomSheet, {
 } from '@gorhom/bottom-sheet';
 import EventPopUpCard from './EventPopUpCard';
 import PostCard from './PostCard';
-import { getUserById } from '../../profile/services/userService';
+import { getUserById } from '../../profile/api/userService';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import {
   track as trackClient,

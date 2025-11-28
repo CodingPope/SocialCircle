@@ -11,14 +11,14 @@ import {
   PanResponder,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { db, serverTimestamp } from '../../../firebase/config';
+import { db, serverTimestamp } from '../../../services/firebase/config';
 import { useUserStore } from '../stores/userStore';
 import {
   setOptIn as analyticsSetOptIn,
   analyticsInit as configureAnalytics,
   event as analyticsEvent,
   deriveUserAnalyticsProps,
-} from '../../../services/analytics';
+} from '../../../services/analyticsService';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 

@@ -29,10 +29,10 @@ import { useThemeStore } from '../../../../store/themeStore';
 import {
   registerForPushTokenAsync,
   initPushForUser,
-} from '../../../notifications/services/pushService';
-import { auth } from '../../../../firebase/config';
+} from '../../../notifications/api/pushService';
+import { auth } from '../../../../services/firebase/config';
 import { track as trackClient } from '../../../../lib/analytics';
-import { createUser } from '../../../profile/services/userService';
+import { createUser } from '../../../profile/api/userService';
 
 const HERO_COPY = {
   login: {
@@ -164,7 +164,7 @@ export default function LoginScreen({ navigation }) {
                     const {
                       findSoftDeletedUserByEmail,
                       reactivateUser,
-                    } = require('../../../profile/services/userService');
+                    } = require('../../../profile/api/userService');
                     const softDeleted = await findSoftDeletedUserByEmail(email);
                     if (softDeleted) {
                       await reactivateUser(softDeleted.id, {});

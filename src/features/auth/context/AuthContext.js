@@ -1,10 +1,10 @@
 // src/context/AuthContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { auth, db } from '../../../firebase/config';
+import { auth, db } from '../../../services/firebase/config';
 import {
   init as analyticsInit,
   setOptIn as analyticsSetOptIn,
-} from '../../../services/analytics';
+} from '../../../services/analyticsService';
 import { useSessionRole } from '../../profile';
 
 const AuthContext = createContext({ user: null, loading: true });

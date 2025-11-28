@@ -6,7 +6,7 @@ describe('Analytics Parameter Validation', () => {
   // that the analytics service exists and follows Firebase rules
 
   it('should export main analytics functions', () => {
-    const analytics = require('../../src/services/analytics');
+    const analytics = require('../../src/services/analyticsService');
     expect(typeof analytics.event).toBe('function');
     expect(typeof analytics.screen).toBe('function');
     expect(typeof analytics.setOptIn).toBe('function');

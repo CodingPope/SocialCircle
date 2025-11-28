@@ -12,13 +12,13 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { db } from '../../../../../firebase/config';
+import { db } from '../../../../../services/firebase/config';
 import { useUserStore } from '../../../../profile';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import {
   logOnboardingStepComplete,
   logOnboardingDone,
-} from '../../../../../services/onboardingAnalytics';
+} from '../../../../../services/onboardingAnalyticsService';
 import Button from '../../../../../components/ui/Button';
 import { useTheme } from '../../../../../theme';
 
@@ -465,7 +465,7 @@ function InterestsScreen({ navigation }) {
       // Check if there are more onboarding steps after interests
       const {
         getNextOnboardingStep,
-      } = require('../../../../../utils/onboardingRouter');
+      } = require('../../../utils/onboardingRouter');
       const updatedUserData = { ...user, interests: selected };
       const nextStep = getNextOnboardingStep(updatedUserData);
 

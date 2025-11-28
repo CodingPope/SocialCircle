@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, Button, StyleSheet, Platform } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
-import { auth } from '../../../firebase/config';
+import { auth } from '../../../services/firebase/config';
 import * as WebBrowser from 'expo-web-browser';
 import { GOOGLE_EXPO_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
 import { track as trackClient } from '../../../lib/analytics';

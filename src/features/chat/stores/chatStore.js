@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db } from '../../../firebase/config';
+import { db } from '../../../services/firebase/config';
 
 // Description: Store for chat and message state, actions, and Firestore integration
 export const useChatStore = create((set, get) => ({

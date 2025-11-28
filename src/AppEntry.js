@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import LoadingOverlay from './components/ui/LoadingOverlay';
-import { auth } from './firebase/config';
+import { auth } from './services/firebase/config';
 import AppNavigator from './navigation/AppNavigator';
 import { AuthScreen } from './features/auth';
 

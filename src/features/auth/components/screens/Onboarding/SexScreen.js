@@ -12,8 +12,8 @@ import {
 import { useUserStore } from '../../../../profile';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import { Ionicons } from '@expo/vector-icons';
-import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
-import { mergeUserFields } from '../../../../profile/services/userService';
+import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalyticsService';
+import { mergeUserFields } from '../../../../profile/api/userService';
 import { normalizeSex } from '../../../../profile/utils/userProfile';
 import Button from '../../../../../components/ui/Button';
 import { useTheme } from '../../../../../theme';

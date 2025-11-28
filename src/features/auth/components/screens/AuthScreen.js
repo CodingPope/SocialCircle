@@ -9,14 +9,14 @@ import {
   StyleSheet,
   Image,
 } from 'react-native';
-import { auth, db } from '../../../../firebase/config';
+import { auth, db } from '../../../../services/firebase/config';
 import {
   doc,
   setDoc,
   serverTimestamp,
   getDoc,
   updateDoc,
-} from '../../../../firebase/firestoreCompat';
+} from '../../../../services/firebase/firestoreCompat';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
@@ -24,7 +24,7 @@ import { useUserStore, useSessionRole } from '../../../profile';
 import {
   registerForPushTokenAsync,
   initPushForUser,
-} from '../../../notifications/services/pushService';
+} from '../../../notifications/api/pushService';
 import { GOOGLE_CLIENT_ID } from '@env';
 import { track as trackClient } from '../../../../lib/analytics';
 import LoadingOverlay from '../../../../components/ui/LoadingOverlay';
@@ -450,7 +450,7 @@ export default function AuthScreen({ navigation, route }) {
         if (result?.additionalUserInfo?.isNewUser) {
           const {
             createUser,
-          } = require('../../../profile/services/userService');
+          } = require('../../../profile/api/userService');
           const token = await registerForPushTokenAsync().catch(() => null);
           const appleProfile = extractAppleProfileFields(
             credential,
@@ -556,7 +556,7 @@ export default function AuthScreen({ navigation, route }) {
           if (result.additionalUserInfo?.isNewUser) {
             const {
               createUser,
-            } = require('../../../profile/services/userService');
+            } = require('../../../profile/api/userService');
             const token = await registerForPushTokenAsync().catch(() => null);
             await createUser(result.user.uid, {
               email: result.user.email,
@@ -702,7 +702,7 @@ export default function AuthScreen({ navigation, route }) {
         try {
           const {
             createUser,
-          } = require('../../../profile/services/userService');
+          } = require('../../../profile/api/userService');
           await createUser(result.user.uid, {
             email: result.user.email,
             deviceToken: token || null,

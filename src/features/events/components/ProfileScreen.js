@@ -7,6 +7,7 @@ import React, {
   useMemo,
 } from 'react';
 import { Animated, Dimensions, PanResponder } from 'react-native';
+import { useScrollToTop } from '@react-navigation/native';
 import {
   SafeAreaView,
   View,
@@ -35,11 +36,11 @@ import {
   uploadProfileImage,
   db,
   reportContent,
-} from '../../../firebase/config';
+} from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useMyEvents } from '../hooks/useMyEvents';
 import * as ImagePicker from 'expo-image-picker';
-import { createImagePickerOptions } from '../../../utils/imagePicker';
+import { createImagePickerOptions } from '../../../lib/imagePicker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
   collection,
@@ -53,12 +54,12 @@ import {
   onSnapshot,
   writeBatch,
   serverTimestamp,
-} from '../../../firebase/firestoreCompat';
+} from '../../../services/firebase/firestoreCompat';
 import PostCard from './PostCard';
 import InterestPostCard from '../../interestPosts/components/InterestPostCard';
-import { fetchInterestPostsByCreator } from '../../interestPosts/services/interestPostService';
+import { fetchInterestPostsByCreator } from '../../interestPosts/api/interestPostService';
 import ActionModals from '../../profile/components/ActionModals';
-import { shareProfile } from '../../../services/share';
+import { shareProfile } from '../../../services/shareService';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import { trackReportContent } from '../../../lib/analytics';
@@ -112,6 +113,19 @@ export default function ProfileScreen({ navigation }) {
   const now = new Date();
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const scrollRef = useRef(null);
+  useScrollToTop(scrollRef);
+  useEffect(() => {
+    const parent = navigation?.getParent?.();
+    if (!parent) return;
+    const unsubscribe = parent.addListener('tabPress', (e) => {
+      if (!navigation?.isFocused?.()) return;
+      if (scrollRef.current?.scrollTo) {
+        scrollRef.current.scrollTo({ y: 0, animated: true });
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   // Description: Get theme mode and toggle function from theme store
   const themeMode = useThemeStore((state) => state.mode);
@@ -129,6 +143,7 @@ export default function ProfileScreen({ navigation }) {
 
   // Ensure snippet fetcher from store
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
+  const hostCacheRef = useRef(new Map());
 
   // --- Notification badge state ---
   const [unreadCount, setUnreadCount] = useState(0);
@@ -607,7 +622,7 @@ export default function ProfileScreen({ navigation }) {
         if (!ids.length) return [];
         // Use helper from firebase config if exposed
         try {
-          const { getUserEventsByIds } = require('../../../firebase/config');
+          const { getUserEventsByIds } = require('../../../services/firebase/config');
           if (typeof getUserEventsByIds === 'function') {
             const res = await getUserEventsByIds(ids);
             return res.filter((e) => e.isDeleted !== true);
@@ -646,9 +661,6 @@ export default function ProfileScreen({ navigation }) {
       ]);
 
       setUserEvents({ created, attending, attended });
-      setEnhancedEvents(
-        mergeUniqueEvents(created, attending, attended, groupEvents)
-      );
 
       try {
         const postsResult = await fetchInterestPostsByCreator({
@@ -735,7 +747,7 @@ export default function ProfileScreen({ navigation }) {
         if (!ids.length) return [];
         // Use helper from firebase config if exposed
         try {
-          const { getUserEventsByIds } = require('../../../firebase/config');
+          const { getUserEventsByIds } = require('../../../services/firebase/config');
           if (typeof getUserEventsByIds === 'function') {
             const res = await getUserEventsByIds(ids);
             return res.filter((e) => e.isDeleted !== true);
@@ -927,10 +939,75 @@ export default function ProfileScreen({ navigation }) {
 
       const updated = slice.map((event) => {
         const s = event.ownerId ? map.get(event.ownerId) : null;
-        const hostName = s?.name || event.ownerName || 'Unknown Host';
-        const hostPhoto = s?.photoURL || null;
-        const hostRating = typeof s?.rating === 'number' ? s.rating : 0;
-        const hostVerified = s?.verification?.status === 'verified';
+        const cached = hostCacheRef.current.get(event.id);
+        const fallbackHost =
+          (event.ownerId && event.ownerId === user?.uid ? user : null) ||
+          event.ownerSnapshot ||
+          event.owner ||
+          null;
+
+        const deriveName = (host) => {
+          if (!host) return null;
+          const first = (host.firstName || host.givenName || '').toString().trim();
+          const last = (host.lastName || host.familyName || '').toString().trim();
+          const full = `${first} ${last}`.trim();
+          return (
+            full ||
+            host.displayName ||
+            host.name ||
+            host.username ||
+            null
+          );
+        };
+
+        const derivePhoto = (host) => {
+          if (!host) return null;
+          return (
+            host.profileImage ||
+            host.avatarURL ||
+            host.photoURL ||
+            host.avatar ||
+            null
+          );
+        };
+
+        const deriveRating = (host) => {
+          if (!host) return null;
+          if (typeof host.rating === 'number') return host.rating;
+          if (typeof host.ranking === 'number') return host.ranking;
+          if (typeof host.averageRating === 'number') return host.averageRating;
+          return null;
+        };
+
+        const deriveVerification = (host) => {
+          if (!host) return false;
+          if (host.verified === true || host.isVerified === true) return true;
+          if (host.verification?.status === 'verified') return true;
+          return false;
+        };
+
+        const hostName =
+          s?.name ||
+          cached?.hostName ||
+          deriveName(fallbackHost) ||
+          event.ownerName ||
+          'Unknown Host';
+        const hostPhoto =
+          s?.photoURL || cached?.hostPhoto || derivePhoto(fallbackHost) || null;
+        const derivedRating = deriveRating(fallbackHost);
+        const hostRating =
+          typeof s?.rating === 'number'
+            ? s.rating
+            : typeof cached?.hostRating === 'number'
+            ? cached.hostRating
+            : typeof derivedRating === 'number'
+            ? derivedRating
+            : 0;
+        const hostVerified =
+          s?.verified === true ||
+          cached?.hostVerified === true ||
+          deriveVerification(fallbackHost);
+
         return {
           ...event,
           hostPhoto,
@@ -966,6 +1043,14 @@ export default function ProfileScreen({ navigation }) {
           }
           if (same) return prev;
         }
+        updated.forEach((evt) => {
+          hostCacheRef.current.set(evt.id, {
+            hostName: evt.hostName,
+            hostPhoto: evt.hostPhoto,
+            hostRating: evt.hostRating,
+            hostVerified: evt.hostVerified,
+          });
+        });
         return updated;
       });
     };
@@ -976,7 +1061,7 @@ export default function ProfileScreen({ navigation }) {
       setEnhancedEvents([]);
     }
     // Depend only on a stable key of the current slice to prevent infinite loops
-  }, [visibleIdsKey]);
+  }, [visibleIdsKey, user]);
 
   // Helper function to format location
   const formatLocation = (location) => {
@@ -1249,6 +1334,7 @@ export default function ProfileScreen({ navigation }) {
       attended: removeEventById(prev.attended, eventId),
     }));
     setEnhancedEvents((prev) => removeEventById(prev, eventId));
+    hostCacheRef.current.delete(eventId);
     if (previousMyEventsSnapshot) {
       myEventsRef.current = removeEventById(previousMyEventsSnapshot, eventId);
     }
@@ -1613,6 +1699,7 @@ export default function ProfileScreen({ navigation }) {
       )}
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl

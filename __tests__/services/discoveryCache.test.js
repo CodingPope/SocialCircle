@@ -8,16 +8,26 @@ jest.mock('../../src/lib/ttlCache', () => ({
   getWithTTL: jest.fn(async (_key, fetcher, _ttl) => await fetcher()),
 }));
 
-jest.mock('firebase/firestore', () => ({
-  getFirestore: jest.fn(() => ({})),
-  collection: jest.fn(),
-  getDocs: jest.fn(async () => ({ docs: [] })),
-  query: jest.fn(),
-  where: jest.fn(),
-  Timestamp: {
-    now: () => ({ seconds: Math.floor(Date.now() / 1000) }),
-    fromMillis: (ms) => ({ seconds: Math.floor(ms / 1000) }),
-  },
+jest.mock('../../src/services/firebase/config', () => {
+  const createQuery = () => {
+    const query = {
+      where: jest.fn(() => query),
+      get: jest.fn(async () => ({ docs: [] })),
+    };
+    return query;
+  };
+  return {
+    db: { collection: jest.fn(() => createQuery()) },
+    Timestamp: {
+      fromMillis: (ms) => ({ seconds: Math.floor(ms / 1000) }),
+    },
+    getTimestampNow: () => ({ seconds: Math.floor(Date.now() / 1000) }),
+  };
+});
+
+jest.mock('geofire-common', () => ({
+  geohashQueryBounds: jest.fn(() => [['aaaa', 'zzzz']]),
+  distanceBetween: jest.fn(() => 0),
 }));
 
 import { getWithTTL } from '../../src/lib/ttlCache';

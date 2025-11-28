@@ -14,9 +14,9 @@ import {
   getCurrentPositionAsync,
 } from 'expo-location';
 import { useUserStore } from '../../../../profile';
-import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalytics';
+import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalyticsService';
 import { geohashForLocation } from 'geofire-common';
-import { mergeUserFields } from '../../../../profile/services/userService';
+import { mergeUserFields } from '../../../../profile/api/userService';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import Button from '../../../../../components/ui/Button';
 import { useTheme } from '../../../../../theme';

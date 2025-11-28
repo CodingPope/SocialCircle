@@ -1,6 +1,6 @@
 // src/hooks/useMyEvents.js
 import { useState, useEffect } from 'react';
-import { db } from '../../../firebase/config';
+import { db } from '../../../services/firebase/config';
 
 export function useMyEvents(creatorId) {
   const [events, setEvents] = useState([]);

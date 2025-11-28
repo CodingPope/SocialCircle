@@ -6,7 +6,7 @@ import {
   addBusinessLocation,
   submitBusiness,
   db,
-} from '../../../firebase/config';
+} from '../../../services/firebase/config';
 import { useSessionRole } from '../../profile';
 
 export const BUSINESS_ONBOARDING_STAGES = Object.freeze({

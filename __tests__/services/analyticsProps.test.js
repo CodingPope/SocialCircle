@@ -13,7 +13,7 @@ jest.mock('@react-native-firebase/analytics', () => {
 
 jest.mock('@react-native-firebase/app', () => ({}), { virtual: true });
 
-import { deriveUserAnalyticsProps } from '../../src/services/analytics';
+import { deriveUserAnalyticsProps } from '../../src/services/analyticsService';
 
 describe('deriveUserAnalyticsProps', () => {
   it('generates normalized properties with age and sex buckets', () => {

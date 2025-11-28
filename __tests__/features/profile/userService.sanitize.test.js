@@ -71,7 +71,7 @@ jest.mock('@react-native-firebase/storage', () => {
   return jest.fn(() => mockInstance);
 });
 
-import { __userServiceInternals } from '../../../src/features/profile/services/userService';
+import { __userServiceInternals } from '../../../src/features/profile/api/userService';
 
 const { sanitizeUserPayload, stripUnsupportedFirestoreValues } =
   __userServiceInternals;

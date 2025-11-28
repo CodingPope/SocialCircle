@@ -11,10 +11,10 @@ import {
   Platform,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { db } from '../../../firebase/config';
-import { collection, getDocs } from '../../../firebase/firestoreCompat';
+import { db } from '../../../services/firebase/config';
+import { collection, getDocs } from '../../../services/firebase/firestoreCompat';
 import InterestSelector from '../../profile/components/InterestSelector';
-import { trackFilterApplySafe } from '../../../services/analytics';
+import { trackFilterApplySafe } from '../../../services/analyticsService';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 

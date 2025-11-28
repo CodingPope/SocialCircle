@@ -18,8 +18,8 @@ import {
   collection,
   getDocs,
   getDoc,
-} from '../../../firebase/firestoreCompat';
-import { db } from '../../../firebase/config';
+} from '../../../services/firebase/firestoreCompat';
+import { db } from '../../../services/firebase/config';
 import { useUserStore } from '../stores/userStore';
 import Button from '../../../components/ui/Button';
 import AnimatedGradientBackground from '../../../components/ui/AnimatedGradientBackground';

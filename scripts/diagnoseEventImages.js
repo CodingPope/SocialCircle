@@ -1,7 +1,7 @@
 // Description: Test script to check event images - paste this into App.js temporarily
 // Or run from a test file to check Firestore event data
 
-import { db } from './src/firebase/config';
+import { db } from '../src/services/firebase/config';
 
 export async function diagnoseEventImages() {
   console.log('🔍 Starting event image diagnosis...\n');

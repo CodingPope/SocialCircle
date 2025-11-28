@@ -26,8 +26,8 @@ import {
   getDoc,
   doc,
   onSnapshot,
-} from '../../../firebase/firestoreCompat';
-import { db } from '../../../firebase/config';
+} from '../../../services/firebase/firestoreCompat';
+import { db } from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import EventPopUpCard from './EventPopUpCard';
@@ -35,7 +35,7 @@ import UpcomingEventCard from './UpcomingEventCard';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSavedEventsStore } from '../stores/savedEventsStore';
-import { removeSavedEventForUser } from '../services/savedEvents';
+import { removeSavedEventForUser } from '../api/savedEventsService';
 import { getBlockContext, isEventVisibleForUser } from '../utils/blockUtils';
 import {
   trackSaveEvent,

@@ -22,12 +22,12 @@ import {
   addCommentToPost,
   notifyPostComment,
   deleteInterestPost,
-} from '../services/interestPostService';
-import { event as trackEvent } from '../../../services/analytics';
-import { reportContent } from '../../../firebase/config';
+} from '../api/interestPostService';
+import { event as trackEvent } from '../../../services/analyticsService';
+import { reportContent } from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import smileDefault from '../../../../assets/smileDefault.png';
-import { sharePost } from '../../../services/share';
+import { sharePost } from '../../../services/shareService';
 import { useTheme } from '../../../theme';
 import EditInterestPostModal from './EditInterestPostModal';
 

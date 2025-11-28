@@ -1,5 +1,5 @@
 // __tests__/lib/joinEvent.test.js
-import { joinEvent } from '../../src/lib/joinEvent';
+import { joinEvent } from '../../src/features/events/testing/joinEventTestHelper';
 
 describe('joinEvent', () => {
   const makeEvent = (over = {}) => ({

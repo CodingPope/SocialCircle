@@ -13,11 +13,11 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { createImagePickerOptions } from '../../../utils/imagePicker';
-import { createInterestPost } from '../services/interestPostService';
-import { fetchUserInterests } from '../../profile/services/userQueries';
+import { createImagePickerOptions } from '../../../lib/imagePicker';
+import { createInterestPost } from '../api/interestPostService';
+import { fetchUserInterests } from '../../profile/api/userQueries';
 import { useUserStore } from '../../profile/stores/userStore';
-import { event as trackEvent } from '../../../services/analytics';
+import { event as trackEvent } from '../../../services/analyticsService';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import smileDefault from '../../../../assets/smileDefault.png';

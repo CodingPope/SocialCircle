@@ -1,14 +1,14 @@
 // Description: Lightweight client tracker that sends sanitized analytics events to a server Cloud Function.
-// - Respects in-app analytics opt-in via services/analytics.isEnabled
+// - Respects in-app analytics opt-in via services/analyticsService.isEnabled
 // - Uses callable function 'trackEvent' (us-central1)
 // - Best-effort: never throws
 // - Uses React Native Firebase for native mobile analytics
 
-import { functions, auth } from '../firebase/config';
+import { functions, auth } from '../services/firebase/config';
 import {
   event as analyticsEvent,
   isEnabled as analyticsIsEnabled,
-} from '../services/analytics';
+} from '../services/analyticsService';
 
 // Event taxonomy: standard names used across app surfaces
 // Naming: snake_case event names and payload keys. No lat/lng or PII.

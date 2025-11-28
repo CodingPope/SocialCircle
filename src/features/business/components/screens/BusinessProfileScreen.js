@@ -27,7 +27,7 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { db, auth } from '../../../../firebase/config';
+import { db, auth } from '../../../../services/firebase/config';
 
 export default function BusinessProfileScreen() {
   const navigation = useNavigation();

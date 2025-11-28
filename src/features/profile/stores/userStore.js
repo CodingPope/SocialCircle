@@ -1,9 +1,9 @@
 // Description: Zustand store for user authentication and profile
 import { create } from 'zustand';
-import { auth, db, getUserData, updateUserData } from '../../../firebase/config';
-import { findSoftDeletedUserByEmail, reactivateUser } from '../services/userService';
+import { auth, db, getUserData, updateUserData } from '../../../services/firebase/config';
+import { findSoftDeletedUserByEmail, reactivateUser } from '../api/userService';
 import { navigationRef, resetRoot } from '../../../navigation/RootNavigation';
-import { getNextOnboardingStep } from '../../../utils/onboardingRouter';
+import { getNextOnboardingStep } from '../../auth/utils/onboardingRouter';
 
 export const useUserStore = create((set) => ({
   // Current user object

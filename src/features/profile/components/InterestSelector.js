@@ -8,7 +8,7 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { db } from '../../../firebase/config';
+import { db } from '../../../services/firebase/config';
 import categoriesData from '../../events/constants/categoriesData.json';
 import { useTheme } from '../../../theme';
 

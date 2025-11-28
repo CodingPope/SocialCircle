@@ -34,7 +34,7 @@ import {
   followUser,
   unfollowUser,
   functions,
-} from '../../../firebase/config';
+} from '../../../services/firebase/config';
 import {
   collection,
   getDocs,
@@ -42,7 +42,7 @@ import {
   where,
   doc,
   getDoc,
-} from '../../../firebase/firestoreCompat';
+} from '../../../services/firebase/firestoreCompat';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import PopupMenu from './PopupMenu';
@@ -50,10 +50,10 @@ import PostCard from './PostCard';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import InterestPostCard from '../../interestPosts/components/InterestPostCard';
-import logger from '../../../utils/logger';
-import { fetchInterestPostsByCreator } from '../../interestPosts/services/interestPostService';
+import logger from '../../../lib/logger';
+import { fetchInterestPostsByCreator } from '../../interestPosts/api/interestPostService';
 import { trackReportContent } from '../../../lib/analytics';
-import { shareEvent } from '../../../services/share';
+import { shareEvent } from '../../../services/shareService';
 import {
   getEventEndMs,
   getTimelineTimestamp,
@@ -62,7 +62,7 @@ import {
 import {
   blockUser as blockUserService,
   unblockUser as unblockUserService,
-} from '../../profile/services/blockService';
+} from '../../profile/api/blockService';
 import displayNameFromUser from '../../notifications/utils/displayName';
 
 export default function OtherUserProfileScreen({ route, navigation }) {

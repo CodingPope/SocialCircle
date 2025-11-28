@@ -2,5 +2,5 @@ export { default as CreateInterestPostModal } from './components/CreateInterestP
 export { default as InterestPostCard } from './components/InterestPostCard';
 export { default as InterestPostScreen } from './components/InterestPostScreen';
 
-export * from './services/interestPostService';
+export * from './api/interestPostService';
 export * from './types/types';

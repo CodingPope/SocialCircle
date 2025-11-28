@@ -43,8 +43,8 @@ import {
   getDocs,
   where,
   Timestamp,
-} from '../../../firebase/firestoreCompat';
-import { functions } from '../../../firebase/config';
+} from '../../../services/firebase/firestoreCompat';
+import { functions } from '../../../services/firebase/config';
 import { geohashForLocation } from 'geofire-common';
 import {
   db,
@@ -52,7 +52,7 @@ import {
   sendNotification,
   updateEventCount,
   deleteEvent, // import soft-delete helper
-} from '../../../firebase/config';
+} from '../../../services/firebase/config';
 import smileDefault from '../../../../assets/smileDefault.png';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import ReportModal from '../../events/components/ReportModal'; // Import reusable modal component

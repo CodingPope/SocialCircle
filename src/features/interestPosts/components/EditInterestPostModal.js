@@ -14,8 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { useUserStore } from '../../profile/stores/userStore';
-import { fetchUserInterests } from '../../profile/services/userQueries';
-import { updateInterestPost } from '../services/interestPostService';
+import { fetchUserInterests } from '../../profile/api/userQueries';
+import { updateInterestPost } from '../api/interestPostService';
 
 const MAX_TEXT_LENGTH = 600;
 

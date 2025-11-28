@@ -35,11 +35,11 @@ import {
   notifyPostComment,
   softDeleteComment,
   toMillis,
-} from '../services/interestPostService';
-import { reportContent } from '../../../firebase/config';
+} from '../api/interestPostService';
+import { reportContent } from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import smileDefault from '../../../../assets/smileDefault.png';
-import { event as trackEvent } from '../../../services/analytics';
+import { event as trackEvent } from '../../../services/analyticsService';
 import { useTheme } from '../../../theme';
 
 const PAGE_SIZE = 20;

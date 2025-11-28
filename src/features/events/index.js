@@ -26,14 +26,14 @@ export { useEventStore } from './stores/eventStore';
 export { useCategoryStore } from './stores/categoryStore';
 export { default as useAttendeesStore } from './stores/useAttendeesStore';
 
-export { joinEvent } from './services/joinEvent';
+export { joinEvent } from './api/joinEventService';
 export {
   fetchHotEvents,
   fetchNewEvents,
   fetchThisWeekEvents,
   fetchTodayEvents,
   fetchGenericEvents,
-} from './services/discoveryQueries';
+} from './api/discoveryService';
 
 export {
   toMillis,

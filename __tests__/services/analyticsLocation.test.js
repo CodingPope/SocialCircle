@@ -3,8 +3,8 @@ import {
   getFormattedCity,
   clearLocationCache,
   refreshLocation,
-} from '../../src/services/locationContext';
-import { deriveUserAnalyticsProps } from '../../src/services/analytics';
+} from '../../src/services/locationContextService';
+import { deriveUserAnalyticsProps } from '../../src/services/analyticsService';
 
 // Mock expo-location to avoid native module dependency in Jest
 jest.mock('expo-location', () => ({

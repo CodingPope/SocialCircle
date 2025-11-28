@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { auth, db } from '../../../firebase/config';
-import { doc, getDoc, updateDoc } from '../../../firebase/firestoreCompat';
+import { auth, db } from '../../../services/firebase/config';
+import { doc, getDoc, updateDoc } from '../../../services/firebase/firestoreCompat';
 
 /**
  * Zustand store for managing user interests with Firestore integration.

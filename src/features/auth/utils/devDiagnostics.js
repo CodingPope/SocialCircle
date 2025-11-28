@@ -1,7 +1,7 @@
 // src/lib/devDiagnostics.js
 // Dev-only diagnostics; never run in production builds
 import { Platform } from 'react-native';
-import { functions } from '../../../firebase/config';
+import { functions } from '../../../services/firebase/config';
 import { track as trackClient } from '../../../lib/analytics';
 
 export async function runFunctionSmokeTests() {

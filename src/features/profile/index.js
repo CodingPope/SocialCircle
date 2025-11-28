@@ -20,7 +20,7 @@ export { useInterestStore } from './stores/interestStore';
 export { useSessionRole } from './stores/sessionRoleStore';
 export { useUserSnippetStore } from './stores/userSnippetStore';
 
-export * from './services/userService';
-export * from './services/userQueries';
+export * from './api/userService';
+export * from './api/userQueries';
 
 export * from './utils/userProfile';

@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Avatar from '../../../components/ui/Avatar';
 import RatingStars from './RatingStars';
 import PopupMenu from '../../events/components/PopupMenu';
-import { reportContent } from '../../../firebase/config';
+import { reportContent } from '../../../services/firebase/config';
 import { useUserStore } from '../stores/userStore';
 
 export default function ProfileHeader({

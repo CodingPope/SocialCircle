@@ -29,10 +29,10 @@ import {
   arrayUnion,
   getDocs,
   getDoc,
-} from '../../../firebase/firestoreCompat';
-import { db, storage, auth, authInstance } from '../../../firebase/config';
+} from '../../../services/firebase/firestoreCompat';
+import { db, storage, auth, authInstance } from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
-import { updateEventCount } from '../../../firebase/config';
+import { updateEventCount } from '../../../services/firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import InterestSelector from '../../profile/components/InterestSelector'; // Import the reusable InterestSelector
@@ -43,7 +43,7 @@ import { useThemeStore } from '../../../store/themeStore';
 import {
   interpretStorageError,
   logStorageDiagnostic,
-} from '../../../firebase/storageUtils';
+} from '../../../services/firebase/storageUtils';
 
 // --- Date/Time constraints ---
 const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future

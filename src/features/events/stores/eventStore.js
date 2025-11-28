@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db, functions } from '../../../firebase/config';
+import { db, functions } from '../../../services/firebase/config';
 
 // Description: Zustand store for events, RSVP, waitlist, and event creation
 export const useEventStore = create(

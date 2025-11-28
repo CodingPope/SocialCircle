@@ -27,10 +27,10 @@ import {
   reportContent,
   db,
   updateUserData,
-} from '../../../firebase/config';
+} from '../../../services/firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { Video } from 'expo-video';
-import joinEvent from '../services/joinEvent';
+import joinEvent from '../api/joinEventService';
 import {
   trackCardClick,
   trackReportContent,
@@ -38,11 +38,11 @@ import {
   AnalyticsSurfaces,
   AnalyticsSources,
 } from '../../../lib/analytics';
-import { shareEvent } from '../../../services/share';
+import { shareEvent } from '../../../services/shareService';
 import {
   saveEventForUser,
   removeSavedEventForUser,
-} from '../services/savedEvents';
+} from '../api/savedEventsService';
 import { useSavedEventsStore } from '../stores/savedEventsStore';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
