@@ -144,11 +144,11 @@ export default function EventPopUpCard({
       typeof payload === 'string'
         ? { message: payload, tone: 'info' }
         : payload && typeof payload === 'object'
-        ? {
-            message: payload.message || '',
-            tone: payload.tone || 'info',
-          }
-        : null;
+          ? {
+              message: payload.message || '',
+              tone: payload.tone || 'info',
+            }
+          : null;
 
     if (!normalized || !normalized.message) return;
 
@@ -574,8 +574,8 @@ export default function EventPopUpCard({
   const profileImageSource = userDetails?.photoURL
     ? { uri: userDetails.photoURL }
     : userDetails?.profileImage || userDetails?.avatarURL
-    ? { uri: userDetails.profileImage || userDetails.avatarURL }
-    : require('../../../../assets/smileDefault.png');
+      ? { uri: userDetails.profileImage || userDetails.avatarURL }
+      : require('../../../../assets/smileDefault.png');
 
   const handleToggleSave = useCallback(async () => {
     if (!activeEventId) return;
@@ -689,11 +689,7 @@ export default function EventPopUpCard({
 
         {/* Title + share */}
         <View style={styles.titleRow}>
-          <Text
-            style={styles.title}
-            numberOfLines={2}
-            ellipsizeMode={'tail'}
-          >
+          <Text style={styles.title} numberOfLines={2} ellipsizeMode={'tail'}>
             {liveEvent.title || 'Untitled Event'}
           </Text>
           <View style={styles.titleActions}>
@@ -782,8 +778,8 @@ export default function EventPopUpCard({
           {showFullDescription
             ? liveEvent.description
             : liveEvent.description?.length > 300
-            ? `${liveEvent.description.slice(0, 300)}...`
-            : liveEvent.description || 'No description'}
+              ? `${liveEvent.description.slice(0, 300)}...`
+              : liveEvent.description || 'No description'}
         </Text>
         {liveEvent.description && liveEvent.description.length > 300 && (
           <TouchableOpacity
