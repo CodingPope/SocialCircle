@@ -124,8 +124,13 @@ const buildRegionFromContext = (
   radiusMeters = DEFAULT_DISCOVERY_RADIUS_METERS
 ) => {
   if (!coords) return null;
-  const latDelta = ((radiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS) * 2) / METERS_PER_DEGREE_LAT;
-  const cosLat = Math.max(Math.cos((coords.latitude * Math.PI) / 180), MIN_COS_LAT);
+  const latDelta =
+    ((radiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS) * 2) /
+    METERS_PER_DEGREE_LAT;
+  const cosLat = Math.max(
+    Math.cos((coords.latitude * Math.PI) / 180),
+    MIN_COS_LAT
+  );
   const lngDelta = latDelta / cosLat;
   return {
     latitude: coords.latitude,
@@ -193,6 +198,7 @@ export default function MapScreen() {
   }, [user?.blocked, user?.blockedBy]);
 
   const [events, setEvents] = useState([]);
+  const [optimisticEvents, setOptimisticEvents] = useState([]); // Description: Track optimistically created events
   const [filteredEvents, setFilteredEvents] = useState([]);
   const [newEventLocation, setNewEventLocation] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -233,9 +239,15 @@ export default function MapScreen() {
   const tutorialOpacity = useRef(new Animated.Value(0)).current;
   const lastInteractionRef = useRef(Date.now());
   const skipNextRegionSyncRef = useRef(false);
-  const setGpsLocation = useDiscoveryLocationStore((state) => state.setGpsLocation);
-  const setMapOverride = useDiscoveryLocationStore((state) => state.setMapOverride);
-  const clearOverride = useDiscoveryLocationStore((state) => state.clearOverride);
+  const setGpsLocation = useDiscoveryLocationStore(
+    (state) => state.setGpsLocation
+  );
+  const setMapOverride = useDiscoveryLocationStore(
+    (state) => state.setMapOverride
+  );
+  const clearOverride = useDiscoveryLocationStore(
+    (state) => state.clearOverride
+  );
 
   const [isLocating, setIsLocating] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -637,10 +649,7 @@ export default function MapScreen() {
         const storedOverride = useDiscoveryLocationStore.getState().override;
         const gpsCoords = resolved?.coords || null;
         const fallbackCoords =
-          gpsCoords ||
-          storedOverride?.coords ||
-          user?.location ||
-          null;
+          gpsCoords || storedOverride?.coords || user?.location || null;
 
         if (!fallbackCoords) {
           Alert.alert(
@@ -657,12 +666,11 @@ export default function MapScreen() {
               storedOverride.radiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS
             )
           : null;
-        const initialRegion =
-          overrideRegion || {
-            ...fallbackCoords,
-            latitudeDelta: 0.0922 * 1.5,
-            longitudeDelta: 0.0421 * 1.5,
-          };
+        const initialRegion = overrideRegion || {
+          ...fallbackCoords,
+          latitudeDelta: 0.0922 * 1.5,
+          longitudeDelta: 0.0421 * 1.5,
+        };
 
         skipNextRegionSyncRef.current = true;
         setRegion(initialRegion);
@@ -682,12 +690,16 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
-    if (!events.length) {
-      setFilteredEvents([]);
-      return;
-    }
+    // Description: Clean up optimistic events that now exist in Firestore
+    const firestoreIds = new Set(events.map((e) => e.id));
+    setOptimisticEvents((prev) =>
+      prev.filter((opt) => !firestoreIds.has(opt.id) || opt._optimistic)
+    );
+  }, [events]);
+
+  useEffect(() => {
     applyFilters(selectedFilters);
-  }, [events, selectedFilters]);
+  }, [applyFilters, selectedFilters]);
 
   useEffect(() => {
     setEvents((prev) => {
@@ -754,79 +766,93 @@ export default function MapScreen() {
     return base.getTime();
   };
 
-  const applyFilters = (filters = {}) => {
-    if (!Array.isArray(events) || !events.length) {
-      setFilteredEvents([]);
-      return;
-    }
-
-    const { dateRange, date, interests, genderOnly } = filters;
-    const now = Date.now();
-
-    const sourceEvents = filterBlockedEvents(events, user);
-
-    let filtered = sourceEvents.filter((event) => {
-      if (!eventPassesGenderGate(event, user)) return false;
-      const eventEnd = getEventEndMs(event);
-      return eventEnd && eventEnd + 60 * 60 * 1000 > now;
-    });
-
-    if (dateRange?.start || dateRange?.end) {
-      const startMs = boundaryMsForIsoDate(
-        dateRange.start || dateRange.end,
-        'start'
-      );
-      const endMs = boundaryMsForIsoDate(
-        dateRange.end || dateRange.start,
-        'end'
-      );
-      filtered = filtered.filter((event) => {
-        const eventStart = getEventStartMs(event) ?? getEventEndMs(event);
-        if (!eventStart) return false;
-        if (startMs && eventStart < startMs) return false;
-        if (endMs && eventStart > endMs) return false;
-        return true;
+  const applyFilters = useCallback(
+    (filters = {}) => {
+      // Description: Merge optimistic events with Firestore events (optimistic events take precedence)
+      const allEvents = [...events];
+      optimisticEvents.forEach((optEvent) => {
+        const existingIndex = allEvents.findIndex((e) => e.id === optEvent.id);
+        if (existingIndex >= 0) {
+          allEvents[existingIndex] = optEvent; // Replace with updated version
+        } else {
+          allEvents.push(optEvent); // Add new optimistic event
+        }
       });
-    } else if (date) {
-      filtered = filtered.filter((event) => {
-        const startMs = getEventStartMs(event);
-        if (!startMs) return false;
-        const eventDateStr = new Date(startMs).toISOString().split('T')[0];
-        return eventDateStr === date;
-      });
-    }
 
-    if (Array.isArray(interests) && interests.length > 0) {
-      const interestSet = new Set(
-        interests
-          .map((i) =>
-            (typeof i === 'string' ? i : i?.name || i?.id || '')
-              .toString()
-              .trim()
-              .toLowerCase()
+      if (!Array.isArray(allEvents) || !allEvents.length) {
+        setFilteredEvents([]);
+        return;
+      }
+
+      const { dateRange, date, interests, genderOnly } = filters;
+      const now = Date.now();
+
+      const sourceEvents = filterBlockedEvents(allEvents, user);
+
+      let filtered = sourceEvents.filter((event) => {
+        if (!eventPassesGenderGate(event, user)) return false;
+        const eventEnd = getEventEndMs(event);
+        return eventEnd && eventEnd + 60 * 60 * 1000 > now;
+      });
+
+      if (dateRange?.start || dateRange?.end) {
+        const startMs = boundaryMsForIsoDate(
+          dateRange.start || dateRange.end,
+          'start'
+        );
+        const endMs = boundaryMsForIsoDate(
+          dateRange.end || dateRange.start,
+          'end'
+        );
+        filtered = filtered.filter((event) => {
+          const eventStart = getEventStartMs(event) ?? getEventEndMs(event);
+          if (!eventStart) return false;
+          if (startMs && eventStart < startMs) return false;
+          if (endMs && eventStart > endMs) return false;
+          return true;
+        });
+      } else if (date) {
+        filtered = filtered.filter((event) => {
+          const startMs = getEventStartMs(event);
+          if (!startMs) return false;
+          const eventDateStr = new Date(startMs).toISOString().split('T')[0];
+          return eventDateStr === date;
+        });
+      }
+
+      if (Array.isArray(interests) && interests.length > 0) {
+        const interestSet = new Set(
+          interests
+            .map((i) =>
+              (typeof i === 'string' ? i : i?.name || i?.id || '')
+                .toString()
+                .trim()
+                .toLowerCase()
+            )
+            .filter(Boolean)
+        );
+        filtered = filtered.filter((event) => {
+          const evInterest = (
+            typeof event.interest === 'string'
+              ? event.interest
+              : event.interest?.name || event.category || ''
           )
-          .filter(Boolean)
-      );
-      filtered = filtered.filter((event) => {
-        const evInterest = (
-          typeof event.interest === 'string'
-            ? event.interest
-            : event.interest?.name || event.category || ''
-        )
-          .toString()
-          .trim()
-          .toLowerCase();
-        if (!evInterest) return false;
-        return interestSet.has(evInterest);
-      });
-    }
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (!evInterest) return false;
+          return interestSet.has(evInterest);
+        });
+      }
 
-    if (genderOnly) {
-      filtered = filtered.filter((event) => event.privacy === genderOnly);
-    }
+      if (genderOnly) {
+        filtered = filtered.filter((event) => event.privacy === genderOnly);
+      }
 
-    setFilteredEvents(filtered);
-  };
+      setFilteredEvents(filtered);
+    },
+    [events, optimisticEvents, user]
+  );
 
   const fetchEventsInRegion = async (region, isInitial = false) => {
     if (!region) return;
@@ -1096,10 +1122,7 @@ export default function MapScreen() {
           const markerOffsetY = MARKER_VISUAL_OFFSET + badgeOffsetY;
           const idealTop =
             anchorY -
-            (PREVIEW_HEIGHT +
-              POINTER_MARGIN +
-              POINTER_HEIGHT +
-              markerOffsetY);
+            (PREVIEW_HEIGHT + POINTER_MARGIN + POINTER_HEIGHT + markerOffsetY);
           const top = clamp(
             idealTop + PREVIEW_VERTICAL_GAP,
             minTop,
@@ -1141,8 +1164,7 @@ export default function MapScreen() {
       setPreviewItems(items);
       if (rotated.length) {
         const advanceBy = Math.max(1, items.length);
-        rotationState.nextIndex =
-          (rotationOffset + advanceBy) % rotated.length;
+        rotationState.nextIndex = (rotationOffset + advanceBy) % rotated.length;
       } else {
         rotationState.nextIndex = 0;
       }
@@ -1501,18 +1523,8 @@ export default function MapScreen() {
     });
   };
 
-  if (initialLoading) {
-    return (
-      <View
-        style={[
-          { flex: 1, justifyContent: 'center', alignItems: 'center' },
-          { backgroundColor: theme.colors.background },
-        ]}
-      >
-        <ActivityIndicator size='large' color={theme.colors.primary} />
-      </View>
-    );
-  }
+  // Don't block UI with loading spinner - let map render with skeleton/empty state
+  // Background data loads will populate pins as they arrive
 
   // Check if user has interests selected
   if (userInterests.length === 0) {
@@ -1858,6 +1870,33 @@ export default function MapScreen() {
                 latitudeDelta: 0.05,
                 longitudeDelta: 0.05,
               });
+          }}
+          onOptimisticCreate={(event, tempId) => {
+            // Description: Handle optimistic event creation
+            if (!event) {
+              // Remove failed optimistic event
+              setOptimisticEvents((prev) =>
+                prev.filter((e) => e.id !== tempId)
+              );
+              applyFilters(selectedFilters);
+              return;
+            }
+
+            if (tempId && event.id !== tempId) {
+              // Replace temp event with real event (has real Firestore ID)
+              setOptimisticEvents((prev) => {
+                const updated = prev.filter((e) => e.id !== tempId);
+                // Only keep if not already in Firestore events
+                if (!events.some((e) => e.id === event.id)) {
+                  updated.push(event);
+                }
+                return updated;
+              });
+            } else {
+              // Add new optimistic event
+              setOptimisticEvents((prev) => [...prev, event]);
+            }
+            applyFilters(selectedFilters);
           }}
         />
       </Modal>

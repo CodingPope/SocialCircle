@@ -13,9 +13,10 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { KeyboardAwareFlatList } from 'react-native-keyboard-aware-scroll-view';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
+import { pickAndCompressImage } from '../../../lib/imagePicker';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import SegmentedControl from '@react-native-segmented-control/segmented-control';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,7 +31,12 @@ import {
   getDocs,
   getDoc,
 } from '../../../services/firebase/firestoreCompat';
-import { db, storage, auth, authInstance } from '../../../services/firebase/config';
+import {
+  db,
+  storage,
+  auth,
+  authInstance,
+} from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import { updateEventCount } from '../../../services/firebase/config';
 import { GOOGLE_MAPS_API_KEY } from '@env';
@@ -74,7 +80,12 @@ const roundUpToMinuteIncrement = (inputDate) => {
   return d;
 };
 
-export default function CreateEventScreen({ location, onCancel, onSuccess }) {
+export default function CreateEventScreen({
+  location,
+  onCancel,
+  onSuccess,
+  onOptimisticCreate,
+}) {
   // Description: Get current user from Zustand userStore
   const user = useUserStore((state) => state.user);
   const safeAreaInsets = useSafeAreaInsets();
@@ -135,20 +146,6 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
   }, [styles.input, theme]);
   const datePickerTheme = useMemo(
     () => ({
-      modalStyle: {
-        backgroundColor: theme.isDark
-          ? theme.colors.surfaceOverlay
-          : theme.colors.card,
-        borderRadius: 16,
-      },
-      pickerContainerStyle: {
-        backgroundColor: theme.colors.card,
-        borderTopLeftRadius: 16,
-        borderTopRightRadius: 16,
-      },
-      pickerStyle: {
-        backgroundColor: theme.colors.card,
-      },
       buttonColor: theme.colors.primary,
     }),
     [theme]
@@ -185,7 +182,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
   const [ageRange, setAgeRange] = useState([18, 99]);
   const [privacyIndex, setPrivacyIndex] = useState(0);
-  
+
   // Description: Build privacy segments based on user's sex (male, female, nonbinary)
   const segments = useMemo(() => {
     if (user.sex === 'female') return ['Public', 'RSVP', 'Women Only'];
@@ -194,14 +191,14 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
     // Fallback for any other value
     return ['Public', 'RSVP', 'Private'];
   }, [user.sex]);
-  
+
   const privacyValues = useMemo(() => {
     if (user.sex === 'female') return ['public', 'rsvp', 'female-only'];
     if (user.sex === 'male') return ['public', 'rsvp', 'male-only'];
     if (user.sex === 'nonbinary') return ['public', 'rsvp', 'nonbinary-only'];
     return ['public', 'rsvp', 'private'];
   }, [user.sex]);
-  
+
   const [placeInput, setPlaceInput] = useState('');
 
   const [capacity, setCapacity] = useState('');
@@ -255,20 +252,14 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         );
         return;
       }
-      const mediaTypeImages =
-        ImagePicker?.MediaType?.IMAGES ??
-        ImagePicker?.MediaType?.IMAGE ??
-        ImagePicker?.MediaTypeOptions?.Images;
+      const compressed = await pickAndCompressImage(
+        { aspect: [4, 3] },
+        'EVENT'
+      );
 
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: mediaTypeImages,
-        allowsEditing: true,
-        quality: 0.8,
-      });
-      if (!res.canceled && res.assets && res.assets[0]) {
-        const uri = res.assets[0].uri;
+      if (compressed?.uri) {
         // Description: Defer uploading until after the event document exists (so storage rules that require ownerId match succeed).
-        setImageUri(uri);
+        setImageUri(compressed.uri);
       }
     } catch (e) {
       console.error('Image pick error:', e);
@@ -320,7 +311,10 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       (privacyValue === 'male-only' && user.sex !== 'male') ||
       (privacyValue === 'nonbinary-only' && user.sex !== 'nonbinary')
     ) {
-      return Alert.alert('Privacy mismatch', 'You can only create gender-restricted events matching your sex.');
+      return Alert.alert(
+        'Privacy mismatch',
+        'You can only create gender-restricted events matching your sex.'
+      );
     }
 
     const eventLocation = manualLocation || location;
@@ -331,16 +325,21 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
     const extractedCity = manualAddress?.split(',')?.[1]?.trim() || '';
 
-    // Description: Create event without image first. Upload image after we have an event ID so Storage rules (owner check) pass.
-    const newEvent = {
+    // Description: Generate a temporary ID for optimistic UI
+    const tempId = `temp-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+
+    // Description: Create optimistic event object that will be shown immediately
+    const optimisticEvent = {
+      id: tempId,
       title: title.trim(),
       description: description.trim(),
-      imageUrl: null, // upload later and update
+      imageUrl: imageUri || null, // show local URI optimistically
       location: eventLocation,
       geohash,
       address: manualAddress,
       city: extractedCity,
-      // References for business context (optional, set by server or future UI)
       businessId: null,
       locationId: null,
       date: Timestamp.fromDate(date),
@@ -358,10 +357,20 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       status: 'active',
       isReported: false,
       attendees: [],
-      isDeleted: false, // New field to mark the event as active
-      deletedAt: null, // New field to store deletion timestamp
+      isDeleted: false,
+      deletedAt: null,
+      _optimistic: true, // flag to identify optimistic events
     };
 
+    // Description: Immediately close modal and show event on map (optimistic UI)
+    try {
+      onOptimisticCreate?.(optimisticEvent);
+      onSuccess?.(eventLocation);
+    } catch (navErr) {
+      console.warn('Optimistic UI callback error:', navErr);
+    }
+
+    // Description: Now create the event in Firestore in the background
     setUploading(true);
 
     let createdEventId = null;
@@ -370,14 +379,31 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
 
       trackClient('event_create_attempt', {
         auth_uid_present: !!authSnapshot?.uid,
-        owner_matches_auth: authSnapshot?.uid === newEvent.ownerId,
+        owner_matches_auth: authSnapshot?.uid === optimisticEvent.ownerId,
         image_selected: !!imageUri,
-        has_location: !!newEvent?.location?.geohash,
-        interest: newEvent?.interest || null,
-        privacy: newEvent?.privacy || null,
+        has_location: !!optimisticEvent?.location?.geohash,
+        interest: optimisticEvent?.interest || null,
+        privacy: optimisticEvent?.privacy || null,
       });
-      const docRef = await addDoc(collection(db, 'events'), newEvent);
+
+      // Description: Create real event in Firestore (without _optimistic flag and with null imageUrl)
+      const firestoreEvent = {
+        ...optimisticEvent,
+        imageUrl: null, // will be updated after image upload
+      };
+      delete firestoreEvent.id;
+      delete firestoreEvent._optimistic;
+
+      const docRef = await addDoc(collection(db, 'events'), firestoreEvent);
       createdEventId = docRef.id;
+
+      // Description: Update optimistic event with real ID
+      try {
+        onOptimisticCreate?.(
+          { ...optimisticEvent, id: docRef.id, _optimistic: false },
+          tempId
+        );
+      } catch {}
 
       // Wait for the event document to be readable by security rules (avoid storage.get() race)
       const waitForEventDoc = async (id, attempts = 12, delayMs = 750) => {
@@ -489,13 +515,6 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         }
       }
 
-      // Success: navigate away / close creator BEFORE any non-critical updates
-      try {
-        onSuccess && onSuccess(eventLocation);
-      } catch (navErr) {
-        console.warn('onSuccess handler error:', navErr);
-      }
-
       // Fire-and-forget: user doc updates should not block success UX
       (async () => {
         try {
@@ -531,10 +550,15 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       })();
     } catch (e) {
       console.error('Create event failed', e?.code || '', e?.message || e);
-      // Only surface error for creation step (addDoc). If we got here, addDoc likely failed
+      // Description: Remove optimistic event from map on failure
+      try {
+        onOptimisticCreate?.(null, tempId); // signal to remove temp event
+      } catch {}
+      // Show non-blocking toast instead of blocking alert
       Alert.alert(
-        'Creation failed',
-        e?.message || 'Missing or insufficient permissions.'
+        'Event creation failed',
+        'Could not create your event. Please try again.',
+        [{ text: 'OK' }]
       );
     } finally {
       setUploading(false);
@@ -607,7 +631,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
       >
         <Ionicons name='close' size={22} color={theme.colors.text} />
       </TouchableOpacity>
-      <KeyboardAwareScrollView
+      <KeyboardAwareFlatList
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollContent,
@@ -619,8 +643,10 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
         keyboardShouldPersistTaps='handled'
         extraScrollHeight={Platform.OS === 'ios' ? 24 : 0}
         enableOnAndroid
-      >
-        <View>
+        data={[{ key: 'form' }]}
+        keyExtractor={(item) => item.key}
+        renderItem={() => (
+          <View>
           {/* Image Preview */}
           {imageUri ? (
             <Image source={{ uri: imageUri }} style={styles.preview} />
@@ -686,9 +712,7 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
             textColor={theme.colors.text}
             isDarkModeEnabled={theme.isDark}
             buttonTextColorIOS={datePickerTheme.buttonColor}
-            pickerContainerStyleIOS={datePickerTheme.pickerContainerStyle}
-            pickerStyleIOS={datePickerTheme.pickerStyle}
-            modalStyleIOS={datePickerTheme.modalStyle}
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           />
 
           {/* Address Input */}
@@ -725,16 +749,16 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
               }}
             />
           </View>
-            {manualLocation && (
-              <View style={styles.row}>
-                <Ionicons
-                  name='location-outline'
-                  size={20}
-                  color={theme.colors.textSecondary}
-                  style={{ marginRight: 8 }}
-                />
-                <Text style={styles.pinLocationText}>
-                  Pin Location: {manualAddress || 'Unknown'}
+          {manualLocation && (
+            <View style={styles.row}>
+              <Ionicons
+                name='location-outline'
+                size={20}
+                color={theme.colors.textSecondary}
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.pinLocationText}>
+                Pin Location: {manualAddress || 'Unknown'}
               </Text>
             </View>
           )}
@@ -850,8 +874,9 @@ export default function CreateEventScreen({ location, onCancel, onSuccess }) {
           <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
             <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>
-        </View>
-      </KeyboardAwareScrollView>
+          </View>
+        )}
+      />
     </SafeAreaView>
   );
 }

@@ -100,8 +100,8 @@ const createStyles = (theme) => {
       marginTop: spacing.xs,
     },
     activityChip: {
-      backgroundColor: 'rgba(255,255,255,0.2)',
-      borderRadius: radii.pill,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      borderRadius: radii.lg,
       paddingVertical: spacing.sm,
       paddingHorizontal: spacing.md,
       margin: spacing.sm,
@@ -109,44 +109,37 @@ const createStyles = (theme) => {
       alignItems: 'center',
     },
     selectedActivityChip: {
-      backgroundColor: colors.neutral100,
-      transform: [{ scale: 1.05 }],
+      backgroundColor: '#007AFF',
+      shadowColor: '#007AFF',
+      shadowOpacity: 0.2,
+      shadowRadius: 3,
+      transform: [{ scale: 1.03 }],
     },
     activityText: {
-      fontSize: 15,
-      color: colors.neutral100,
-      fontWeight: '600',
-      textShadowColor: 'rgba(0,0,0,0.1)',
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 1,
+      fontSize: 13,
+      color: '#f8fafc',
+      fontWeight: '500',
       flexShrink: 0,
     },
     selectedActivityText: {
-      color: colors.secondary,
-      fontWeight: '800',
-      textShadowColor: 'rgba(118, 118, 118, 0.05)',
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 1,
+      color: '#fff',
+      fontWeight: '600',
     },
     countDivider: {
       width: 1,
-      height: '80%',
+      height: 12,
       backgroundColor: 'rgba(255,255,255,0.4)',
-      marginHorizontal: spacing.sm,
+      marginHorizontal: spacing.xs,
     },
     countText: {
-      fontSize: 15,
-      color: colors.neutral100,
-      fontWeight: '700',
-      textAlign: 'center',
-      textShadowColor: 'rgba(0,0,0,0.1)',
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 1,
+      fontSize: 11,
+      color: 'rgba(255,255,255,0.7)',
+      fontWeight: '500',
       flexShrink: 0,
     },
     selectedCountText: {
-      color: colors.secondary,
-      textShadowColor: 'rgba(0,0,0,0.05)',
+      color: 'rgba(255,255,255,0.9)',
+      fontWeight: '600',
     },
     checkIcon: {
       marginLeft: spacing.sm,
@@ -614,14 +607,6 @@ function InterestsScreen({ navigation }) {
                           {activity.count}
                         </Text>
                       </>
-                    )}
-                    {selected.includes(activity.name) && (
-                      <Ionicons
-                        name='checkmark'
-                        size={14}
-                        color={theme.colors.neutral100}
-                        style={styles.checkIcon}
-                      />
                     )}
                   </TouchableOpacity>
                 ))

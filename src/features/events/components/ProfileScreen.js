@@ -36,11 +36,12 @@ import {
   uploadProfileImage,
   db,
   reportContent,
+  deleteEvent,
 } from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useMyEvents } from '../hooks/useMyEvents';
 import * as ImagePicker from 'expo-image-picker';
-import { createImagePickerOptions } from '../../../lib/imagePicker';
+import { pickAndCompressImage } from '../../../lib/imagePicker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
   collection,
@@ -72,11 +73,13 @@ import {
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import VerificationModal from '../../profile/components/VerificationModal';
+import logger from '../../../lib/logger';
 
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const removeEventById = (list = [], eventId) => {
-  if (!Array.isArray(list) || !eventId) return Array.isArray(list) ? [...list] : [];
+  if (!Array.isArray(list) || !eventId)
+    return Array.isArray(list) ? [...list] : [];
   return list.filter((event) => event?.id !== eventId);
 };
 
@@ -165,7 +168,7 @@ export default function ProfileScreen({ navigation }) {
           });
           setUnreadCount(activeUnread.length);
         } catch (e) {
-          console.warn('Notifications parse error:', e?.message || e);
+          logger.warn('Notifications parse error:', e?.message || e);
         }
       },
       (error) => {
@@ -177,7 +180,7 @@ export default function ProfileScreen({ navigation }) {
           } catch {}
           return;
         }
-        console.warn('Notifications listener error:', error?.message || error);
+        logger.warn('Notifications listener error:', error?.message || error);
       }
     );
 
@@ -204,7 +207,7 @@ export default function ProfileScreen({ navigation }) {
         }
       })
       .catch((err) => {
-        console.warn('Profile tutorial flag read failed:', err?.message || err);
+        logger.warn('Profile tutorial flag read failed:', err?.message || err);
         if (isMounted) setShowProfileTutorial(true);
       });
     return () => {
@@ -245,7 +248,7 @@ export default function ProfileScreen({ navigation }) {
       }
     } catch (e) {
       // Non-blocking; the Notifications screen will also mark as read via its store
-      console.warn('Failed to mark notifications as read:', e?.message || e);
+      logger.warn('Failed to mark notifications as read:', e?.message || e);
     } finally {
       navigation.navigate('Notifications');
     }
@@ -278,7 +281,7 @@ export default function ProfileScreen({ navigation }) {
     try {
       await AsyncStorage.setItem(tutorialStorageKey, 'true');
     } catch (err) {
-      console.warn('Profile tutorial flag write failed:', err?.message || err);
+      logger.warn('Profile tutorial flag write failed:', err?.message || err);
     }
   }, [tutorialStorageKey]);
 
@@ -329,7 +332,7 @@ export default function ProfileScreen({ navigation }) {
         source: 'profile_header',
       });
     } catch (err) {
-      console.warn('Profile share failed:', err?.message || err);
+      logger.warn('Profile share failed:', err?.message || err);
     }
   }, [user]);
 
@@ -349,7 +352,7 @@ export default function ProfileScreen({ navigation }) {
               // Soft delete user in Firestore
               await updateDoc(doc(db, 'users', user.uid), {
                 isDeleted: true,
-                deletedAt: new Date(),
+                deletedAt: serverTimestamp(),
                 displayName: 'Deleted User',
                 profileImage: null,
                 bio: '',
@@ -522,7 +525,7 @@ export default function ProfileScreen({ navigation }) {
   // Description: Parse user join date with fallback handling
   const userSince = useMemo(() => {
     if (!user?.createdAt) {
-      console.log(
+      logger.debug(
         '[ProfileScreen] No createdAt found on user object:',
         user?.uid
       );
@@ -531,7 +534,7 @@ export default function ProfileScreen({ navigation }) {
       return now.toLocaleString('default', { month: 'short', year: 'numeric' });
     }
 
-    console.log(
+    logger.debug(
       '[ProfileScreen] createdAt value:',
       user.createdAt,
       'type:',
@@ -562,7 +565,7 @@ export default function ProfileScreen({ navigation }) {
       }
       // Handle timestamp-like object with _type marker - use current date as fallback
       else if (user.createdAt._type === 'timestamp') {
-        console.log(
+        logger.debug(
           '[ProfileScreen] createdAt is placeholder timestamp, using current date'
         );
         date = new Date();
@@ -573,11 +576,11 @@ export default function ProfileScreen({ navigation }) {
           month: 'short',
           year: 'numeric',
         });
-        console.log('[ProfileScreen] Formatted userSince:', formatted);
+        logger.debug('[ProfileScreen] Formatted userSince:', formatted);
         return formatted;
       }
     } catch (e) {
-      console.warn('[ProfileScreen] Error parsing createdAt:', e);
+      logger.warn('[ProfileScreen] Error parsing createdAt:', e);
     }
 
     // Final fallback
@@ -622,7 +625,9 @@ export default function ProfileScreen({ navigation }) {
         if (!ids.length) return [];
         // Use helper from firebase config if exposed
         try {
-          const { getUserEventsByIds } = require('../../../services/firebase/config');
+          const {
+            getUserEventsByIds,
+          } = require('../../../services/firebase/config');
           if (typeof getUserEventsByIds === 'function') {
             const res = await getUserEventsByIds(ids);
             return res.filter((e) => e.isDeleted !== true);
@@ -676,7 +681,7 @@ export default function ProfileScreen({ navigation }) {
           timelinePosts.filter((post) => post?.isDeleted !== true)
         );
       } catch (err) {
-        console.warn('Failed to refresh interest posts', err);
+        logger.warn('Failed to refresh interest posts', err);
       }
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -710,7 +715,7 @@ export default function ProfileScreen({ navigation }) {
       const data = await getUserData(user.uid);
       if (!isMounted) return;
 
-      console.log(
+      logger.debug(
         '[ProfileScreen] Fetched user data createdAt:',
         data.createdAt
       );
@@ -747,7 +752,9 @@ export default function ProfileScreen({ navigation }) {
         if (!ids.length) return [];
         // Use helper from firebase config if exposed
         try {
-          const { getUserEventsByIds } = require('../../../services/firebase/config');
+          const {
+            getUserEventsByIds,
+          } = require('../../../services/firebase/config');
           if (typeof getUserEventsByIds === 'function') {
             const res = await getUserEventsByIds(ids);
             return res.filter((e) => e.isDeleted !== true);
@@ -825,7 +832,7 @@ export default function ProfileScreen({ navigation }) {
           ? postsResult
           : [];
       } catch (err) {
-        console.warn('Failed to load interest posts for profile timeline', err);
+        logger.warn('Failed to load interest posts for profile timeline', err);
       }
 
       if (isMounted) setUserEvents({ created, attending, attended });
@@ -948,16 +955,14 @@ export default function ProfileScreen({ navigation }) {
 
         const deriveName = (host) => {
           if (!host) return null;
-          const first = (host.firstName || host.givenName || '').toString().trim();
-          const last = (host.lastName || host.familyName || '').toString().trim();
+          const first = (host.firstName || host.givenName || '')
+            .toString()
+            .trim();
+          const last = (host.lastName || host.familyName || '')
+            .toString()
+            .trim();
           const full = `${first} ${last}`.trim();
-          return (
-            full ||
-            host.displayName ||
-            host.name ||
-            host.username ||
-            null
-          );
+          return full || host.displayName || host.name || host.username || null;
         };
 
         const derivePhoto = (host) => {
@@ -1124,7 +1129,7 @@ export default function ProfileScreen({ navigation }) {
     }
 
     try {
-      console.log('[ProfileScreen] Starting image upload for user:', user.uid);
+      logger.debug('[ProfileScreen] Starting image upload');
 
       const permissionResult =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1136,112 +1141,27 @@ export default function ProfileScreen({ navigation }) {
         return;
       }
 
-      const pickerResult = await ImagePicker.launchImageLibraryAsync(
-        createImagePickerOptions({
-          aspect: [1, 1],
-          quality: 1,
-        })
+      // Description: Use pickAndCompressImage which handles compression with PROFILE limits (5MB/1024px)
+      const compressed = await pickAndCompressImage(
+        { aspect: [1, 1] },
+        'PROFILE'
       );
 
-      if (pickerResult.canceled) {
-        console.log('[ProfileScreen] Image picker canceled');
+      if (!compressed) {
+        logger.debug('[ProfileScreen] Image picker canceled');
         return;
       }
 
-      const imageAsset = pickerResult.assets?.[0];
-      if (!imageAsset?.uri) {
-        Alert.alert('Selection failed', 'Could not read the selected image.');
-        return;
-      }
+      logger.debug('[ProfileScreen] Image compressed, URI:', compressed.uri);
 
-      console.log('[ProfileScreen] Image selected, URI:', imageAsset.uri);
+      logger.debug('[ProfileScreen] Uploading to Firebase Storage...');
+      const newImage = await uploadProfileImage(user.uid, compressed.uri);
+      logger.debug('[ProfileScreen] Upload successful, URL:', newImage);
 
-      // Compress the image to ensure it's under 5MB and optimized
-      console.log('[ProfileScreen] Compressing image...');
-      const manipulatedImage = await ImageManipulator.manipulateAsync(
-        imageAsset.uri,
-        [{ resize: { width: 1024 } }], // Resize to max 1024px wide (maintains aspect ratio)
-        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-      );
-
-      console.log(
-        '[ProfileScreen] Compressed image URI:',
-        manipulatedImage.uri
-      );
-
-      // Check compressed file size
-      try {
-        const fileInfo = await fetch(manipulatedImage.uri);
-        const blob = await fileInfo.blob();
-        console.log(
-          '[ProfileScreen] Compressed image size:',
-          blob.size,
-          'bytes'
-        );
-
-        // If still too large after compression, reduce quality further
-        if (blob?.size && blob.size > MAX_PROFILE_IMAGE_BYTES) {
-          console.log(
-            '[ProfileScreen] Still too large, compressing further...'
-          );
-          const furtherCompressed = await ImageManipulator.manipulateAsync(
-            imageAsset.uri,
-            [{ resize: { width: 800 } }],
-            { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG }
-          );
-
-          const recheck = await fetch(furtherCompressed.uri);
-          const recheckBlob = await recheck.blob();
-          console.log(
-            '[ProfileScreen] Further compressed size:',
-            recheckBlob.size,
-            'bytes'
-          );
-
-          if (recheckBlob?.size && recheckBlob.size > MAX_PROFILE_IMAGE_BYTES) {
-            Alert.alert(
-              'Image too large',
-              'Unable to compress the image below 5MB. Please select a different photo.'
-            );
-            return;
-          }
-
-          // Use the further compressed version
-          console.log('[ProfileScreen] Uploading to Firebase Storage...');
-          const newImage = await uploadProfileImage(
-            user.uid,
-            furtherCompressed.uri
-          );
-          console.log('[ProfileScreen] Upload successful, URL:', newImage);
-
-          console.log('[ProfileScreen] Updating Firestore user document...');
-          await updateUserData(user.uid, { profileImage: newImage });
-
-          console.log('[ProfileScreen] Updating local state...');
-          setProfileImage(newImage);
-          setUser({ ...user, profileImage: newImage });
-
-          console.log('[ProfileScreen] Profile image update complete!');
-          Alert.alert('Profile updated', 'Your profile photo was changed.');
-          return;
-        }
-      } catch (sizeCheckError) {
-        console.warn(
-          '[ProfileScreen] Could not check file size:',
-          sizeCheckError
-        );
-        // Continue with upload anyway
-      }
-
-      console.log('[ProfileScreen] Uploading to Firebase Storage...');
-      // Pass the compressed URI
-      const newImage = await uploadProfileImage(user.uid, manipulatedImage.uri);
-      console.log('[ProfileScreen] Upload successful, URL:', newImage);
-
-      console.log('[ProfileScreen] Updating Firestore user document...');
+      logger.debug('[ProfileScreen] Updating Firestore user document...');
       await updateUserData(user.uid, { profileImage: newImage });
 
-      console.log('[ProfileScreen] Updating local state...');
+      logger.debug('[ProfileScreen] Updating local state...');
       setProfileImage(newImage);
       setUser({ ...user, profileImage: newImage });
 
@@ -1249,12 +1169,12 @@ export default function ProfileScreen({ navigation }) {
       const clearUserFromCache = useUserSnippetStore.getState().clearUser;
       if (clearUserFromCache) {
         clearUserFromCache(user.uid);
-        console.log(
+        logger.debug(
           '[ProfileScreen] Cleared user snippet cache for updated profile image'
         );
       }
 
-      console.log('[ProfileScreen] Profile image update complete!');
+      logger.debug('[ProfileScreen] Profile image update complete!');
       Alert.alert('Profile updated', 'Your profile photo was changed.');
     } catch (err) {
       console.error('[ProfileScreen] Profile image upload failed:', err);
@@ -1340,10 +1260,8 @@ export default function ProfileScreen({ navigation }) {
     }
 
     try {
-      await updateDoc(doc(db, 'events', eventId), {
-        isDeleted: true,
-        deletedAt: new Date(),
-      });
+      // Use callable to ensure transactional delete with proper validation
+      await deleteEvent(eventId, user?.uid);
 
       if (user) {
         const filterIds = (list) =>
@@ -2016,9 +1934,7 @@ export default function ProfileScreen({ navigation }) {
                   });
                 }
               })
-              .catch((err) =>
-                console.warn('Failed to refresh user data:', err)
-              );
+              .catch((err) => logger.warn('Failed to refresh user data:', err));
           }
         }}
       />

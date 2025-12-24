@@ -10,7 +10,7 @@ import {
   trackJoinEventSafe,
 } from '../../../services/analyticsService';
 import { trackRsvpYes, trackJoinEvent } from '../../../lib/analytics';
-import { functions } from '../../../services/firebase/config';
+import { callFirebaseFunction } from '../../../services/firebase/config';
 
 // Safe no-op
 const noop = () => {};
@@ -179,8 +179,7 @@ export async function joinEvent({
       if (typeof options.requestJoinFn === 'function') {
         await options.requestJoinFn(event.id);
       } else {
-        const requestFn = functions.httpsCallable('requestToJoinEvent');
-        await requestFn({ eventId: event.id });
+        await callFirebaseFunction('requestToJoinEvent', { eventId: event.id });
       }
       onShowMessage("Request sent. You'll be notified if accepted.");
       fireAndForget(() => trackEvent('rsvp_request', { privacy }));

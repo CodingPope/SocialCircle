@@ -17,6 +17,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { AttendeeBubbleRow } from '../..';
 import { getCategoryConfig } from '../../constants/categoryPins';
+import { shouldMaskRsvpDetails } from '../../utils/rsvpVisibility';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 const adjustHexColor = (hex, amount = 0) => {
@@ -89,6 +90,10 @@ export default function BlipPreview({
     event?.ownerId && user?.uid ? event.ownerId === user.uid : false;
   const isAttendee = user?.uid ? attendees.includes(user.uid) : false;
   const isMember = isOwner || isAttendee;
+  const maskRsvpDetails = useMemo(
+    () => shouldMaskRsvpDetails(event, user?.uid),
+    [event, user?.uid]
+  );
   const hasRequested = user?.uid
     ? (requests.includes(user.uid) || requestedLocal) && !isMember
     : requestedLocal && !isMember;
@@ -134,6 +139,21 @@ export default function BlipPreview({
     const tomorrowStr = tomorrow.toDateString();
 
     let label = '';
+    if (maskRsvpDetails) {
+      if (startDateStr === todayStr) {
+        label = 'Today';
+      } else if (startDateStr === tomorrowStr) {
+        label = 'Tomorrow';
+      } else {
+        label = start.toLocaleDateString([], {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        });
+      }
+      return { whenLabel: label, happeningNow: false };
+    }
+
     if (now >= startMs && (typeof endMs !== 'number' || now < endMs)) {
       label = 'Happening now';
     } else if (startDateStr === todayStr) {
@@ -155,7 +175,7 @@ export default function BlipPreview({
       label = `${wd} ${time}`;
     }
     return { whenLabel: label, happeningNow: label === 'Happening now' };
-  }, [event?.date, event?.endAt]);
+  }, [event?.date, event?.endAt, maskRsvpDetails]);
 
   const interestLabel = useMemo(() => {
     const interest = (event?.interest || event?.category || '').toString();

@@ -8,6 +8,7 @@ import {
   db,
 } from '../../../services/firebase/config';
 import { useSessionRole } from '../../profile';
+import logger from '../../../lib/logger';
 
 export const BUSINESS_ONBOARDING_STAGES = Object.freeze({
   INTRO: 'intro',
@@ -49,14 +50,14 @@ const loadDraftFromFirestore = async (bizId) => {
         ...(doc.data() || {}),
       }));
     } catch (err) {
-      console.warn(
+      logger.warn(
         '[bizOnboarding] Failed to load locations',
         err?.message || err
       );
     }
     return { id: snap.id, data, locations };
   } catch (err) {
-    console.warn(
+    logger.warn(
       '[bizOnboarding] loadDraftFromFirestore error',
       err?.message || err
     );
@@ -242,7 +243,7 @@ export const useBizOnboarding = create((set, get) => ({
         throw new Error('Not authenticated. Please sign in to continue.');
       }
 
-      console.log(`[bizOnboarding] Starting business draft for user: ${uid}`);
+      logger.debug('[bizOnboarding] Starting business draft');
 
       // Description: Call createBusinessDraft - auth validation happens in callCallable
       const res = await createBusinessDraft('single');
@@ -251,7 +252,7 @@ export const useBizOnboarding = create((set, get) => ({
         throw new Error('Business draft could not be created');
       }
 
-      console.log(`[bizOnboarding] Business draft created: ${res.bizId}`);
+      logger.debug(`[bizOnboarding] Business draft created: ${res.bizId}`);
 
       const draft = { type: 'single', status: 'draft' };
 

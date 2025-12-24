@@ -148,8 +148,7 @@ const EventChatScreen = () => {
   const [editLocation, setEditLocation] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editDate, setEditDate] = useState(null);
-  const [isEditDatePickerVisible, setIsEditDatePickerVisible] =
-    useState(false);
+  const [isEditDatePickerVisible, setIsEditDatePickerVisible] = useState(false);
   const [editDateDraft, setEditDateDraft] = useState(null);
   const [isSavingEvent, setIsSavingEvent] = useState(false);
   const [editPlaceDetails, setEditPlaceDetails] = useState(null);
@@ -812,6 +811,14 @@ const EventChatScreen = () => {
       );
       return;
     }
+    if (!eventId || !userId) {
+      console.error('Missing params for acceptRsvpRequest:', {
+        eventId,
+        userId,
+      });
+      alert('Unable to accept request. Missing event or user information.');
+      return;
+    }
     try {
       const accept = functions.httpsCallable('acceptRsvpRequest');
       await accept({ eventId, userId });
@@ -838,6 +845,14 @@ const EventChatScreen = () => {
         'Action unavailable',
         'Cannot modify requests for archived or ended events.'
       );
+      return;
+    }
+    if (!eventId || !userId) {
+      console.error('Missing params for declineRsvpRequest:', {
+        eventId,
+        userId,
+      });
+      alert('Unable to decline request. Missing event or user information.');
       return;
     }
     try {
@@ -1031,13 +1046,8 @@ const EventChatScreen = () => {
 
   // Description: Allow a non-host attendee to leave the event (removes from event + user doc)
   const handleLeaveEvent = async () => {
-    if (isSoftDeleted || ended) {
-      Alert.alert(
-        'Action unavailable',
-        'Cannot modify attendance for archived or ended events.'
-      );
-      return;
-    }
+    // Server is the authority on whether a user can leave (even for ended/archived events).
+    // We avoid client-side blocks so a stuck attendee can always attempt the leave callable.
     const currentUid = auth().currentUser?.uid;
     if (!currentUid || !eventId) return;
     if (isCreator) return; // Creator uses delete flow instead
@@ -1144,7 +1154,9 @@ const EventChatScreen = () => {
         : '';
     setEditLocation(sanitizedLocation);
     setEditDescription(event?.description || '');
-    setEditDate(coerceDateWithinBounds(toDateOrNull(event?.date) || new Date()));
+    setEditDate(
+      coerceDateWithinBounds(toDateOrNull(event?.date) || new Date())
+    );
     const loc = event?.location || {};
     const lat =
       typeof loc.latitude === 'number'
@@ -1476,6 +1488,7 @@ const EventChatScreen = () => {
                 shareEventDetails(event, {
                   surface: 'event_chat',
                   source: 'chat_header',
+                  viewerId: auth().currentUser?.uid || null,
                 })
               }
               accessibilityRole='button'
@@ -1549,7 +1562,7 @@ const EventChatScreen = () => {
               item?.senderId === 'system' || item?.type === 'system';
             if (isSystem) {
               return (
-                <View style={styles.systemContainer}>
+                <View key={item.id} style={styles.systemContainer}>
                   <Text style={styles.systemText}>
                     {item?.text || 'System update'}
                   </Text>
@@ -1571,6 +1584,7 @@ const EventChatScreen = () => {
               sender?.displayName || (isHost ? 'Host' : 'User');
             return (
               <View
+                key={item.id}
                 style={{
                   flexDirection: isCurrentUser ? 'row-reverse' : 'row',
                   alignItems: 'flex-start',
@@ -1707,8 +1721,8 @@ const EventChatScreen = () => {
           scrollTo={handleSidebarScrollTo}
           scrollOffset={sidebarScrollOffset}
           scrollOffsetMax={sidebarScrollOffsetMax}
-            >
-              <View style={styles.sidebarWrapper} onLayout={handleSidebarLayout}>
+        >
+          <View style={styles.sidebarWrapper} onLayout={handleSidebarLayout}>
             {/* Floating close button */}
             <TouchableOpacity
               style={styles.floatingCloseButton}
@@ -2054,12 +2068,12 @@ const EventChatScreen = () => {
                   {requesters.length > 0 ? (
                     requesters.map((requester) => (
                       <TouchableOpacity
-                        key={requester.userId}
+                        key={requester.id}
                         style={styles.requestItem}
                         onPress={() => {
                           setIsModalVisible(false);
-                          if (requester?.userId)
-                            navigateToOtherUserProfile(requester.userId);
+                          if (requester?.id)
+                            navigateToOtherUserProfile(requester.id);
                         }}
                       >
                         <Image
@@ -2081,17 +2095,19 @@ const EventChatScreen = () => {
                         <View style={styles.requestActions}>
                           <TouchableOpacity
                             style={styles.acceptButton}
-                            onPress={() =>
-                              handleAcceptRequest(requester.userId)
-                            }
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleAcceptRequest(requester.id);
+                            }}
                           >
                             <Text style={styles.acceptButtonText}>Accept</Text>
                           </TouchableOpacity>
                           <TouchableOpacity
                             style={styles.declineButton}
-                            onPress={() =>
-                              handleDeclineRequest(requester.userId)
-                            }
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleDeclineRequest(requester.id);
+                            }}
                           >
                             <Text style={styles.declineButtonText}>
                               Decline

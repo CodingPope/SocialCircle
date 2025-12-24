@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { auth } from '../../../../services/firebase/config';
+import logger from '../../../../lib/logger';
 
 export default function BusinessCircleScreen() {
   const navigation = useNavigation();
@@ -20,12 +21,12 @@ export default function BusinessCircleScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              console.log('🔴 Signing out business user...');
+              logger.debug('🔴 Signing out business user...');
 
               // Sign out from Firebase
               await auth().signOut();
 
-              console.log('✅ Sign out successful');
+              logger.debug('✅ Sign out successful');
 
               // Navigation will be handled automatically by auth state change
               // But we can also manually reset just to be sure

@@ -14,6 +14,7 @@ import AttendeeBubbleRow from './AttendeeBubbleRow';
 import { shareEventDetails } from '../utils/shareUtils';
 import { useTheme } from '../../../theme';
 import { getCategoryConfig } from '../constants/categoryPins';
+import { useUserStore } from '../../profile/stores/userStore';
 
 // Description: Helper to adjust hex color brightness for gradient effect
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -36,6 +37,7 @@ const adjustHexColor = (hex, amount = 0) => {
 };
 
 export default function UpcomingEventCard({ event, onOpen, onPrimaryAction }) {
+  const user = useUserStore((state) => state.user);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
@@ -103,6 +105,7 @@ export default function UpcomingEventCard({ event, onOpen, onPrimaryAction }) {
     shareEventDetails(event, {
       surface: 'upcoming_card',
       source: 'card_header',
+      viewerId: user?.uid || null,
     });
 
   return (

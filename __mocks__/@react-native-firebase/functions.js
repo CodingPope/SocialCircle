@@ -1,9 +1,16 @@
 // Mock for @react-native-firebase/functions
-const functions = () => ({
-  httpsCallable: jest.fn((name) =>
-    jest.fn(() => Promise.resolve({ data: { success: true } }))
-  ),
-  useFunctionsEmulator: jest.fn(),
-});
+const mockCallable = jest.fn(() =>
+  Promise.resolve({ data: { success: true } })
+);
+const mockHttpsCallable = jest.fn(() => mockCallable);
+
+const functions = jest.fn(() => ({
+  httpsCallable: mockHttpsCallable,
+  useEmulator: jest.fn(),
+}));
+
+// Expose for tests to configure
+functions.mockCallable = mockCallable;
+functions.mockHttpsCallable = mockHttpsCallable;
 
 export default functions;

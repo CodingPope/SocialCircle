@@ -44,6 +44,11 @@ import {
   removeSavedEventForUser,
 } from '../api/savedEventsService';
 import { useSavedEventsStore } from '../stores/savedEventsStore';
+import { toDate } from '../utils/dateUtils';
+import {
+  getEventCityLabel,
+  shouldMaskRsvpDetails,
+} from '../utils/rsvpVisibility';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 
@@ -139,6 +144,10 @@ export default function PostCard({ event, onPress, onJoinPress }) {
   const isOwner = useMemo(
     () => event.ownerId === user?.uid,
     [event.ownerId, user?.uid]
+  );
+  const maskRsvpDetails = useMemo(
+    () => shouldMaskRsvpDetails(event, user?.uid),
+    [event, user?.uid]
   );
 
   // Description: Show menu
@@ -457,18 +466,22 @@ export default function PostCard({ event, onPress, onJoinPress }) {
     () => (event.capacity ? attendeesCount / event.capacity : 0),
     [event.capacity, attendeesCount]
   );
-  const eventDateTime = useMemo(
-    () =>
-      event.date?.seconds
-        ? new Date(event.date.seconds * 1000).toLocaleString([], {
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: 'numeric',
-          })
-        : 'Date TBD',
-    [event.date]
-  );
+  const eventDateTime = useMemo(() => {
+    const date = toDate(event?.date);
+    if (!date) return 'Date TBD';
+    if (maskRsvpDetails) {
+      return date.toLocaleDateString([], {
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+    return date.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+    });
+  }, [event?.date, maskRsvpDetails]);
 
   // Description: Fetch address if not present
   useEffect(() => {
@@ -529,12 +542,18 @@ export default function PostCard({ event, onPress, onJoinPress }) {
 
   // Description: Truncate address for display
   const MAX_ADDRESS_LENGTH = 30;
+  const displayLocation = useMemo(() => {
+    if (!maskRsvpDetails) return resolvedAddress;
+    const city = getEventCityLabel(event, resolvedAddress);
+    return city || 'Location after RSVP';
+  }, [event, maskRsvpDetails, resolvedAddress]);
+
   const truncatedAddress = useMemo(
     () =>
-      resolvedAddress.length > MAX_ADDRESS_LENGTH
-        ? `${resolvedAddress.slice(0, MAX_ADDRESS_LENGTH)}...`
-        : resolvedAddress,
-    [resolvedAddress]
+      displayLocation.length > MAX_ADDRESS_LENGTH
+        ? `${displayLocation.slice(0, MAX_ADDRESS_LENGTH)}...`
+        : displayLocation,
+    [displayLocation]
   );
 
   // Description: RSVP badge style and text color
@@ -651,6 +670,7 @@ export default function PostCard({ event, onPress, onJoinPress }) {
                 shareEvent(event, {
                   surface: 'discover_card',
                   source: 'event_card',
+                  viewerId: user?.uid || null,
                 })
               }
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

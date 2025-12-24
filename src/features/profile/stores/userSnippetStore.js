@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../../../services/firebase/config';
+import logger from '../../../lib/logger';
 
 // Build a minimal snippet from a user doc
 function toSnippet(uid, user) {
@@ -15,15 +16,12 @@ function toSnippet(uid, user) {
   const photoURL =
     user?.profileImage || user?.avatarURL || user?.photoURL || null;
 
-  // Debug logging for missing photos
+  // Debug logging for missing photos (dev only)
   if (!photoURL && uid) {
-    console.log(`[UserSnippet] No photo for ${uid}:`, {
+    logger.debug('[UserSnippet] No photo for user', {
       hasProfileImage: !!user?.profileImage,
       hasAvatarURL: !!user?.avatarURL,
       hasPhotoURL: !!user?.photoURL,
-      profileImage: user?.profileImage?.substring?.(0, 50),
-      avatarURL: user?.avatarURL?.substring?.(0, 50),
-      photoURL: user?.photoURL?.substring?.(0, 50),
     });
   }
 
@@ -81,7 +79,7 @@ export const useUserSnippetStore = create(
         const cached = get().getMany(ids);
         const missing = ids.filter((u) => !cached.has(u));
 
-        console.log(
+        logger.debug(
           `[UserSnippet] ensureSnippets: ${ids.length} requested, ${cached.size} cached, ${missing.length} missing`
         );
 
@@ -140,7 +138,7 @@ export const useUserSnippetStore = create(
 
       // Clear entire cache (for debugging or when user data updates)
       clearCache: () => {
-        console.log('[UserSnippet] Clearing entire cache');
+        logger.debug('[UserSnippet] Clearing entire cache');
         set({ cache: {} });
       },
 
@@ -150,7 +148,7 @@ export const useUserSnippetStore = create(
         const next = { ...get().cache };
         delete next[uid];
         set({ cache: next });
-        console.log(`[UserSnippet] Cleared cache for user ${uid}`);
+        logger.debug('[UserSnippet] Cleared user cache');
       },
     }),
     {

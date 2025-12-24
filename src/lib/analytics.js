@@ -5,6 +5,7 @@
 // - Uses React Native Firebase for native mobile analytics
 
 import { functions, auth } from '../services/firebase/config';
+import logger from './logger';
 import {
   event as analyticsEvent,
   isEnabled as analyticsIsEnabled,
@@ -316,7 +317,7 @@ export async function track(name, payload = {}) {
         message?.slice(0, 30) || 'no-msg'
       }`;
       if (!loggedCallableWarnings.has(errorKey)) {
-        console.warn(
+        logger.warn(
           '[Analytics] Server tracking failed:',
           code || 'unknown',
           message?.slice(0, 80)
@@ -327,7 +328,7 @@ export async function track(name, payload = {}) {
   } catch (error) {
     // Never throw from analytics - it's best-effort
     if (!loggedCallableWarnings.has('track-outer-error')) {
-      console.warn('[Analytics] Unexpected error:', error?.message);
+      logger.warn('[Analytics] Unexpected error:', error?.message);
       loggedCallableWarnings.add('track-outer-error');
     }
   }

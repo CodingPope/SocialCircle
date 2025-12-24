@@ -1,18 +1,50 @@
 // src/services/firebase/config.js
 // Description: React Native Firebase configuration using native modules
-import { USE_FIREBASE_EMULATORS } from '@env';
+
 // React Native Firebase native modules
 import nativeAuth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import storage from '@react-native-firebase/storage';
+import appCheck from '@react-native-firebase/app-check';
 import logger from '../../lib/logger';
+import { Alert, Platform } from 'react-native';
+
+logger.debug('[Firebase] Initializing configuration');
+
+// Description: Safely import environment variables with fallback
+let USE_FIREBASE_EMULATORS = '0';
+let FIREBASE_EMULATOR_HOST = '';
+let FORCE_FIREBASE_APPCHECK_DEBUG = '0';
+try {
+  const envVars = require('@env');
+  if (envVars && envVars.USE_FIREBASE_EMULATORS) {
+    USE_FIREBASE_EMULATORS = envVars.USE_FIREBASE_EMULATORS;
+  }
+  if (envVars && envVars.FIREBASE_EMULATOR_HOST) {
+    FIREBASE_EMULATOR_HOST = envVars.FIREBASE_EMULATOR_HOST;
+  }
+  if (envVars && envVars.FORCE_FIREBASE_APPCHECK_DEBUG) {
+    FORCE_FIREBASE_APPCHECK_DEBUG = envVars.FORCE_FIREBASE_APPCHECK_DEBUG;
+  }
+  logger.debug('[Firebase] Environment variables loaded');
+} catch (error) {
+  // @env module not available in production builds, use default
+  logger.debug(
+    '[Firebase] Environment variables not available, using defaults'
+  );
+}
 
 let authInstance = null;
 
 const initializeAuthSingleton = () => {
-  if (authInstance) return authInstance;
+  logger.debug('[Firebase] Initializing auth singleton');
+  if (authInstance) {
+    logger.debug('[Firebase] Auth instance already exists');
+    return authInstance;
+  }
   if (typeof nativeAuth !== 'function') {
+    console.error('[Firebase Auth] Native module not linked');
     logger.error(
       '[Firebase Auth] Native module not linked. @react-native-firebase/auth is required.'
     );
@@ -20,7 +52,12 @@ const initializeAuthSingleton = () => {
   }
   try {
     authInstance = nativeAuth();
+    logger.debug('[Firebase] Auth instance created successfully');
   } catch (error) {
+    logger.error(
+      '[Firebase Auth] Failed to initialize:',
+      error?.message || 'Unknown error'
+    );
     logger.error(
       '[Firebase Auth] Failed to initialize default instance:',
       error?.message || error
@@ -84,25 +121,33 @@ initializeAuthSingleton();
 
 // Dev helpers: optional emulator support
 if (__DEV__ && USE_FIREBASE_EMULATORS === '1') {
+  const host =
+    FIREBASE_EMULATOR_HOST ||
+    (Platform.OS === 'android' ? '10.0.2.2' : 'localhost');
+  const authHost = host.startsWith('http') ? host : `http://${host}`;
   try {
-    auth().useEmulator('http://localhost:9099');
+    auth().useEmulator(`${authHost}:9099`);
+    logger.info(`[Firebase] Auth emulator: ${authHost}:9099`);
   } catch (e) {}
   try {
-    firestore().useEmulator('localhost', 8080);
+    firestore().useEmulator(host, 8080);
+    logger.info(`[Firebase] Firestore emulator: ${host}:8080`);
   } catch (e) {}
   try {
-    functions().useEmulator('localhost', 5001);
+    functions().useEmulator(host, 5001);
+    logger.info(`[Firebase] Functions emulator: ${host}:5001`);
   } catch (e) {}
   try {
-    storage().useEmulator('localhost', 9199);
+    storage().useEmulator(host, 9199);
+    logger.info(`[Firebase] Storage emulator: ${host}:9199`);
   } catch (e) {}
 }
 
 // Module singletons
 const firestoreInstance = firestore();
+const DEFAULT_FUNCTION_REGION = 'us-central1';
 const functionsInstance = functions();
 const storageInstance = storage();
-const DEFAULT_FUNCTION_REGION = 'us-central1';
 
 const getProjectId = () => {
   try {
@@ -143,7 +188,8 @@ const getCurrentFirebaseUser = () => {
 };
 
 // Description: Wait for auth to be initialized with a user
-const waitForAuthUser = async (maxWaitMs = 3000) => {
+// Production timeout: 5s to accommodate slower networks and cold starts
+const waitForAuthUser = async (maxWaitMs = 5000) => {
   const startTime = Date.now();
 
   while (Date.now() - startTime < maxWaitMs) {
@@ -187,6 +233,7 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
   }
 
   let idToken;
+  let appCheckToken = null;
   try {
     // Description: Force refresh token with forceRefresh=true
     idToken = await user.getIdToken(true);
@@ -227,18 +274,37 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
     throw new Error('UNAUTHENTICATED: Authentication token refresh failed');
   }
 
+  // Description: Try to get an App Check token so the manual request passes enforceAppCheck
+  try {
+    const tokenResult = await appCheck().getToken(true);
+    if (tokenResult?.token) {
+      appCheckToken = tokenResult.token;
+    }
+  } catch (tokenErr) {
+    logger.warn(
+      `[Firebase] Failed to get App Check token for ${name}:`,
+      tokenErr?.message || tokenErr
+    );
+  }
+
+  // Ensure we have a projectId for manual fetch URL
   const projectId = getProjectId();
   const url = `https://${DEFAULT_FUNCTION_REGION}-${projectId}.cloudfunctions.net/${name}`;
 
   logger.debug(`[Firebase] Manual fetch to: ${url}`);
 
   try {
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    };
+    if (appCheckToken) {
+      headers['X-Firebase-AppCheck'] = appCheckToken;
+    }
+
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
+      headers,
       body: JSON.stringify({ data: payload ?? null }),
     });
 
@@ -278,7 +344,7 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
       `[Firebase] Callable retry failed for ${name}:`,
       fetchError?.message || fetchError
     );
-    throw originalError;
+    throw fetchError;
   }
 };
 
@@ -292,7 +358,7 @@ const callCallable = async (name, payload) => {
       logger.debug(
         `[Firebase] No immediate user for ${name}, waiting for auth...`
       );
-      user = await waitForAuthUser(2000);
+      user = await waitForAuthUser(5000);
     }
 
     if (!user) {
@@ -303,17 +369,35 @@ const callCallable = async (name, payload) => {
     }
 
     if (!user.uid) {
-      logger.warn(
-        `[Firebase] User exists but has no uid for callable ${name}`
-      );
+      logger.warn(`[Firebase] User exists but has no uid for callable ${name}`);
       throw new Error('UNAUTHENTICATED: User authentication incomplete');
+    }
+
+    try {
+      // Ensure auth token is fresh before calling a callable.
+      await user.getIdToken(true);
+    } catch (tokenError) {
+      logger.warn(
+        `[Firebase] Failed to refresh ID token before ${name}:`,
+        tokenError?.message || tokenError
+      );
+    }
+
+    try {
+      // Preflight App Check token so callable has a valid token when enforced.
+      await appCheck().getToken(true);
+    } catch (tokenError) {
+      logger.warn(
+        `[Firebase] Failed to prefetch App Check token before ${name}:`,
+        tokenError?.message || tokenError
+      );
     }
 
     logger.debug(`[Firebase] Calling ${name} with user ${user.uid}`);
 
-    // Description: Get fresh callable instance to ensure current auth context
-    // Using functions() directly instead of cached functionsInstance
-    const fn = functions().httpsCallable(name);
+    // Description: Use regioned functions instance to ensure consistency with manual retry
+    // Always use us-central1 region for all callable functions
+    const fn = functionsInstance.httpsCallable(name);
 
     // Description: Attempt the callable - SDK handles auth automatically
     const res = await fn(payload);
@@ -339,6 +423,10 @@ const callCallable = async (name, payload) => {
   }
 };
 
+// Description: Export callable helper so feature modules can benefit from auth wait/retry logic
+export const callFirebaseFunction = (name, payload) =>
+  callCallable(name, payload);
+
 // Description: Disable App Verification for development (fixes auth/internal-error)
 // This is required for iOS simulator and development builds
 // Reference: https://rnfirebase.io/auth/usage#disable-app-verification
@@ -356,12 +444,162 @@ if (__DEV__) {
   }
 }
 
+// Description: Initialize Firebase App Check for production security
+// Uses debug provider in dev, DeviceCheck (iOS) / Play Integrity (Android) in production
+// Reference: https://rnfirebase.io/app-check/usage
+let lastAlertedAppCheckToken = null;
+
+const logAppCheckDebugToken = (source, token) => {
+  if (!token) {
+    logger.warn(`[Firebase App Check] ${source} returned an empty token`);
+    return;
+  }
+
+  const lines = [
+    '🔑 ═══════════════════════════════════════════════════════════',
+    `🔑 APP CHECK DEBUG TOKEN (${source})`,
+    `🔑 ${token}`,
+    '🔑 ═══════════════════════════════════════════════════════════',
+    '🔑 Register this token at:',
+    '🔑 https://console.firebase.google.com/project/social-scene1/appcheck/apps',
+    '🔑 ═══════════════════════════════════════════════════════════',
+  ];
+
+  lines.forEach((line) => console.log(line));
+  logger.info(`[Firebase App Check] Debug token (${source}): ${token}`);
+
+  try {
+    if (lastAlertedAppCheckToken !== token && Alert?.alert) {
+      lastAlertedAppCheckToken = token;
+      Alert.alert('Firebase App Check Debug Token', `(${source})\n${token}`, [
+        {
+          text: 'Close',
+          style: 'cancel',
+        },
+      ]);
+    }
+  } catch (alertError) {
+    console.log(
+      '[Firebase App Check] Unable to show token alert:',
+      alertError?.message || alertError
+    );
+  }
+};
+
+const isDevBuild = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
+const shouldUseDebugAppCheck =
+  isDevBuild ||
+  FORCE_FIREBASE_APPCHECK_DEBUG === '1' ||
+  USE_FIREBASE_EMULATORS === '1';
+
+const scheduleDebugTokenRequest = (reason, delayMs = 0) => {
+  setTimeout(() => {
+    try {
+      console.log(
+        `🔐 [Firebase App Check] Requesting debug token (${reason})...`
+      );
+      const request = appCheck().getToken(true);
+      if (!request?.then) {
+        console.log(
+          '🔑 [Firebase App Check] getToken returned non-promise value:',
+          request
+        );
+        logAppCheckDebugToken(`getToken(${reason})`, request?.token || request);
+        return;
+      }
+      request
+        .then((result) => {
+          console.log(
+            `🔐 [Firebase App Check] getToken resolved (${reason}):`,
+            result
+          );
+          logAppCheckDebugToken(`getToken(${reason})`, result?.token);
+        })
+        .catch((err) => {
+          console.log(`🔑 Error getting App Check token (${reason}):`, err);
+        });
+    } catch (err) {
+      console.log(`🔑 Exception requesting App Check token (${reason}):`, err);
+    }
+  }, delayMs);
+};
+
+if (shouldUseDebugAppCheck) {
+  try {
+    const debugModeSource = isDevBuild ? 'dev build' : 'forced override';
+    console.log(
+      `🔐 [Firebase App Check] Debug provider enabled (${debugModeSource})`
+    );
+    const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
+    rnfbProvider.configure({
+      android: {
+        provider: 'debug',
+        debugToken: process.env.FIREBASE_APPCHECK_DEBUG_TOKEN_ANDROID || 'auto',
+      },
+      apple: {
+        provider: 'debug',
+        debugToken: process.env.FIREBASE_APPCHECK_DEBUG_TOKEN_IOS || 'auto',
+      },
+    });
+    appCheck().initializeAppCheck({
+      provider: rnfbProvider,
+      isTokenAutoRefreshEnabled: true,
+    });
+    logger.info(
+      '🔐 [Firebase App Check] Initialized with debug provider (DEV)'
+    );
+
+    // Description: Force print the debug token for registration in Firebase Console
+    scheduleDebugTokenRequest('initial');
+    scheduleDebugTokenRequest('retry-2s', 2000);
+    scheduleDebugTokenRequest('retry-10s', 10000);
+    appCheck().onTokenChanged((tokenResult) => {
+      console.log('🔐 [Firebase App Check] onTokenChanged fired:', tokenResult);
+      if (tokenResult?.token) {
+        logAppCheckDebugToken('onTokenChanged', tokenResult.token);
+      }
+    });
+  } catch (error) {
+    logger.warn(
+      '[Firebase App Check] Failed to initialize debug provider:',
+      error
+    );
+  }
+} else {
+  try {
+    console.log('🔐 [Firebase App Check] Using native providers (prod mode)');
+    const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
+    rnfbProvider.configure({
+      android: {
+        provider: 'playIntegrity',
+      },
+      apple: {
+        provider: 'deviceCheck',
+      },
+    });
+    appCheck().initializeAppCheck({
+      provider: rnfbProvider,
+      isTokenAutoRefreshEnabled: true,
+    });
+    logger.info(
+      '🔐 [Firebase App Check] Initialized with native providers (PROD)'
+    );
+  } catch (error) {
+    logger.error(
+      '[Firebase App Check] Failed to initialize in production:',
+      error
+    );
+  }
+}
+
 // Description: Enable Firestore offline persistence (required for React Native)
 // This must be called before any Firestore operations
 try {
   firestoreInstance.settings({
     persistence: true, // Enable offline persistence
-    cacheSizeBytes: firestore.CACHE_SIZE_UNLIMITED, // Optional: unlimited cache
+    // Set 50MB cache limit (instead of unlimited) to prevent unbounded growth
+    // 50MB supports ~5,000-10,000 event documents with images and user data
+    cacheSizeBytes: __DEV__ ? firestore.CACHE_SIZE_UNLIMITED : 50 * 1024 * 1024,
   });
 } catch (error) {
   // Settings can only be called once, so ignore if already set
@@ -383,10 +621,7 @@ export const serverTimestamp = () => firestore.FieldValue.serverTimestamp();
 let loggedTimestampFallback = false;
 export const getTimestampNow = () => {
   try {
-    if (
-      firestore.Timestamp &&
-      typeof firestore.Timestamp.now === 'function'
-    ) {
+    if (firestore.Timestamp && typeof firestore.Timestamp.now === 'function') {
       return firestore.Timestamp.now();
     }
   } catch (error) {
@@ -403,9 +638,7 @@ export const getTimestampNow = () => {
     typeof firestore.Timestamp.fromDate === 'function'
   ) {
     if (!loggedTimestampFallback) {
-      logger.warn(
-        '[Firebase] Timestamp.now missing, using fromDate fallback'
-      );
+      logger.warn('[Firebase] Timestamp.now missing, using fromDate fallback');
       loggedTimestampFallback = true;
     }
     return firestore.Timestamp.fromDate(new Date());
@@ -479,7 +712,10 @@ export const uploadProfileImage = async (uid, imageFile) => {
     logger.debug('[uploadProfileImage] Upload complete');
     return downloadURL;
   } catch (error) {
-    logger.error('[uploadProfileImage] Upload failed:', error?.message || error);
+    logger.error(
+      '[uploadProfileImage] Upload failed:',
+      error?.message || error
+    );
     throw error;
   }
 };
@@ -516,77 +752,39 @@ export const updateEventCount = async (uid) => {
   }
 };
 
-// Description: Add a friend (mutual)
+// Description: Add a friend (mutual) via server callable
 export const addFriend = async (currentUid, targetUid) => {
-  // Add each user to the other's friends array
-  await db
-    .collection('users')
-    .doc(currentUid)
-    .update({
-      friends: firestore.FieldValue.arrayUnion(targetUid),
-    });
-  await db
-    .collection('users')
-    .doc(targetUid)
-    .update({
-      friends: firestore.FieldValue.arrayUnion(currentUid),
-    });
+  const addFriendFn = functionsInstance.httpsCallable('addFriend');
+  const res = await addFriendFn({ targetUid });
+  return res?.data || { ok: true };
 };
 
-// Description: Remove a friend (mutual)
+// Description: Remove a friend (mutual) via server callable
 export const removeFriend = async (currentUid, targetUid) => {
-  await db
-    .collection('users')
-    .doc(currentUid)
-    .update({
-      friends: firestore.FieldValue.arrayRemove(targetUid),
-    });
-  await db
-    .collection('users')
-    .doc(targetUid)
-    .update({
-      friends: firestore.FieldValue.arrayRemove(currentUid),
-    });
+  const removeFriendFn = functionsInstance.httpsCallable('removeFriend');
+  const res = await removeFriendFn({ targetUid });
+  return res?.data || { ok: true };
 };
 
-// Description: Request to follow (private profile)
+// Description: Request to follow (private profile) via server callable
 export const requestFollow = async (currentUid, targetUid) => {
-  // Description: Add currentUid to target user's followRequests array
-  await db
-    .collection('users')
-    .doc(targetUid)
-    .update({
-      followRequests: firestore.FieldValue.arrayUnion(currentUid),
-    });
+  const requestFollowFn = functionsInstance.httpsCallable('requestFollow');
+  const res = await requestFollowFn({ targetUid });
+  return res?.data || { ok: true };
 };
 
-// Description: Approve follow request
+// Description: Approve follow request via server callable
 export const approveFollowRequest = async (currentUid, requesterUid) => {
-  // Description: Remove requesterUid from followRequests, add to followers/following
-  await db
-    .collection('users')
-    .doc(currentUid)
-    .update({
-      followRequests: firestore.FieldValue.arrayRemove(requesterUid),
-      followers: firestore.FieldValue.arrayUnion(requesterUid),
-    });
-  await db
-    .collection('users')
-    .doc(requesterUid)
-    .update({
-      following: firestore.FieldValue.arrayUnion(currentUid),
-    });
+  const approveFn = functionsInstance.httpsCallable('approveFollowRequest');
+  const res = await approveFn({ requesterUid });
+  return res?.data || { ok: true };
 };
 
-// Description: Deny follow request
+// Description: Deny follow request via server callable
 export const denyFollowRequest = async (currentUid, requesterUid) => {
-  // Description: Remove requesterUid from followRequests
-  await db
-    .collection('users')
-    .doc(currentUid)
-    .update({
-      followRequests: firestore.FieldValue.arrayRemove(requesterUid),
-    });
+  const denyFn = functionsInstance.httpsCallable('denyFollowRequest');
+  const res = await denyFn({ requesterUid });
+  return res?.data || { ok: true };
 };
 
 // Description: Follow a user (one-way, for public profiles)
@@ -681,31 +879,11 @@ export const sendNotification = async (type, recipientId, data = {}) => {
   }
 };
 
-// Description: Update user rating
+// Description: Update user rating via server callable (enforces mutual-event rule + prevents gaming)
 export const updateUserRating = async (uid, raterUid, rating) => {
-  const userRef = db.collection('users').doc(uid);
-  const userSnapshot = await userRef.get();
-
-  if (userSnapshot.exists) {
-    const userData = userSnapshot.data();
-    const ratings = userData.ratings || {}; // Ensure ratings map exists
-
-    // Update the ratings map
-    ratings[raterUid] = rating;
-
-    // Calculate the new average rating
-    const totalRatings = Object.values(ratings);
-    const newRatingCount = totalRatings.length;
-    const newRating =
-      totalRatings.reduce((sum, r) => sum + r, 0) / newRatingCount;
-
-    // Update Firestore with the new rating and rating count
-    await userRef.update({
-      ratings, // Save the updated ratings map
-      rating: newRating,
-      ratingCount: newRatingCount,
-    });
-  }
+  const rateUserFn = functionsInstance.httpsCallable('rateUser');
+  const res = await rateUserFn({ targetUid: uid, rating });
+  return res?.data || { ok: true };
 };
 
 // Description: Delete an event (post) - call server-side callable to perform soft-delete with proper permissions
@@ -726,10 +904,7 @@ export const deleteEvent = async (eventId, userId) => {
     if (res && res.data) return res.data;
     return { ok: true };
   } catch (error) {
-    logger.error(
-      'Callable deleteEvent failed, falling back to client update if allowed:',
-      error.message || error
-    );
+    logger.error('Callable deleteEvent failed:', error.message || error);
 
     // If the error is explicitly unauthenticated, bubble a clearer error
     if (
@@ -743,27 +918,7 @@ export const deleteEvent = async (eventId, userId) => {
       throw e;
     }
 
-    // Try legacy client-side soft-delete as fallback (may be rejected by rules)
-    try {
-      const eventRef = db.collection('events').doc(eventId);
-      await eventRef.update({
-        isDeleted: true,
-        deletedAt: new Date(),
-      });
-      if (userId) {
-        await db
-          .collection('users')
-          .doc(userId)
-          .update({
-            createdEvents: firestore.FieldValue.arrayRemove(eventId),
-          });
-      }
-      await updateEventCount(userId).catch(() => {});
-      return { ok: true, fallback: true };
-    } catch (err) {
-      logger.error('Fallback client delete failed:', err.message || err);
-      throw err;
-    }
+    throw error;
   }
 };
 
@@ -793,23 +948,6 @@ export const reportContent = async (
     throw error;
   }
 };
-
-// Description: Soft delete an event
-export async function softDeleteEvent(eventId) {
-  try {
-    const eventRef = db.collection('events').doc(eventId);
-    const snapshot = await eventRef.get();
-    if (!snapshot.exists) throw new Error('Event does not exist');
-
-    await eventRef.update({
-      isDeleted: true,
-      deletedAt: new Date(),
-    });
-  } catch (error) {
-    logger.error('Error soft-deleting event:', error);
-    throw error;
-  }
-}
 
 // Description: Get user events by IDs (handles batching for Firestore 'in' query limit)
 export async function getUserEventsByIds(eventIds) {

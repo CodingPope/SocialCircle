@@ -18,11 +18,17 @@ import {
   where,
 } from '../../../services/firebase/firestoreCompat';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { auth, db, storage, getTimestampNow } from '../../../services/firebase/config';
+import {
+  auth,
+  db,
+  storage,
+  getTimestampNow,
+} from '../../../services/firebase/config';
 import {
   interpretStorageError,
   logStorageDiagnostic,
 } from '../../../services/firebase/storageUtils';
+import logger from '../../../lib/logger';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_TEXT_LENGTH = 2000;
@@ -75,7 +81,7 @@ async function compressImageAsync(uri) {
       thumbnail: thumbnailResult,
     };
   } catch (error) {
-    console.warn('compressImageAsync failed, using original image', error);
+    logger.warn('compressImageAsync failed, using original image', error);
     return null;
   }
 }
@@ -206,7 +212,7 @@ export async function createInterestPost({ content, interestId, media }) {
         lastInterestPostAt: serverTimestamp(),
       });
     } catch (bgErr) {
-      console.warn('Background post-create task failed (non-critical):', bgErr);
+      logger.warn('Background post-create task failed (non-critical):', bgErr);
     }
   })();
 

@@ -58,7 +58,9 @@ export default function InterestPostCard({
   const [commentText, setCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [post, setPost] = useState(initialPost);
-  const [commentCount, setCommentCount] = useState(initialPost?.commentCount || 0);
+  const [commentCount, setCommentCount] = useState(
+    initialPost?.commentCount || 0
+  );
   const [isDeleting, setIsDeleting] = useState(false);
   const [isLocallyDeleted, setIsLocallyDeleted] = useState(
     initialPost?.isDeleted === true
@@ -279,10 +281,6 @@ export default function InterestPostCard({
             <Ionicons name='share-social-outline' size={16} color='#2563EB' />
             <Text style={styles.shareText}>Share</Text>
           </TouchableOpacity>
-          <View style={styles.likePlaceholder}>
-            <Ionicons name='heart-outline' size={16} color='#c7c7cc' />
-            <Text style={styles.likePlaceholderText}>Coming soon</Text>
-          </View>
         </View>
 
         {commentVisible && enableInlineComposer && (

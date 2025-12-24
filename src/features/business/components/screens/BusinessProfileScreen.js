@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useCallback,
 } from 'react';
+import logger from '../../../../lib/logger';
 import {
   View,
   Text,
@@ -56,7 +57,8 @@ export default function BusinessProfileScreen() {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }, []);
   const primaryLocation = useMemo(
-    () => (Array.isArray(locations) && locations.length > 0 ? locations[0] : null),
+    () =>
+      Array.isArray(locations) && locations.length > 0 ? locations[0] : null,
     [locations]
   );
   const { upcoming: upcomingEvents, past: pastEvents } = useMemo(() => {
@@ -93,20 +95,18 @@ export default function BusinessProfileScreen() {
         : [],
     [business?.interests]
   );
-  const hasPolicySection =
-    !!(
-      business?.houseRules ||
-      interestChips.length > 0 ||
-      (business?.ageRestriction && business.ageRestriction !== 'none') ||
-      (business?.genderRestriction && business.genderRestriction !== 'none')
-    );
-  const showDetailsSection =
-    !!(
-      business?.legalName ||
-      business?.status ||
-      business?.type ||
-      typeof business?.rating === 'number'
-    );
+  const hasPolicySection = !!(
+    business?.houseRules ||
+    interestChips.length > 0 ||
+    (business?.ageRestriction && business.ageRestriction !== 'none') ||
+    (business?.genderRestriction && business.genderRestriction !== 'none')
+  );
+  const showDetailsSection = !!(
+    business?.legalName ||
+    business?.status ||
+    business?.type ||
+    typeof business?.rating === 'number'
+  );
 
   // Sidebar state
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -169,9 +169,9 @@ export default function BusinessProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              console.log('🔴 Signing out from business profile...');
+              logger.debug('🔴 Signing out from business profile...');
               await auth().signOut();
-              console.log('✅ Sign out successful');
+              logger.debug('✅ Sign out successful');
               closeSidebar();
               setTimeout(() => {
                 navigation.reset({ index: 0, routes: [{ name: 'Auth' }] });
@@ -193,12 +193,12 @@ export default function BusinessProfileScreen() {
     try {
       const currentUser = auth().currentUser;
       if (!currentUser?.uid) {
-        console.log('⚠️ No authenticated user in BusinessProfileScreen');
+        logger.debug('⚠️ No authenticated user in BusinessProfileScreen');
         setLoading(false);
         return;
       }
 
-      console.log('🔍 Fetching business data for user:', currentUser.uid);
+      logger.debug('🔍 Fetching business data for authenticated user');
 
       const bizSnap = await db
         .collection('businesses')
@@ -209,7 +209,7 @@ export default function BusinessProfileScreen() {
       if (!bizSnap.empty) {
         const bizDoc = bizSnap.docs[0];
         const bizData = { id: bizDoc.id, ...bizDoc.data() };
-        console.log('✅ Business found:', bizData.displayName);
+        logger.debug('✅ Business found:', bizData.displayName);
         setBusiness(bizData);
         setFetchAttempts(0); // Reset attempts on success
 
@@ -227,7 +227,7 @@ export default function BusinessProfileScreen() {
             ...(doc.data() || {}),
           }));
         } catch (locErr) {
-          console.warn(
+          logger.warn(
             '⚠️ Failed to load business locations:',
             locErr?.message || locErr
           );
@@ -274,7 +274,7 @@ export default function BusinessProfileScreen() {
           pastEvents: pastCount,
         });
       } else {
-        console.log(
+        logger.debug(
           '⚠️ No business profile found for user (attempt',
           fetchAttempts + 1,
           ')'
@@ -284,7 +284,7 @@ export default function BusinessProfileScreen() {
         // If this is the first attempt, try again after a delay
         // (in case Firestore write is still propagating)
         if (fetchAttempts < 1) {
-          console.log('🔄 Retrying in 2 seconds...');
+          logger.debug('🔄 Retrying in 2 seconds...');
           setTimeout(() => {
             if (!sidebarClosing.current) {
               fetchBusinessData();
@@ -317,7 +317,7 @@ export default function BusinessProfileScreen() {
     const currentUser = auth().currentUser;
     // Only redirect if we've tried multiple times and still no business found
     if (!loading && !business && currentUser?.uid && fetchAttempts >= 2) {
-      console.warn(
+      logger.warn(
         '⚠️ Business profile not found after multiple attempts, redirecting to onboarding...'
       );
       Alert.alert(
@@ -615,19 +615,19 @@ export default function BusinessProfileScreen() {
 
         {primaryLocation?.hours &&
           typeof primaryLocation.hours === 'object' && (
-          <View style={styles.hoursSection}>
-            <Text style={styles.sectionTitle}>Hours</Text>
-            <View style={styles.hoursCard}>
-              {Object.entries(primaryLocation.hours).map(([day, config]) => (
-                <HourRow
-                  key={day}
-                  day={day}
-                  value={formatHoursRange(config)}
-                />
-              ))}
+            <View style={styles.hoursSection}>
+              <Text style={styles.sectionTitle}>Hours</Text>
+              <View style={styles.hoursCard}>
+                {Object.entries(primaryLocation.hours).map(([day, config]) => (
+                  <HourRow
+                    key={day}
+                    day={day}
+                    value={formatHoursRange(config)}
+                  />
+                ))}
+              </View>
             </View>
-          </View>
-        )}
+          )}
 
         {/* Quick Actions */}
         <View style={styles.actionsSection}>

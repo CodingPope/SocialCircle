@@ -1,12 +1,20 @@
+// Mock AsyncStorage first
 jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(() => Promise.resolve()),
   getItem: jest.fn(() => Promise.resolve(null)),
   removeItem: jest.fn(() => Promise.resolve()),
 }));
 
-jest.mock('../../src/lib/ttlCache', () => ({
-  getWithTTL: jest.fn(async (_key, fetcher, _ttl) => await fetcher()),
-}));
+// Mock ttlCache module - must use factory function that returns the mock
+jest.mock('../../src/features/events/utils/ttlCache', () => {
+  const mockGetWithTTL = jest.fn(
+    async (_key, fetcher, _ttl) => await fetcher()
+  );
+  return {
+    getWithTTL: mockGetWithTTL,
+    __mockGetWithTTL: mockGetWithTTL, // expose for assertions
+  };
+});
 
 jest.mock('../../src/services/firebase/config', () => {
   const createQuery = () => {
@@ -30,10 +38,14 @@ jest.mock('geofire-common', () => ({
   distanceBetween: jest.fn(() => 0),
 }));
 
-import { getWithTTL } from '../../src/lib/ttlCache';
 import { fetchHotEvents } from '../../src/services/discoveryQueries';
+import { __mockGetWithTTL as mockGetWithTTL } from '../../src/features/events/utils/ttlCache';
 
 describe('discovery TTL cache layer', () => {
+  beforeEach(() => {
+    mockGetWithTTL.mockClear();
+  });
+
   it('wraps hot fetch in getWithTTL', async () => {
     const res = await fetchHotEvents(
       ['Music'],
@@ -41,6 +53,6 @@ describe('discovery TTL cache layer', () => {
       1000
     );
     expect(Array.isArray(res)).toBe(true);
-    expect(getWithTTL).toHaveBeenCalled();
+    expect(mockGetWithTTL).toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@ import { serverTimestamp } from '../services/firebase/config';
 import { mergeUserFields } from '../features/profile/api/userService';
 import { event as analyticsEvent } from './analyticsService';
 import { trackSessionStart } from '../lib/analytics';
+import logger from '../lib/logger';
 
 const STORAGE_KEY_PREFIX = 'session:last:uid:';
 
@@ -30,7 +31,7 @@ export async function recordDailySessionHeartbeat(user) {
     const lastRecorded = await AsyncStorage.getItem(storageKey);
     if (lastRecorded === today) shouldRecord = false;
   } catch (err) {
-    console.warn('sessionHeartbeat: failed to read cache', err?.message || err);
+    logger.warn('sessionHeartbeat: failed to read cache', err?.message || err);
   }
 
   if (!shouldRecord) return;
@@ -38,7 +39,7 @@ export async function recordDailySessionHeartbeat(user) {
   try {
     await AsyncStorage.setItem(storageKey, today);
   } catch (err) {
-    console.warn('sessionHeartbeat: failed to write cache', err?.message || err);
+    logger.warn('sessionHeartbeat: failed to write cache', err?.message || err);
   }
 
   try {
@@ -47,11 +48,17 @@ export async function recordDailySessionHeartbeat(user) {
       lastSessionCadence: 'daily',
     });
   } catch (err) {
-    console.warn('sessionHeartbeat: failed to update user doc', err?.message || err);
+    logger.warn(
+      'sessionHeartbeat: failed to update user doc',
+      err?.message || err
+    );
   }
 
   try {
-    await analyticsEvent('session_start', { cadence: 'daily', trigger: 'auth_resolved' });
+    await analyticsEvent('session_start', {
+      cadence: 'daily',
+      trigger: 'auth_resolved',
+    });
   } catch {}
 
   try {

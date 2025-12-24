@@ -9,6 +9,19 @@ export function toMillis(value) {
   return 0;
 }
 
+export function toDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  if (typeof value?.seconds === 'number') return new Date(value.seconds * 1000);
+  if (typeof value === 'number') return new Date(value);
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
 export function getTimelineTimestamp(item) {
   if (!item) return 0;
   if (item.type === 'post') return toMillis(item.post?.createdAt);

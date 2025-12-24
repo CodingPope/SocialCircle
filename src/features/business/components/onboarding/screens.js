@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import logger from '../../../../lib/logger';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -613,7 +614,7 @@ export function LocationScreen() {
         Alert.alert('Not found', 'We could not locate that address.');
       }
     } catch (err) {
-      console.warn('Geocode error', err);
+      logger.warn('Geocode error', err);
       Alert.alert('Error', 'Unable to verify that address.');
     } finally {
       setVerifying(false);
@@ -651,7 +652,7 @@ export function LocationScreen() {
         'We used your current location as the business address.'
       );
     } catch (err) {
-      console.warn('Location error', err);
+      logger.warn('Location error', err);
       Alert.alert('Error', 'Unable to fetch your current location.');
     } finally {
       setVerifying(false);

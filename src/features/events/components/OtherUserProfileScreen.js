@@ -702,6 +702,7 @@ export default function OtherUserProfileScreen({ route, navigation }) {
     await shareEvent(item, {
       surface: 'profile',
       source: 'profile_timeline',
+      viewerId: currentUser?.uid || null,
     });
   };
 

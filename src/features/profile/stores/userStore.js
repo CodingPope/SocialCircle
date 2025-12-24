@@ -1,7 +1,12 @@
 // Description: Zustand store for user authentication and profile
 import { create } from 'zustand';
-import { auth, db, getUserData, updateUserData } from '../../../services/firebase/config';
-import { findSoftDeletedUserByEmail, reactivateUser } from '../api/userService';
+import {
+  auth,
+  db,
+  getUserData,
+  updateUserData,
+} from '../../../services/firebase/config';
+import { findSoftDeletedUserByEmail, reactivateUser, mergeUserFields } from '../api/userService';
 import { navigationRef, resetRoot } from '../../../navigation/RootNavigation';
 import { getNextOnboardingStep } from '../../auth/utils/onboardingRouter';
 
@@ -117,6 +122,17 @@ export const useUserStore = create((set) => ({
   logout: async () => {
     set({ loading: true });
     try {
+      // Clear device token proactively to avoid the device remaining attached to this account
+      try {
+        const current = useUserStore.getState().user;
+        if (current && current.uid) {
+          // Best-effort: clear token while still authenticated
+          await mergeUserFields(current.uid, { deviceToken: null, pushOptIn: false });
+        }
+      } catch (e) {
+        // Non-fatal; continue with sign out
+        console.warn('[logout] failed to clear device token:', e?.message || e);
+      }
       // Pause Firestore network first to prevent transient permission-denied callbacks
       try {
         await db.disableNetwork();
@@ -180,27 +196,55 @@ export const useUserStore = create((set) => ({
 
   // Listen to auth state changes (for auto-login)
   listenAuthState: () => {
+    console.log('[UserStore] Starting auth state listener');
     set({ loading: true });
-    auth().onAuthStateChanged(async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          await db.enableNetwork();
-        } catch {}
-        const userData = await getUserData(firebaseUser.uid);
-        const complete = getNextOnboardingStep(userData) === null;
-        set({
-          user: {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            ...userData,
-          },
-          loading: false,
-          profileComplete: complete,
+
+    try {
+      const unsubscribe = auth().onAuthStateChanged(async (firebaseUser) => {
+        console.log('[UserStore] Auth state changed:', {
+          hasUser: !!firebaseUser,
+          uid: firebaseUser?.uid,
         });
-      } else {
-        set({ user: null, loading: false, profileComplete: false });
-        // Do not reset navigation here; AppNavigator will render AuthStack when user is null
-      }
-    });
+
+        if (firebaseUser) {
+          try {
+            await db.enableNetwork();
+          } catch (err) {
+            console.warn('[UserStore] Failed to enable network:', err);
+          }
+
+          try {
+            const userData = await getUserData(firebaseUser.uid);
+            console.log('[UserStore] User data fetched:', {
+              hasData: !!userData,
+            });
+
+            const complete = getNextOnboardingStep(userData) === null;
+            set({
+              user: {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                ...userData,
+              },
+              loading: false,
+              profileComplete: complete,
+            });
+          } catch (err) {
+            console.error('[UserStore] Failed to fetch user data:', err);
+            set({ user: null, loading: false, profileComplete: false });
+          }
+        } else {
+          console.log('[UserStore] No user signed in');
+          set({ user: null, loading: false, profileComplete: false });
+          // Do not reset navigation here; AppNavigator will render AuthStack when user is null
+        }
+      });
+
+      return unsubscribe;
+    } catch (err) {
+      console.error('[UserStore] Failed to set up auth listener:', err);
+      set({ loading: false });
+      throw err;
+    }
   },
 }));

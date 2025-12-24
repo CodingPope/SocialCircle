@@ -18,6 +18,15 @@ admin.initializeApp();
 const db = admin.firestore(); // convenience
 const FieldValue = admin.firestore.FieldValue;
 const projectId = process.env.GCLOUD_PROJECT;
+const ENFORCE_APPCHECK =
+  process.env.ENFORCE_APPCHECK === '1' ||
+  process.env.ENFORCE_APPCHECK === 'true';
+const JOIN_CALLABLE_OPTIONS = Object.freeze({
+  region: 'us-central1',
+  memory: '256MiB',
+  timeoutSeconds: 60,
+  enforceAppCheck: ENFORCE_APPCHECK,
+});
 
 const SHARE_CONFIG = Object.freeze({
   apiKey:
@@ -125,8 +134,7 @@ function buildUserDisplayName(user = {}) {
   if (typeof user.name === 'string' && user.name.trim()) {
     return user.name.trim();
   }
-  const first =
-    typeof user.firstName === 'string' ? user.firstName.trim() : '';
+  const first = typeof user.firstName === 'string' ? user.firstName.trim() : '';
   const last = typeof user.lastName === 'string' ? user.lastName.trim() : '';
   const combined = [first, last].filter(Boolean).join(' ');
   return combined || 'Someone';
@@ -596,6 +604,64 @@ exports.sendPush = onCall(async (req) => {
   return { ok: true, sent: expoTokens.length };
 });
 
+// Callable: Claim a device token for the authenticated user.
+// This will clear the same token from any other user documents (to avoid cross-account delivery)
+// and set it on the requesting user's document in an atomic/batched manner.
+exports.claimDeviceToken = onCall(
+  {
+    region: 'us-central1',
+    memory: '128MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const callerUid = req.auth?.uid || null;
+    if (!callerUid) throw new HttpsError('unauthenticated', 'Sign in required');
+
+    const token = (req.data?.token || '').toString().trim();
+    const targetUid = (req.data?.uid || '').toString().trim();
+    const devicePlatform = typeof req.data?.devicePlatform === 'string' ? req.data.devicePlatform : null;
+    if (!token) throw new HttpsError('invalid-argument', 'Missing token');
+    if (!targetUid) throw new HttpsError('invalid-argument', 'Missing uid');
+    if (targetUid !== callerUid)
+      throw new HttpsError('permission-denied', 'UID mismatch');
+
+    try {
+      // Find any user docs that currently hold this token
+      const q = db.collection('users').where('deviceToken', '==', token).limit(50);
+      const snap = await q.get();
+      const batch = db.batch();
+      let cleared = 0;
+
+      snap.docs.forEach((d) => {
+        if (d.id === targetUid) return; // We'll set it explicitly below
+        batch.update(d.ref, {
+          deviceToken: null,
+          pushOptIn: false,
+          deviceUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        cleared++;
+      });
+
+      // Ensure target user has this token (including platform metadata)
+      const targetRef = db.collection('users').doc(targetUid);
+      const payload = {
+        deviceToken: token,
+        pushOptIn: true,
+        deviceUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (devicePlatform) payload.devicePlatform = devicePlatform;
+      batch.set(targetRef, payload, { merge: true });
+
+      await batch.commit();
+      logger.log('[claimDeviceToken] claimed token for', targetUid, 'clearedFrom:', cleared);
+      return { ok: true, clearedFrom: cleared };
+    } catch (err) {
+      logger.error('[claimDeviceToken] error', err?.message || err);
+      throw new HttpsError('internal', 'Failed to claim token');
+    }
+  }
+);
+
 // Trigger: on new chat message, notify all attendees + host (except the sender)
 // Also stamps events/{eventId}.lastMessageAt for feed sorting
 exports.onMessageCreateNotify = onDocumentCreated(
@@ -879,12 +945,9 @@ exports.onNotificationCreatedPush = onDocumentCreated(
 );
 
 // Callable: RSVP to event — creates chat doc (id == eventId) on first RSVP and ensures participants list
+// App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
 exports.rsvpEvent = onCall(
-  {
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60,
-  },
+  JOIN_CALLABLE_OPTIONS,
   async (req) => {
     const auth = req.auth;
     const data = req.data || {};
@@ -1085,12 +1148,9 @@ exports.rsvpEvent = onCall(
 );
 
 // Callable: allow a signed-in attendee to leave an event (removes from attendees, updates user arrays, prunes chat participants)
+// App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
 exports.leaveEvent = onCall(
-  {
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60,
-  },
+  JOIN_CALLABLE_OPTIONS,
   async (req) => {
     const auth = req.auth;
     const data = req.data || {};
@@ -1168,11 +1228,13 @@ exports.leaveEvent = onCall(
 );
 
 // Callable: delete (soft) an event — runs with admin privileges to avoid client rule issues
+// App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
 exports.deleteEvent = onCall(
   {
     region: 'us-central1',
     memory: '256MiB',
     timeoutSeconds: 60,
+    enforceAppCheck: true,
   },
   async (req) => {
     const auth = req.auth;
@@ -1266,12 +1328,9 @@ exports.deleteEvent = onCall(
 );
 
 // Callable: request to join an RSVP event (adds caller to requests, notifies host)
+// App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
 exports.requestToJoinEvent = onCall(
-  {
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60,
-  },
+  JOIN_CALLABLE_OPTIONS,
   async (req) => {
     const uid = req.auth?.uid;
     const { eventId } = req.data || {};
@@ -1564,6 +1623,235 @@ exports.declineRsvpRequest = onCall(
     });
 
     // No notification for decline (product decision)
+    return { ok: true };
+  }
+);
+
+// -------------------- SOCIAL GRAPH CALLABLES (server-enforced cross-user writes) --------------------
+
+// Callable: follow request (writes to target user's followRequests)
+exports.requestFollow = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const currentUid = req.auth?.uid;
+    if (!currentUid) throw new HttpsError('unauthenticated', 'Auth required');
+    const { targetUid } = req.data || {};
+    if (!targetUid || typeof targetUid !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing targetUid');
+    if (currentUid === targetUid)
+      throw new HttpsError('invalid-argument', 'Cannot follow yourself');
+
+    const targetRef = db.doc(`users/${targetUid}`);
+    const targetSnap = await targetRef.get();
+    if (!targetSnap.exists)
+      throw new HttpsError('not-found', 'Target user not found');
+
+    await targetRef.update({
+      followRequests: admin.firestore.FieldValue.arrayUnion(currentUid),
+    });
+
+    logger.log('[requestFollow]', currentUid, '->', targetUid);
+    return { ok: true };
+  }
+);
+
+// Callable: approve follow request (mutual)
+exports.approveFollowRequest = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const currentUid = req.auth?.uid;
+    if (!currentUid) throw new HttpsError('unauthenticated', 'Auth required');
+    const { requesterUid } = req.data || {};
+    if (!requesterUid || typeof requesterUid !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing requesterUid');
+
+    const currentRef = db.doc(`users/${currentUid}`);
+    const requesterRef = db.doc(`users/${requesterUid}`);
+
+    await db.runTransaction(async (tx) => {
+      const currentSnap = await tx.get(currentRef);
+      if (!currentSnap.exists)
+        throw new HttpsError('not-found', 'User not found');
+
+      tx.update(currentRef, {
+        followRequests: admin.firestore.FieldValue.arrayRemove(requesterUid),
+        followers: admin.firestore.FieldValue.arrayUnion(requesterUid),
+      });
+      tx.update(requesterRef, {
+        following: admin.firestore.FieldValue.arrayUnion(currentUid),
+      });
+    });
+
+    logger.log('[approveFollowRequest]', currentUid, '<-', requesterUid);
+    return { ok: true };
+  }
+);
+
+// Callable: deny follow request
+exports.denyFollowRequest = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const currentUid = req.auth?.uid;
+    if (!currentUid) throw new HttpsError('unauthenticated', 'Auth required');
+    const { requesterUid } = req.data || {};
+    if (!requesterUid || typeof requesterUid !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing requesterUid');
+
+    const currentRef = db.doc(`users/${currentUid}`);
+    await currentRef.update({
+      followRequests: admin.firestore.FieldValue.arrayRemove(requesterUid),
+    });
+
+    logger.log('[denyFollowRequest]', currentUid, 'denied', requesterUid);
+    return { ok: true };
+  }
+);
+
+// Callable: add friend (mutual)
+exports.addFriend = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const currentUid = req.auth?.uid;
+    if (!currentUid) throw new HttpsError('unauthenticated', 'Auth required');
+    const { targetUid } = req.data || {};
+    if (!targetUid || typeof targetUid !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing targetUid');
+    if (currentUid === targetUid)
+      throw new HttpsError('invalid-argument', 'Cannot friend yourself');
+
+    const currentRef = db.doc(`users/${currentUid}`);
+    const targetRef = db.doc(`users/${targetUid}`);
+
+    await db.runTransaction(async (tx) => {
+      const targetSnap = await tx.get(targetRef);
+      if (!targetSnap.exists)
+        throw new HttpsError('not-found', 'Target user not found');
+
+      tx.update(currentRef, {
+        friends: admin.firestore.FieldValue.arrayUnion(targetUid),
+      });
+      tx.update(targetRef, {
+        friends: admin.firestore.FieldValue.arrayUnion(currentUid),
+      });
+    });
+
+    logger.log('[addFriend]', currentUid, '<->', targetUid);
+    return { ok: true };
+  }
+);
+
+// Callable: remove friend (mutual)
+exports.removeFriend = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 30,
+  },
+  async (req) => {
+    const currentUid = req.auth?.uid;
+    if (!currentUid) throw new HttpsError('unauthenticated', 'Auth required');
+    const { targetUid } = req.data || {};
+    if (!targetUid || typeof targetUid !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing targetUid');
+
+    const currentRef = db.doc(`users/${currentUid}`);
+    const targetRef = db.doc(`users/${targetUid}`);
+
+    await db.runTransaction(async (tx) => {
+      tx.update(currentRef, {
+        friends: admin.firestore.FieldValue.arrayRemove(targetUid),
+      });
+      tx.update(targetRef, {
+        friends: admin.firestore.FieldValue.arrayRemove(currentUid),
+      });
+    });
+
+    logger.log('[removeFriend]', currentUid, 'X', targetUid);
+    return { ok: true };
+  }
+);
+
+// Callable: join waitlist (server-enforced capacity + state checks)
+exports.joinWaitlist = onCall(
+  {
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 60,
+  },
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'Auth required');
+    const { eventId } = req.data || {};
+    if (!eventId || typeof eventId !== 'string')
+      throw new HttpsError('invalid-argument', 'Missing eventId');
+
+    const eventRef = db.doc(`events/${eventId}`);
+
+    await db.runTransaction(async (tx) => {
+      const evSnap = await tx.get(eventRef);
+      if (!evSnap.exists) throw new HttpsError('not-found', 'Event not found');
+
+      const ev = evSnap.data();
+      const isHost = ev.ownerId === uid || ev.hostId === uid;
+      const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
+      const isAttendee = attendees.includes(uid);
+      const requests = Array.isArray(ev.requests) ? ev.requests : [];
+      const hasRequested = requests.includes(uid);
+      const waitlist = Array.isArray(ev.waitlist) ? ev.waitlist : [];
+      const isWaitlisted = waitlist.includes(uid);
+
+      if (isHost)
+        throw new HttpsError('failed-precondition', 'Host cannot waitlist');
+      if (isAttendee)
+        throw new HttpsError(
+          'failed-precondition',
+          'Already attending this event'
+        );
+      if (hasRequested)
+        throw new HttpsError('failed-precondition', 'Request pending');
+      if (isWaitlisted)
+        throw new HttpsError(
+          'failed-precondition',
+          'Already on waitlist for this event'
+        );
+
+      const status = (ev.status || 'active').toString().toLowerCase();
+      if (status !== 'active')
+        throw new HttpsError('failed-precondition', 'Event not active');
+      if (ev.isDeleted === true)
+        throw new HttpsError('failed-precondition', 'Event deleted');
+
+      const capacity = typeof ev.capacity === 'number' ? ev.capacity : null;
+      const isFull = capacity && capacity > 0 && attendees.length >= capacity;
+      if (!isFull)
+        throw new HttpsError(
+          'failed-precondition',
+          'Event is not full; join directly instead'
+        );
+
+      tx.update(eventRef, {
+        waitlist: admin.firestore.FieldValue.arrayUnion(uid),
+        waitlistCount: admin.firestore.FieldValue.increment(1),
+      });
+    });
+
+    logger.log('[joinWaitlist]', uid, 'joined waitlist for', eventId);
     return { ok: true };
   }
 );
@@ -2644,7 +2932,7 @@ const BUSINESS_CALLABLE_OPTIONS = Object.freeze({
   memory: '256MiB',
   timeoutSeconds: 60,
   invoker: 'public',
-  enforceAppCheck: false,
+  enforceAppCheck: true,
 });
 
 function assertAuth(req) {

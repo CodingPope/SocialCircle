@@ -41,6 +41,7 @@ import { useUserStore } from '../../profile/stores/userStore';
 import smileDefault from '../../../../assets/smileDefault.png';
 import { event as trackEvent } from '../../../services/analyticsService';
 import { useTheme } from '../../../theme';
+import logger from '../../../lib/logger';
 
 const PAGE_SIZE = 20;
 const TOP_BAR_HEIGHT = 52;
@@ -153,7 +154,7 @@ export default function InterestPostScreen() {
           });
         } catch {}
       } catch (error) {
-        console.warn('Failed to load post', error);
+        logger.warn('Failed to load post', error);
       }
     }
     loadPost();

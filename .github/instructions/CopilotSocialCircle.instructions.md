@@ -18,15 +18,19 @@ You're helping me build **Social Circle** — a mobile app designed for adults (
 
 ## ⚙️ Tech Stack
 
-| Area       | Tool/Service                      |
-| ---------- | --------------------------------- |
-| Frontend   | React Native (Expo)               |
-| State Mgmt | Zustand or Context API            |
-| Backend    | Firebase (Firestore)              |
-| Auth       | Firebase Auth                     |
-| Maps       | Google Maps API                   |
-| Storage    | Firebase Storage (images)         |
-| Optional   | Cloud Functions, Mixpanel, Stripe |
+| Area       | Tool/Service                                   |
+| ---------- | ---------------------------------------------- |
+| Platform   | **iOS & Android ONLY** (React Native - no web) |
+| Frontend   | React Native (Expo)                            |
+| State Mgmt | Zustand or Context API                         |
+| Backend    | Firebase (Firestore)                           |
+| Auth       | Firebase Auth                                  |
+| Firebase   | @react-native-firebase (native modules)        |
+| Maps       | Google Maps API                                |
+| Storage    | Firebase Storage (images)                      |
+| Optional   | Cloud Functions, Mixpanel, Stripe              |
+
+**IMPORTANT**: This is a **mobile-only app**. DO NOT use web SDK syntax or browser-specific APIs. Always use React Native Firebase native modules (@react-native-firebase/\*).
 
 ---
 
@@ -100,6 +104,7 @@ You're helping me build **Social Circle** — a mobile app designed for adults (
 
 **When writing code, always**:
 
+- Use **React Native Firebase (@react-native-firebase/\*)** native modules - NEVER web SDK
 - Suggest scalable Firestore structures (avoid tight coupling)
 - Modularize UI components (especially event cards, modals, pins, chats)
 - Use best React Native practices (accessibility, responsive design)
@@ -111,12 +116,29 @@ You're helping me build **Social Circle** — a mobile app designed for adults (
   // Description: [what this block does]
   ```
 
-  Avoid:
+**Avoid**:
 
+- **Web SDK syntax** (firebase/app, firebase/firestore, etc.) - this is mobile-only
+- **Browser-specific APIs** (window, document, localStorage, etc.)
 - Hardcoding unless explicitly mocking or stubbing
 - Long, nested components – extract into reusables
 - Making assumptions about Firestore data without checking null/edge cases
 - UI-blocking logic on user flows (keep it responsive)
+
+**Firebase Best Practices**:
+
+- Always use native modules: `import firestore from '@react-native-firebase/firestore'`
+- Never use: `import { getFirestore } from 'firebase/firestore'` (web SDK)
+- Functions region is configured via deployment, not SDK calls
+- Use `functions().httpsCallable(name)` - region is auto-configured
+- App Check uses DeviceCheck (iOS) and Play Integrity (Android) - no web providers
+
+**Exception - Cloud Functions (server-side only)**:
+
+- Cloud Functions (`functions/` directory) use the **Admin SDK**, not React Native Firebase
+- Correct: `const admin = require('firebase-admin');`
+- Correct: `const db = admin.firestore();`
+- Never use web SDK or React Native Firebase in Cloud Functions
 
 ---
 

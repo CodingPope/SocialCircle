@@ -2,9 +2,10 @@
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { db, serverTimestamp } from '../../../services/firebase/config';
+import { db, serverTimestamp, functions as firebaseFunctions } from '../../../services/firebase/config';
 import { useUserStore } from '../../profile';
 import { EAS_PROJECT_ID } from '@env';
+import logger from '../../../lib/logger';
 
 // Foreground behavior (optional)
 Notifications.setNotificationHandler({
@@ -58,7 +59,7 @@ export async function registerForPushTokenAsync() {
     }
     return token;
   } catch (e) {
-    console.warn('[push] token error:', e?.message || e);
+    logger.warn('[push] token error:', e?.message || e);
     return null;
   }
 }
@@ -75,12 +76,19 @@ export async function initPushForUser(uid) {
     const snap = await userRef.get();
     if (!snap.exists) return; // skip for business accounts
 
-    await userRef.update({
-      deviceToken: token,
-      pushOptIn: true,
-      devicePlatform: Platform.OS,
-      deviceUpdatedAt: serverTimestamp(),
-    });
+    // Use a server callable to claim the token (removes it from other users if needed)
+    try {
+      const claimFn = firebaseFunctions.httpsCallable('claimDeviceToken');
+      await claimFn({ token, uid, devicePlatform: Platform.OS });
+    } catch (e) {
+      // Fallback: best-effort local update (may be denied by rules in some cases)
+      await userRef.update({
+        deviceToken: token,
+        pushOptIn: true,
+        devicePlatform: Platform.OS,
+        deviceUpdatedAt: serverTimestamp(),
+      });
+    }
 
     // keep Zustand mirror in sync if you store the user locally
     const setUser = useUserStore.getState().setUser;
@@ -89,6 +97,6 @@ export async function initPushForUser(uid) {
       setUser({ ...current, deviceToken: token, pushOptIn: true });
     }
   } catch (e) {
-    console.warn('[push] Failed to init push token:', e?.message || e);
+    logger.warn('[push] Failed to init push token:', e?.message || e);
   }
 }

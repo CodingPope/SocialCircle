@@ -1,5 +1,6 @@
 // Description: Helper utilities for handling Firebase Storage errors and diagnostics
 import { Platform } from 'react-native';
+import logger from '../../lib/logger';
 
 const loggedWarnings = new Set();
 
@@ -70,5 +71,5 @@ export function logStorageDiagnostic(kind, info) {
     ...info,
   };
 
-  console.warn(`[Storage Diagnostic] ${kind}`, payload);
+  logger.warn(`[Storage Diagnostic] ${kind}`, payload);
 }

@@ -6,6 +6,7 @@
 // - Automatically includes city-level location context for Firebase Realtime map
 
 import { getFormattedCity } from './locationContextService';
+import logger from '../lib/logger';
 
 let rnfa = null; // cached firebase analytics instance (or null)
 let enabled = false; // runtime flag
@@ -17,13 +18,13 @@ let triedLoadAnalytics = false;
 // Description: Lightweight dev log helpers so we can trace analytics lifecycle without noisy production logs
 const devLog = (...args) => {
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(...args);
+    logger.debug(...args);
   }
 };
 
 const devWarn = (...args) => {
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.warn(...args);
+    logger.warn(...args);
   }
 };
 
@@ -168,7 +169,7 @@ export async function analyticsInit({ optedIn, uid, props } = {}) {
   if (!a) {
     if (enabled && !warnedMissingAnalytics) {
       warnedMissingAnalytics = true;
-      console.warn(
+      logger.warn(
         '[analytics] Firebase Analytics native module unavailable; events will not be sent.'
       );
     }

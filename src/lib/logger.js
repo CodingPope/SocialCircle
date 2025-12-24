@@ -29,26 +29,26 @@ export const logger = {
   },
 
   /**
-   * Warning level logging - shown in development and production
+   * Warning level logging - only in development (production logs suppressed)
+   * Use error() for critical issues that need production visibility
    * @param {...any} args - Arguments to log
    */
   warn: (...args) => {
     if (IS_DEV) {
       console.warn('[WARN]', ...args);
     }
-    // In production, you might want to send to error tracking service
-    // reportToSentry('warning', ...args);
+    // In production, critical warnings should use logger.error() instead
+    // For error tracking, use: reportToSentry('warning', ...args);
   },
 
   /**
    * Error level logging - shown in development and production
+   * Critical errors are logged even in production builds
    * @param {...any} args - Arguments to log
    */
   error: (...args) => {
-    if (IS_DEV) {
-      console.error('[ERROR]', ...args);
-    }
-    // In production, you might want to send to error tracking service
+    console.error('[ERROR]', ...args);
+    // In production, send to error tracking service
     // reportToSentry('error', ...args);
   },
 };

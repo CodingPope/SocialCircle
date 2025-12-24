@@ -1,6 +1,7 @@
 // Description: Zustand store for notifications (subscribe, mark as read, soft delete)
 import { create } from 'zustand';
 import { db, serverTimestamp } from '../../../services/firebase/config';
+import logger from '../../../lib/logger';
 
 export const useNotificationStore = create((set, get) => ({
   notifications: [],
@@ -43,9 +44,12 @@ export const useNotificationStore = create((set, get) => ({
       }
 
       set({ loading: true, error: null });
+      // Limit notifications query to most recent 100 to prevent unbounded reads
       const queryRef = db
         .collection('notifications')
-        .where('recipientId', '==', userId);
+        .where('recipientId', '==', userId)
+        .orderBy('createdAt', 'desc')
+        .limit(100);
       const unsub = queryRef.onSnapshot(
         async (snap) => {
           const list = snap.docs
@@ -109,7 +113,7 @@ export const useNotificationStore = create((set, get) => ({
       });
     } catch (e) {
       // swallow; UI is optimistic
-      console.warn('[notifications] markAsRead failed:', e?.message || e);
+      logger.warn('[notifications] markAsRead failed:', e?.message || e);
     }
     set((state) => {
       const next = state.notifications.map((n) =>
@@ -142,7 +146,7 @@ export const useNotificationStore = create((set, get) => ({
       });
       await batch.commit();
     } catch (e) {
-      console.warn('[notifications] markAllAsRead failed:', e?.message || e);
+      logger.warn('[notifications] markAllAsRead failed:', e?.message || e);
     }
     set((state) => {
       const next = state.notifications.map((n) =>
@@ -165,7 +169,7 @@ export const useNotificationStore = create((set, get) => ({
         deletedAt: serverTimestamp(),
       });
     } catch (e) {
-      console.warn('[notifications] softDelete failed:', e?.message || e);
+      logger.warn('[notifications] softDelete failed:', e?.message || e);
       // Optimistic local removal
       set((s) => ({
         notifications: s.notifications.filter((n) => n.id !== id),

@@ -38,6 +38,11 @@ import { trackOpenEvent, trackReportContent } from '../../../lib/analytics';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import { shareEventDetails } from '../utils/shareUtils';
 import { getBlockContext, isEventVisibleForUser } from '../utils/blockUtils';
+import { toDate } from '../utils/dateUtils';
+import {
+  getEventCityLabel,
+  shouldMaskRsvpDetails,
+} from '../utils/rsvpVisibility';
 import {
   saveEventForUser,
   removeSavedEventForUser,
@@ -296,6 +301,10 @@ export default function EventPopUpCard({
     [endMs]
   );
   const isReadOnly = isSoftDeleted || archived;
+  const maskRsvpDetails = useMemo(
+    () => shouldMaskRsvpDetails(liveEvent, user?.uid),
+    [liveEvent, user?.uid]
+  );
 
   // derived state
   const attendees = Array.isArray(liveEvent?.attendees)
@@ -345,7 +354,9 @@ export default function EventPopUpCard({
       if (!liveEvent?.id || !user?.uid) return false;
       try {
         const snap = await getDoc(doc(db, 'events', liveEvent.id));
-        if (snap.exists()) {
+        const snapshotExists =
+          typeof snap.exists === 'function' ? snap.exists() : !!snap.exists;
+        if (snapshotExists) {
           const data = snap.data();
           const attendeeList = Array.isArray(data?.attendees)
             ? data.attendees
@@ -641,10 +652,37 @@ export default function EventPopUpCard({
   ]);
 
   const openInMaps = () => {
-    if (!liveEvent?.location) return;
+    if (maskRsvpDetails || !liveEvent?.location) return;
     const { latitude, longitude } = liveEvent.location;
     Linking.openURL(`https://www.google.com/maps?q=${latitude},${longitude}`);
   };
+
+  const eventDateLabel = useMemo(() => {
+    const date = toDate(liveEvent?.date);
+    if (!date) return 'Date not specified';
+    if (maskRsvpDetails) {
+      return date.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    return date.toLocaleString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, [liveEvent?.date, maskRsvpDetails]);
+
+  const displayLocationLabel = useMemo(() => {
+    if (!maskRsvpDetails) return address;
+    const city = getEventCityLabel(liveEvent, address);
+    return city || 'Location available after RSVP';
+  }, [address, liveEvent, maskRsvpDetails]);
 
   return (
     <BottomSheet
@@ -719,6 +757,7 @@ export default function EventPopUpCard({
                 shareEventDetails(liveEvent, {
                   surface,
                   source: source || 'event_detail_popover',
+                  viewerId: user?.uid || null,
                 })
               }
               accessibilityRole='button'
@@ -795,30 +834,20 @@ export default function EventPopUpCard({
 
         {/* When */}
         <Text style={styles.sectionLabel}>When</Text>
-        <Text style={styles.bodyText}>
-          {liveEvent.date
-            ? new Date(liveEvent.date.seconds * 1000).toLocaleString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-              })
-            : 'Date not specified'}
-        </Text>
+        <Text style={styles.bodyText}>{eventDateLabel}</Text>
 
         {/* Where */}
         <Text style={[styles.sectionLabel, { marginTop: 12 }]}>Where</Text>
         <TouchableOpacity
           style={styles.inlineButton}
           onPress={openInMaps}
+          disabled={maskRsvpDetails || !liveEvent?.location}
           accessibilityRole='button'
           accessibilityLabel='Open in maps'
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Ionicons name='pin' size={18} color='#2563EB' />
-          <Text style={styles.linkText}>{address}</Text>
+          <Text style={styles.linkText}>{displayLocationLabel}</Text>
         </TouchableOpacity>
 
         {/* Host card */}

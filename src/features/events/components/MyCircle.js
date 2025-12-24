@@ -26,8 +26,11 @@ import {
   getDoc,
   doc,
   onSnapshot,
+  orderBy,
+  limit,
 } from '../../../services/firebase/firestoreCompat';
 import { db } from '../../../services/firebase/config';
+import logger from '../../../lib/logger';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import EventPopUpCard from './EventPopUpCard';
@@ -193,18 +196,28 @@ export default function MyCircle({ navigation }) {
     if (!user?.uid) return;
     setLoading(true);
 
+    // Limit queries to prevent unbounded reads (max 100 hosting + 100 attending events)
     const qHosting = query(
       collection(db, 'events'),
-      where('ownerId', '==', user.uid)
+      where('ownerId', '==', user.uid),
+      orderBy('createdAt', 'desc'),
+      limit(100)
     );
     const qAttending = query(
       collection(db, 'events'),
-      where('attendees', 'array-contains', user.uid)
+      where('attendees', 'array-contains', user.uid),
+      orderBy('date', 'desc'),
+      limit(100)
     );
 
     let cancelled = false;
     const handleSnapshot = async (snapshot, setter) => {
       try {
+        if (!snapshot || !snapshot.docs) {
+          logger.warn('[MyCircle] Received null/invalid snapshot');
+          if (!cancelled) setter([]);
+          return;
+        }
         const now = new Date();
         const events = snapshot.docs
           .map((d) => ({ id: d.id, ...d.data() }))
@@ -213,17 +226,39 @@ export default function MyCircle({ navigation }) {
         const enhanced = await enhanceWithHostData(events);
         if (!cancelled) setter(enhanced);
       } catch (e) {
-        console.error('Events listener error:', e);
+        logger.error('[MyCircle] Events listener error:', e?.message || e);
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
-    const unsub1 = onSnapshot(qHosting, (snap) =>
-      handleSnapshot(snap, setHostingEvents)
+    const unsub1 = onSnapshot(
+      qHosting,
+      (snap) => handleSnapshot(snap, setHostingEvents),
+      (error) => {
+        logger.error(
+          '[MyCircle] Hosting query error:',
+          error?.message || error
+        );
+        if (!cancelled) {
+          setHostingEvents([]);
+          setLoading(false);
+        }
+      }
     );
-    const unsub2 = onSnapshot(qAttending, (snap) =>
-      handleSnapshot(snap, setAttendingEvents)
+    const unsub2 = onSnapshot(
+      qAttending,
+      (snap) => handleSnapshot(snap, setAttendingEvents),
+      (error) => {
+        logger.error(
+          '[MyCircle] Attending query error:',
+          error?.message || error
+        );
+        if (!cancelled) {
+          setAttendingEvents([]);
+          setLoading(false);
+        }
+      }
     );
 
     return () => {
@@ -964,13 +999,8 @@ export default function MyCircle({ navigation }) {
     ]
   );
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size='large' color='#4da6ff' />
-      </View>
-    );
-  }
+  // Don't block UI - show skeleton/empty state while loading in background
+  const isInitialLoad = loading && feedSections.length === 0;
 
   return (
     <SafeAreaView
@@ -984,7 +1014,7 @@ export default function MyCircle({ navigation }) {
         </Text>
       </View>
       <FlatList
-        data={feedSections}
+        data={isInitialLoad ? [] : feedSections}
         renderItem={renderFeedItem}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.contentContainer}
@@ -993,6 +1023,13 @@ export default function MyCircle({ navigation }) {
         maxToRenderPerBatch={10}
         windowSize={11}
         initialNumToRender={8}
+        ListEmptyComponent={
+          isInitialLoad ? (
+            <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+              <ActivityIndicator size='small' color='#4da6ff' />
+            </View>
+          ) : null
+        }
       />
 
       {selectedEvent && (

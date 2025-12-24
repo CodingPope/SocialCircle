@@ -49,14 +49,18 @@ import {
 } from './src/services/deepLinkingService';
 import { ThemeProvider, lightTheme, darkTheme } from './src/theme';
 import { useThemeStore } from './src/store/themeStore';
+import ErrorBoundary from './src/components/ErrorBoundary';
 
 // Description: Keep splash screen visible while app loads
-SplashScreen.preventAutoHideAsync().catch(() => {
-  /* ignore errors */
+SplashScreen.preventAutoHideAsync().catch((err) => {
+  console.error('[App] Failed to prevent auto hide splash:', err);
 });
+console.log('[App] Initializing Social Circle app');
 console.log('Sentry initialization disabled - troubleshooting __extends error');
 
 function AppContent() {
+  console.log('[AppContent] Component rendering');
+
   // Description: Get user from Zustand store
   const user = useUserStore((state) => state.user);
   const storeLoading = useUserStore((state) => state.loading);
@@ -70,17 +74,58 @@ function AppContent() {
   const [consentBusy, setConsentBusy] = useState(false);
   const [appReady, setAppReady] = useState(false);
   const themeMode = useThemeStore((state) => state.mode);
+
+  console.log('[AppContent] State:', {
+    storeLoading,
+    checking,
+    appReady,
+    hasUser: !!user,
+  });
+
   // Import onboarding router utility
-  const { getNextOnboardingStep } = require('./src/features/auth/utils/onboardingRouter');
+  const {
+    getNextOnboardingStep,
+  } = require('./src/features/auth/utils/onboardingRouter');
+
+  // Description: Safety timeout - force hide splash screen after 10 seconds if stuck
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (!appReady) {
+        console.warn(
+          '[AppContent] Timeout reached without app ready. Force hiding splash screen.'
+        );
+        console.warn('[AppContent] Debug state:', {
+          storeLoading,
+          checking,
+          appReady,
+          hasUser: !!user,
+        });
+        SplashScreen.hideAsync().catch(() => {});
+        // Force set states to unblock
+        setChecking(false);
+        setAppReady(true);
+      }
+    }, 10000); // 10 second timeout
+
+    return () => clearTimeout(timeout);
+  }, [appReady, storeLoading, checking, user]);
 
   // Description: Hide splash screen once app is ready
   useEffect(() => {
+    console.log('[AppContent] Splash screen check:', {
+      storeLoading,
+      checking,
+      appReady,
+      shouldHide: !storeLoading && !checking && appReady,
+    });
     if (!storeLoading && !checking && appReady) {
       const hideSplash = async () => {
         try {
+          console.log('[AppContent] Hiding splash screen');
           await SplashScreen.hideAsync();
+          console.log('[AppContent] Splash screen hidden successfully');
         } catch (err) {
-          // Splash already hidden
+          console.log('[AppContent] Splash already hidden or error:', err);
         }
       };
       // Small delay to ensure smooth transition
@@ -140,10 +185,21 @@ function AppContent() {
 
   // NEW: Start auth listener once on mount (since AuthProvider is not used)
   useEffect(() => {
+    console.log('[AppContent] Setting up auth listener');
     try {
       const listen = useUserStore.getState().listenAuthState;
-      if (typeof listen === 'function') listen();
-    } catch {}
+      if (typeof listen === 'function') {
+        console.log('[AppContent] Calling listenAuthState');
+        listen();
+      } else {
+        console.error(
+          '[AppContent] listenAuthState is not a function:',
+          typeof listen
+        );
+      }
+    } catch (err) {
+      console.error('[AppContent] Failed to start auth listener:', err);
+    }
   }, []);
 
   // NEW: Register a notification response listener (must be before any early return)
@@ -243,20 +299,36 @@ function AppContent() {
   }, [user?.uid]);
 
   useEffect(() => {
+    console.log('[AppContent] Checking user profile. User UID:', user?.uid);
     const check = async () => {
       if (user) {
-        const userDocRef = db.collection('users').doc(user.uid);
-        const snap = await userDocRef.get();
-        if (snap.exists) {
-          const data = snap.data();
-          const nextStep = getNextOnboardingStep(data);
-          setOnboardingStep(nextStep);
-          setProfileComplete(!nextStep);
-        } else {
+        console.log('[AppContent] User exists, fetching profile data');
+        try {
+          const userDocRef = db.collection('users').doc(user.uid);
+          const snap = await userDocRef.get();
+          console.log('[AppContent] User doc exists:', snap.exists);
+          if (snap.exists) {
+            const data = snap.data();
+            const nextStep = getNextOnboardingStep(data);
+            console.log('[AppContent] Next onboarding step:', nextStep);
+            setOnboardingStep(nextStep);
+            setProfileComplete(!nextStep);
+          } else {
+            console.log(
+              '[AppContent] User doc does not exist, setting onboarding to NameDob'
+            );
+            setProfileComplete(false);
+            setOnboardingStep('NameDob');
+          }
+        } catch (err) {
+          console.error('[AppContent] Error fetching user profile:', err);
           setProfileComplete(false);
           setOnboardingStep('NameDob');
         }
+      } else {
+        console.log('[AppContent] No user, skipping profile check');
       }
+      console.log('[AppContent] Setting checking to false');
       setChecking(false);
     };
     check();
@@ -387,6 +459,16 @@ function AppContent() {
 
   const showLoadingOverlay = storeLoading || checking;
 
+  console.log('[AppContent] Render state:', {
+    showLoadingOverlay,
+    storeLoading,
+    checking,
+    appReady,
+    hasUser: !!user,
+    profileComplete,
+    onboardingStep,
+  });
+
   useEffect(() => {
     if (user?.uid && user?.analyticsOptIn) {
       recordDailySessionHeartbeat(user);
@@ -412,12 +494,17 @@ function AppContent() {
         ref={navigationRef}
         theme={navigationTheme}
         onReady={() => {
+          console.log('[NavigationContainer] onReady called (with onboarding)');
           try {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
             navigationRef.routeNameRef = rn;
+            console.log('[NavigationContainer] Current route:', rn);
             if (rn) analyticsScreen(rn);
+            console.log('[NavigationContainer] Setting appReady to true');
             setAppReady(true);
-          } catch {}
+          } catch (err) {
+            console.error('[NavigationContainer] Error in onReady:', err);
+          }
         }}
         onStateChange={async () => {
           try {
@@ -439,12 +526,17 @@ function AppContent() {
         ref={navigationRef}
         theme={navigationTheme}
         onReady={() => {
+          console.log('[NavigationContainer] onReady called (normal flow)');
           try {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
             navigationRef.routeNameRef = rn;
+            console.log('[NavigationContainer] Current route:', rn);
             if (rn) analyticsScreen(rn);
+            console.log('[NavigationContainer] Setting appReady to true');
             setAppReady(true);
-          } catch {}
+          } catch (err) {
+            console.error('[NavigationContainer] Error in onReady:', err);
+          }
         }}
         onStateChange={async () => {
           try {
@@ -477,13 +569,17 @@ export default function App() {
   // Description: Get theme mode from store and pass to ThemeProvider
   const themeMode = useThemeStore((state) => state.mode);
 
+  console.log('[App] Rendering root component');
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider mode={themeMode}>
-        <AuthProvider>
-          <AppContent />
-        </AuthProvider>
-      </ThemeProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <ThemeProvider mode={themeMode}>
+          <AuthProvider>
+            <AppContent />
+          </AuthProvider>
+        </ThemeProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }

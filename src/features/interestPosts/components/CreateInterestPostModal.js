@@ -13,12 +13,13 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { createImagePickerOptions } from '../../../lib/imagePicker';
+import { pickAndCompressImage } from '../../../lib/imagePicker';
 import { createInterestPost } from '../api/interestPostService';
 import { fetchUserInterests } from '../../profile/api/userQueries';
 import { useUserStore } from '../../profile/stores/userStore';
 import { event as trackEvent } from '../../../services/analyticsService';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import logger from '../../../lib/logger';
 import { LinearGradient } from 'expo-linear-gradient';
 import smileDefault from '../../../../assets/smileDefault.png';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -66,7 +67,7 @@ export default function CreateInterestPostModal({
         }
         setHasLoadedInterests(true);
       } catch (error) {
-        console.warn('Failed to load interests', error);
+        logger.warn('Failed to load interests', error);
         if (Array.isArray(user?.interests) && user.interests.length) {
           setInterests(user.interests);
           if (!selectedInterest) setSelectedInterest(user.interests[0]);
@@ -101,16 +102,16 @@ export default function CreateInterestPostModal({
       if (status !== 'granted') {
         return Alert.alert('Permission needed', 'Please allow gallery access.');
       }
-      const result = await ImagePicker.launchImageLibraryAsync(
-        createImagePickerOptions({ quality: 0.85 })
-      );
-      if (!result.canceled && result.assets?.length) {
-        const asset = result.assets[0];
+
+      // Description: Use pickAndCompressImage with POST limits (10MB/1920px)
+      const compressed = await pickAndCompressImage({ aspect: [4, 3] }, 'POST');
+
+      if (compressed) {
         setMedia({
-          uri: asset.uri,
-          width: asset.width,
-          height: asset.height,
-          mimeType: asset.mimeType || 'image/jpeg',
+          uri: compressed.uri,
+          width: 1920, // Max width from compression
+          height: 1920, // Approximation, actual may vary
+          mimeType: 'image/jpeg',
         });
       }
     } catch (error) {

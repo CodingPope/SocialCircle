@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db, functions } from '../../../services/firebase/config';
+import {
+  db,
+  callFirebaseFunction,
+} from '../../../services/firebase/config';
 
 // Description: Zustand store for events, RSVP, waitlist, and event creation
 export const useEventStore = create(
@@ -41,10 +44,10 @@ export const useEventStore = create(
       rsvpEvent: async (eventId, userId) => {
         set({ loading: true });
         try {
-          // Use regional Functions instance to ensure we call the correctly-deployed callable
-          const rsvpCallable = functions.httpsCallable('rsvpEvent');
-          const res = await rsvpCallable({ eventId, userId });
-          const data = res.data || {};
+          // Use shared callable helper so auth tokens refresh automatically
+          const data =
+            (await callFirebaseFunction('rsvpEvent', { eventId, userId })) ||
+            {};
 
           // Optimistic local update: add user to event.attendees in local store if present
           set((state) => ({
@@ -83,8 +86,36 @@ export const useEventStore = create(
 
       // Join waitlist for a full event
       joinWaitlist: async (eventId, userId) => {
-        // TODO: Firestore waitlist logic
-        // ...
+        set({ loading: true });
+        try {
+          const data =
+            (await callFirebaseFunction('joinWaitlist', { eventId })) || {};
+
+          // Optimistic local update: add user to event.waitlist in local store if present
+          set((state) => ({
+            events: state.events.map((ev) =>
+              ev.id === eventId
+                ? {
+                    ...ev,
+                    waitlist: Array.isArray(ev.waitlist)
+                      ? Array.from(new Set([...ev.waitlist, userId]))
+                      : [userId],
+                    waitlistCount:
+                      typeof ev.waitlistCount === 'number'
+                        ? ev.waitlistCount + 1
+                        : 1,
+                  }
+                : ev
+            ),
+          }));
+
+          return data;
+        } catch (error) {
+          console.error('Join waitlist failed:', error);
+          throw error;
+        } finally {
+          set({ loading: false });
+        }
       },
 
       // Create a new event

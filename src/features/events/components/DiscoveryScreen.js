@@ -15,10 +15,10 @@ import {
   StyleSheet,
   Platform,
   StatusBar,
-  RefreshControl,
   Dimensions,
 } from 'react-native';
 import * as Location from 'expo-location';
+import TopLoadingBar from '../../../components/ui/TopLoadingBar';
 import {
   fetchHotEvents,
   fetchNewEvents,
@@ -48,6 +48,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { useNavigation } from '@react-navigation/native';
+import logger from '../../../lib/logger';
 import { filterBlockedEvents } from '../utils/blockUtils';
 import { eventPassesGenderGate } from '../utils/genderUtils';
 import {
@@ -187,7 +188,7 @@ export default function DiscoveryScreen() {
         const parsed = JSON.parse(rawValue);
         return sanitizeInterests(parsed);
       } catch (err) {
-        console.warn('Failed to parse stored interests:', err?.message || err);
+        logger.warn('Failed to parse stored interests:', err?.message || err);
         return [];
       }
     },
@@ -239,7 +240,7 @@ export default function DiscoveryScreen() {
         return legacyParsed;
       }
     } catch (err) {
-      console.warn('Failed to load pinned interests:', err?.message || err);
+      logger.warn('Failed to load pinned interests:', err?.message || err);
     }
 
     return [];
@@ -254,7 +255,7 @@ export default function DiscoveryScreen() {
       );
       AsyncStorage.setItem(pinnedInterestsKey, JSON.stringify(sanitized)).catch(
         (err) =>
-          console.warn(
+          logger.warn(
             'Failed to persist pinned interests:',
             err?.message || err
           )
@@ -403,7 +404,7 @@ export default function DiscoveryScreen() {
     try {
       await AsyncStorage.setItem(createPostTutorialKey, 'true');
     } catch (err) {
-      console.warn('Discovery tutorial write failed:', err?.message || err);
+      logger.warn('Discovery tutorial write failed:', err?.message || err);
     }
   }, [createPostTutorialKey]);
 
@@ -485,7 +486,7 @@ export default function DiscoveryScreen() {
           (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24);
         return daysSinceCreation <= 7;
       } catch (e) {
-        console.warn('Error checking user creation date:', e);
+        logger.warn('Error checking user creation date:', e);
         return false;
       }
     };
@@ -498,7 +499,7 @@ export default function DiscoveryScreen() {
         setShowCreatePostTutorial(value !== 'true' && isNewUser());
       })
       .catch((err) => {
-        console.warn('Discovery tutorial load failed:', err?.message || err);
+        logger.warn('Discovery tutorial load failed:', err?.message || err);
         if (!isMounted) return;
         // Default to showing only for new users
         setShowCreatePostTutorial(isNewUser());
@@ -549,7 +550,7 @@ export default function DiscoveryScreen() {
           };
         });
       } catch (error) {
-        console.warn('Discovery enrich hosts failed:', error?.message || error);
+        logger.warn('Discovery enrich hosts failed:', error?.message || error);
         return eventsToEnrich;
       }
     },
@@ -607,7 +608,7 @@ export default function DiscoveryScreen() {
 
         persistPinnedSnapshot(pinnedSnapshot);
       } catch (error) {
-        console.error('Error initializing user data:', error);
+        logger.error('Error initializing user data:', error);
       }
     }
 
@@ -644,7 +645,7 @@ export default function DiscoveryScreen() {
               if (!isMounted) return;
               setEvents(enrichedCached);
             } catch (err) {
-              console.warn('Failed to parse cached generic events:', err);
+              logger.warn('Failed to parse cached generic events:', err);
             }
           }
           const generic = await fetchGenericEvents(20);
@@ -690,7 +691,7 @@ export default function DiscoveryScreen() {
             if (!isMounted) return;
             setEvents(enrichedCached);
           } catch (err) {
-            console.warn('Failed to parse cached hot events:', err);
+            logger.warn('Failed to parse cached hot events:', err);
           }
         }
 
@@ -707,7 +708,7 @@ export default function DiscoveryScreen() {
         setEvents(enrichedEvents);
         await AsyncStorage.setItem('hotEvents', JSON.stringify(filteredEvents));
       } catch (error) {
-        console.error('Error preloading data:', error);
+        logger.error('Error preloading data:', error);
       }
     }
 
@@ -900,7 +901,7 @@ export default function DiscoveryScreen() {
           fetchedPosts = result.posts || [];
         }
       } catch (err) {
-        console.warn('Failed to fetch interest posts', err);
+        logger.warn('Failed to fetch interest posts', err);
       }
     } else if (!personalizationEnabled) {
       fetchedPosts = [];
@@ -979,6 +980,12 @@ export default function DiscoveryScreen() {
     <SafeAreaView
       style={[styles.safe, { backgroundColor: theme.colors.background }]}
     >
+      {/* Subtle top loading bar instead of blocking RefreshControl */}
+      <TopLoadingBar
+        visible={refreshing || isLoadingMore}
+        color={theme.colors.primary}
+      />
+
       <StatusBar
         barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={theme.colors.background}
@@ -1062,6 +1069,21 @@ export default function DiscoveryScreen() {
             </Text>
           </TouchableOpacity>
         ))}
+
+        {/* Manual refresh button - non-blocking */}
+        <TouchableOpacity
+          style={styles.refreshButton}
+          onPress={onRefresh}
+          disabled={refreshing}
+        >
+          <Ionicons
+            name='refresh'
+            size={20}
+            color={
+              refreshing ? theme.colors.textSecondary : theme.colors.primary
+            }
+          />
+        </TouchableOpacity>
       </View>
 
       {personalizationEnabled && activeTab !== 'Hot' && (
@@ -1133,13 +1155,6 @@ export default function DiscoveryScreen() {
         onScroll={handleScroll}
         scrollEventThrottle={400}
         ref={scrollViewRef}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            title=''
-          />
-        }
       >
         {feedItems.length === 0 ? (
           <Text style={styles.emptyMessage}>No events or posts found</Text>
@@ -1318,6 +1333,7 @@ const createStyles = (theme) =>
     },
     tabRow: {
       flexDirection: 'row',
+      alignItems: 'center',
       backgroundColor: theme.colors.card,
       paddingVertical: 8,
       paddingHorizontal: 10,
@@ -1328,6 +1344,13 @@ const createStyles = (theme) =>
       paddingHorizontal: 12,
       borderRadius: 15,
       marginRight: 8,
+    },
+    refreshButton: {
+      marginLeft: 'auto',
+      padding: 8,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     activeTab: {
       backgroundColor: theme.colors.chipBackgroundActive,

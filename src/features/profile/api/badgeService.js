@@ -1,7 +1,12 @@
 // Description: Badge management service for awarding, removing, and managing user badges
 
 import { db, arrayUnion, arrayRemove } from '../../../services/firebase/config';
-import { getBadgeConfig, badgeExists, DEFAULT_BADGE } from '../utils/badgeConfig';
+import {
+  getBadgeConfig,
+  badgeExists,
+  DEFAULT_BADGE,
+} from '../utils/badgeConfig';
+import logger from '../../../lib/logger';
 
 /**
  * Award a badge to a user
@@ -13,7 +18,7 @@ import { getBadgeConfig, badgeExists, DEFAULT_BADGE } from '../utils/badgeConfig
 export async function awardBadge(userId, badgeId, setAsCurrent = false) {
   try {
     if (!badgeExists(badgeId)) {
-      console.warn(`[badgeService] Badge ${badgeId} does not exist`);
+      logger.warn(`[badgeService] Badge ${badgeId} does not exist`);
       return false;
     }
 
@@ -21,7 +26,7 @@ export async function awardBadge(userId, badgeId, setAsCurrent = false) {
     const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
-      console.warn(`[badgeService] User ${userId} does not exist`);
+      logger.warn(`[badgeService] User ${userId} does not exist`);
       return false;
     }
 
@@ -30,7 +35,9 @@ export async function awardBadge(userId, badgeId, setAsCurrent = false) {
 
     // Check if user already has this badge
     if (currentBadges.includes(badgeId)) {
-      console.log(`[badgeService] User ${userId} already has badge ${badgeId}`);
+      logger.debug(
+        `[badgeService] User ${userId} already has badge ${badgeId}`
+      );
       return true;
     }
 
@@ -44,7 +51,7 @@ export async function awardBadge(userId, badgeId, setAsCurrent = false) {
     }
 
     await userRef.update(updateData);
-    console.log(
+    logger.debug(
       `[badgeService] Successfully awarded badge ${badgeId} to user ${userId}`
     );
     return true;
@@ -69,7 +76,7 @@ export async function removeBadge(userId, badgeId) {
     const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
-      console.warn(`[badgeService] User ${userId} does not exist`);
+      logger.warn(`[badgeService] User ${userId} does not exist`);
       return false;
     }
 
@@ -77,7 +84,7 @@ export async function removeBadge(userId, badgeId) {
     const currentBadges = userData.badges || [];
 
     if (!currentBadges.includes(badgeId)) {
-      console.log(
+      logger.debug(
         `[badgeService] User ${userId} does not have badge ${badgeId}`
       );
       return true;
@@ -95,7 +102,7 @@ export async function removeBadge(userId, badgeId) {
     }
 
     await userRef.update(updateData);
-    console.log(
+    logger.debug(
       `[badgeService] Successfully removed badge ${badgeId} from user ${userId}`
     );
     return true;
@@ -120,7 +127,7 @@ export async function setCurrentBadge(userId, badgeId) {
     const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
-      console.warn(`[badgeService] User ${userId} does not exist`);
+      logger.warn(`[badgeService] User ${userId} does not exist`);
       return false;
     }
 
@@ -129,7 +136,7 @@ export async function setCurrentBadge(userId, badgeId) {
 
     // Check if user has this badge
     if (!userBadges.includes(badgeId)) {
-      console.warn(
+      logger.warn(
         `[badgeService] User ${userId} does not have badge ${badgeId}`
       );
       return false;
@@ -139,7 +146,7 @@ export async function setCurrentBadge(userId, badgeId) {
       currentBadge: badgeId,
     });
 
-    console.log(
+    logger.debug(
       `[badgeService] Successfully set current badge to ${badgeId} for user ${userId}`
     );
     return true;
@@ -163,7 +170,7 @@ export async function getUserBadges(userId) {
     const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
-      console.warn(`[badgeService] User ${userId} does not exist`);
+      logger.warn(`[badgeService] User ${userId} does not exist`);
       return [];
     }
 

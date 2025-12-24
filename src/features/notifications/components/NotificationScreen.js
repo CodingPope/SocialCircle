@@ -31,6 +31,7 @@ import { db, functions } from '../../../services/firebase/config';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import displayNameFromUser from '../utils/displayName';
+import logger from '../../../lib/logger';
 
 // --- Helpers ---
 const TypeIcon = ({ type, styles }) => {
@@ -107,10 +108,7 @@ const NotificationCard = memo(
                       uid: requesterId,
                       displayName: snippet.name || prev?.displayName || null,
                       name:
-                        snippet.name ||
-                        prev?.name ||
-                        prev?.displayName ||
-                        null,
+                        snippet.name || prev?.name || prev?.displayName || null,
                       profileImage:
                         snippet.photoURL ||
                         prev?.profileImage ||
@@ -428,7 +426,7 @@ const NotificationScreen = () => {
   const handleAccept = async (requesterId, notificationId, eventId) => {
     try {
       if (!eventId || !requesterId) {
-        console.warn('Accept missing ids', { eventId, requesterId });
+        logger.warn('Accept missing ids', { eventId, requesterId });
         return false;
       }
       const acceptFn = functions.httpsCallable('acceptRsvpRequest');
@@ -437,7 +435,7 @@ const NotificationScreen = () => {
       showToast('Request accepted');
       return true;
     } catch (err) {
-      console.error('Accept failed', err?.message || err);
+      logger.error('Accept failed', err?.message || err);
       showToast('Failed to accept');
       return false;
     }
@@ -447,7 +445,7 @@ const NotificationScreen = () => {
   const handleDeny = async (requesterId, notificationId, eventId) => {
     try {
       if (!eventId || !requesterId) {
-        console.warn('Deny missing ids', { eventId, requesterId });
+        logger.warn('Deny missing ids', { eventId, requesterId });
         return false;
       }
       const declineFn = functions.httpsCallable('declineRsvpRequest');
@@ -456,7 +454,7 @@ const NotificationScreen = () => {
       showToast('Request denied');
       return true;
     } catch (err) {
-      console.error('Deny failed', err?.message || err);
+      logger.error('Deny failed', err?.message || err);
       showToast('Failed to deny');
       return false;
     }

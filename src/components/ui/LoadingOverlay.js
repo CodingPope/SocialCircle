@@ -10,8 +10,9 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 
-// Description: Premium loading overlay with gradient background and elegant animations
-export default function LoadingOverlay({ visible }) {
+// Description: Non-blocking loading overlay - shows subtle indicator instead of covering full screen
+// Use this only for critical initial auth/session checks, not background refreshes
+export default function LoadingOverlay({ visible, blocking = true }) {
   const opacity = useSharedValue(0);
   const scale = useSharedValue(1);
   const glowOpacity = useSharedValue(0);
@@ -60,6 +61,9 @@ export default function LoadingOverlay({ visible }) {
   const glowStyle = useAnimatedStyle(() => ({ opacity: glowOpacity.value }));
 
   if (!visible) return null;
+
+  // Non-blocking mode: only show when user initiates action, not background refreshes
+  if (!blocking) return null;
 
   return (
     <Animated.View

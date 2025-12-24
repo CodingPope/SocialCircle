@@ -3,6 +3,11 @@ import { functions } from '../services/firebase/config';
 import { trackShareEvent } from '../lib/analytics';
 import { event as trackAnalyticsEvent } from './analyticsService';
 import { getUniversalLinkSettings } from './deepLinkingService';
+import logger from '../lib/logger';
+import {
+  getEventCityLabel,
+  shouldMaskRsvpDetails,
+} from '../features/events/utils/rsvpVisibility';
 
 const shareLinkCache = new Map();
 let shareCallable = null;
@@ -31,10 +36,17 @@ function toDate(value) {
   return null;
 }
 
-function formatDate(value) {
+function formatDate(value, { includeTime = true } = {}) {
   const date = toDate(value);
   if (!date) return '';
   try {
+    if (!includeTime) {
+      return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
     return date.toLocaleString('en-US', {
       weekday: 'short',
       month: 'short',
@@ -47,8 +59,11 @@ function formatDate(value) {
   }
 }
 
-function pickLocation(event) {
+function pickLocation(event, { cityOnly = false } = {}) {
   if (!event) return '';
+  if (cityOnly) {
+    return getEventCityLabel(event);
+  }
   if (event.locationName) return sanitize(event.locationName);
   if (event.address) return sanitize(event.address);
   const loc = event.location;
@@ -90,10 +105,7 @@ async function getShareLink(type, id) {
     const res = await call({ type, id });
     payload = res?.data || null;
   } catch (err) {
-    console.warn(
-      '[share] callable failed, using fallback',
-      err?.message || err
-    );
+    logger.warn('[share] callable failed, using fallback', err?.message || err);
   }
 
   const result =
@@ -128,8 +140,9 @@ function activityToChannel(activityType) {
   return map[activityType] || activityType;
 }
 
-function buildEventMessage(event, link, preview = {}) {
+function buildEventMessage(event, link, preview = {}, options = {}) {
   // Description: TestFlight beta marketing message for events
+  const maskDetails = options?.maskDetails === true;
   const testflightUrl = 'https://testflight.apple.com/join/qSuvsM4q';
   const lines = [];
   const title =
@@ -138,10 +151,12 @@ function buildEventMessage(event, link, preview = {}) {
     'Check out this event on Social Circle';
   lines.push(`🎉 ${title}`);
 
-  const when = formatDate(event?.date) || preview?.descriptionTime;
+  const when =
+    formatDate(event?.date, { includeTime: !maskDetails }) ||
+    preview?.descriptionTime;
   if (when) lines.push(`📅 ${when}`);
 
-  const where = pickLocation(event);
+  const where = pickLocation(event, { cityOnly: maskDetails });
   if (where) lines.push(`📍 ${where}`);
 
   const snippet = truncate(event?.description || preview?.description, 120);
@@ -241,7 +256,8 @@ export async function shareEvent(event, context = {}) {
   try {
     // Description: Use TestFlight URL for beta testing period
     const testflightUrl = 'https://testflight.apple.com/join/qSuvsM4q';
-    const message = buildEventMessage(event, testflightUrl, {});
+    const maskDetails = shouldMaskRsvpDetails(event, context?.viewerId || null);
+    const message = buildEventMessage(event, testflightUrl, {}, { maskDetails });
     const result = await Share.share({
       message,
       url: testflightUrl,
