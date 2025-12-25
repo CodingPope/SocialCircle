@@ -2,7 +2,11 @@
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { db, serverTimestamp, functions as firebaseFunctions } from '../../../services/firebase/config';
+import {
+  db,
+  serverTimestamp,
+  functions as firebaseFunctions,
+} from '../../../services/firebase/config';
 import { useUserStore } from '../../profile';
 import { EAS_PROJECT_ID } from '@env';
 import logger from '../../../lib/logger';

@@ -6,7 +6,11 @@ import {
   getUserData,
   updateUserData,
 } from '../../../services/firebase/config';
-import { findSoftDeletedUserByEmail, reactivateUser, mergeUserFields } from '../api/userService';
+import {
+  findSoftDeletedUserByEmail,
+  reactivateUser,
+  mergeUserFields,
+} from '../api/userService';
 import { navigationRef, resetRoot } from '../../../navigation/RootNavigation';
 import { getNextOnboardingStep } from '../../auth/utils/onboardingRouter';
 
@@ -127,7 +131,10 @@ export const useUserStore = create((set) => ({
         const current = useUserStore.getState().user;
         if (current && current.uid) {
           // Best-effort: clear token while still authenticated
-          await mergeUserFields(current.uid, { deviceToken: null, pushOptIn: false });
+          await mergeUserFields(current.uid, {
+            deviceToken: null,
+            pushOptIn: false,
+          });
         }
       } catch (e) {
         // Non-fatal; continue with sign out

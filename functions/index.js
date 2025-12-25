@@ -619,7 +619,10 @@ exports.claimDeviceToken = onCall(
 
     const token = (req.data?.token || '').toString().trim();
     const targetUid = (req.data?.uid || '').toString().trim();
-    const devicePlatform = typeof req.data?.devicePlatform === 'string' ? req.data.devicePlatform : null;
+    const devicePlatform =
+      typeof req.data?.devicePlatform === 'string'
+        ? req.data.devicePlatform
+        : null;
     if (!token) throw new HttpsError('invalid-argument', 'Missing token');
     if (!targetUid) throw new HttpsError('invalid-argument', 'Missing uid');
     if (targetUid !== callerUid)
@@ -627,7 +630,10 @@ exports.claimDeviceToken = onCall(
 
     try {
       // Find any user docs that currently hold this token
-      const q = db.collection('users').where('deviceToken', '==', token).limit(50);
+      const q = db
+        .collection('users')
+        .where('deviceToken', '==', token)
+        .limit(50);
       const snap = await q.get();
       const batch = db.batch();
       let cleared = 0;
@@ -653,7 +659,12 @@ exports.claimDeviceToken = onCall(
       batch.set(targetRef, payload, { merge: true });
 
       await batch.commit();
-      logger.log('[claimDeviceToken] claimed token for', targetUid, 'clearedFrom:', cleared);
+      logger.log(
+        '[claimDeviceToken] claimed token for',
+        targetUid,
+        'clearedFrom:',
+        cleared
+      );
       return { ok: true, clearedFrom: cleared };
     } catch (err) {
       logger.error('[claimDeviceToken] error', err?.message || err);
@@ -946,286 +957,279 @@ exports.onNotificationCreatedPush = onDocumentCreated(
 
 // Callable: RSVP to event — creates chat doc (id == eventId) on first RSVP and ensures participants list
 // App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
-exports.rsvpEvent = onCall(
-  JOIN_CALLABLE_OPTIONS,
-  async (req) => {
-    const auth = req.auth;
-    const data = req.data || {};
-    const eventId = data.eventId;
-    const userId = data.userId;
+exports.rsvpEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
+  const auth = req.auth;
+  const data = req.data || {};
+  const eventId = data.eventId;
+  const userId = data.userId;
 
-    if (!auth || !auth.uid) {
-      logger.error('[rsvpEvent] unauthenticated call');
-      throw new HttpsError('unauthenticated', 'Authentication required');
-    }
-    if (!eventId || !userId) {
-      logger.error('[rsvpEvent] missing params', { eventId, userId });
-      throw new HttpsError('invalid-argument', 'Missing parameters');
-    }
+  if (!auth || !auth.uid) {
+    logger.error('[rsvpEvent] unauthenticated call');
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  if (!eventId || !userId) {
+    logger.error('[rsvpEvent] missing params', { eventId, userId });
+    throw new HttpsError('invalid-argument', 'Missing parameters');
+  }
 
-    const eventRef = db.doc(`events/${eventId}`);
-    const chatRef = db.doc(`chats/${eventId}`);
-    const userRef = db.doc(`users/${userId}`);
+  const eventRef = db.doc(`events/${eventId}`);
+  const chatRef = db.doc(`chats/${eventId}`);
+  const userRef = db.doc(`users/${userId}`);
 
-    try {
-      const result = await db.runTransaction(async (tx) => {
-        const [evSnap, chatSnap, userSnap] = await Promise.all([
-          tx.get(eventRef),
-          tx.get(chatRef),
-          tx.get(userRef),
-        ]);
-        if (!evSnap.exists)
-          throw new HttpsError('not-found', 'Event does not exist');
-        const ev = evSnap.data();
-        const ownerId = ev.ownerId || null;
+  try {
+    const result = await db.runTransaction(async (tx) => {
+      const [evSnap, chatSnap, userSnap] = await Promise.all([
+        tx.get(eventRef),
+        tx.get(chatRef),
+        tx.get(userRef),
+      ]);
+      if (!evSnap.exists)
+        throw new HttpsError('not-found', 'Event does not exist');
+      const ev = evSnap.data();
+      const ownerId = ev.ownerId || null;
 
-        let hostData = {};
-        if (ownerId) {
-          const hostSnap = await tx.get(db.doc(`users/${ownerId}`));
-          if (hostSnap.exists) hostData = hostSnap.data() || {};
-        }
-
-        // Do not allow direct joins for RSVP events
-        if ((ev.privacy || 'public').toLowerCase() === 'rsvp') {
-          throw new HttpsError(
-            'failed-precondition',
-            'RSVP event requires host approval'
-          );
-        }
-
-        // Gender eligibility
-        const userDoc = userSnap.exists ? userSnap.data() : {};
-        const userSex = (userDoc.sex || userDoc.gender || '')
-          .toString()
-          .toLowerCase();
-        const privacy = (ev.privacy || 'public').toString().toLowerCase();
-        if (privacy === 'female-only' && userSex !== 'female') {
-          throw new HttpsError('permission-denied', 'Not eligible (gender)');
-        }
-        if (privacy === 'male-only' && userSex !== 'male') {
-          throw new HttpsError('permission-denied', 'Not eligible (gender)');
-        }
-
-        // Age eligibility
-        const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
-        if (range && range.length === 2) {
-          const [min, max] = range.map((n) =>
-            typeof n === 'number' ? n : parseInt(n, 10)
-          );
-          const age = getAgeFromDob(userDoc.dob);
-          if (typeof age === 'number') {
-            if (
-              (typeof min === 'number' && age < min) ||
-              (typeof max === 'number' && age > max)
-            ) {
-              throw new HttpsError('permission-denied', 'Not eligible (age)');
-            }
-          }
-        }
-
-        // Capacity check
-        const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
-        if (
-          typeof ev.capacity === 'number' &&
-          ev.capacity > 0 &&
-          attendeesArr.length >= ev.capacity &&
-          !attendeesArr.includes(userId)
-        ) {
-          throw new HttpsError(
-            'failed-precondition',
-            'Event is full. Join the waitlist if available.'
-          );
-        }
-
-        if (ownerId) {
-          const viewerBlocked = Array.isArray(userDoc.blocked)
-            ? userDoc.blocked.includes(ownerId)
-            : false;
-          const viewerBlockedBy = Array.isArray(userDoc.blockedBy)
-            ? userDoc.blockedBy.includes(ownerId)
-            : false;
-          const hostBlocksViewer = Array.isArray(hostData.blocked)
-            ? hostData.blocked.includes(userId)
-            : false;
-          const hostBlockedByViewer = Array.isArray(hostData.blockedBy)
-            ? hostData.blockedBy.includes(userId)
-            : false;
-          if (
-            viewerBlocked ||
-            viewerBlockedBy ||
-            hostBlocksViewer ||
-            hostBlockedByViewer
-          ) {
-            throw new HttpsError(
-              'permission-denied',
-              'You cannot join this event.'
-            );
-          }
-        }
-
-        // Compute participants union (owner + attendees + user)
-        const participants = new Set(attendeesArr);
-        if (ownerId) participants.add(ownerId);
-        participants.add(userId);
-        const participantsArray = Array.from(participants);
-
-        // Prepare attendee snippet
-        const snippet = userSnap.exists
-          ? buildSnippetFromUser(userId, userSnap.data())
-          : {
-              uid: userId,
-              name: 'User',
-              photoURL: null,
-              verified: false,
-              rating: null,
-            };
-
-        const updates = {};
-        if (!attendeesArr.includes(userId)) {
-          updates.attendees = admin.firestore.FieldValue.arrayUnion(userId);
-          updates.attendeesCount = admin.firestore.FieldValue.increment(1);
-          updates[`attendeeSnippets.${userId}`] = snippet;
-        }
-        if (Object.keys(updates).length) tx.update(eventRef, updates);
-
-        if (!chatSnap.exists) {
-          tx.set(chatRef, {
-            eventId,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            createdBy: ownerId || req.auth.uid,
-            participants: participantsArray,
-            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-            messageCount: 0,
-            isArchived: false,
-            pinned: null,
-          });
-        } else {
-          tx.update(chatRef, {
-            participants: admin.firestore.FieldValue.arrayUnion(
-              ...participantsArray
-            ),
-            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-        tx.update(userRef, {
-          attendingEvents: admin.firestore.FieldValue.arrayUnion(eventId),
-        });
-        return { chatId: eventId, participants: participantsArray, ownerId };
-      });
-
-      // Notify host that someone joined their event (best-effort outside transaction)
-      try {
-        if (result.ownerId && result.ownerId !== userId) {
-          const eventSnap = await eventRef.get();
-          const eventData = eventSnap.data();
-          const userSnap = await userRef.get();
-          const userData = userSnap.exists ? userSnap.data() : {};
-          const userName = buildUserDisplayName(userData);
-
-          await db.collection('notifications').add({
-            type: 'event_joined',
-            recipientId: result.ownerId,
-            eventId,
-            userId, // who joined
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            linkType: 'event',
-            linkId: eventId,
-            message: `${userName} joined ${eventData?.title || 'your event'}`,
-            userName,
-            read: false,
-          });
-        }
-      } catch (e) {
-        logger.error('[rsvpEvent] event_joined notify error', e?.message || e);
+      let hostData = {};
+      if (ownerId) {
+        const hostSnap = await tx.get(db.doc(`users/${ownerId}`));
+        if (hostSnap.exists) hostData = hostSnap.data() || {};
       }
 
-      return result;
-    } catch (err) {
-      if (err instanceof HttpsError) throw err;
-      throw new HttpsError('internal', err?.message || 'RSVP failed');
+      // Do not allow direct joins for RSVP events
+      if ((ev.privacy || 'public').toLowerCase() === 'rsvp') {
+        throw new HttpsError(
+          'failed-precondition',
+          'RSVP event requires host approval'
+        );
+      }
+
+      // Gender eligibility
+      const userDoc = userSnap.exists ? userSnap.data() : {};
+      const userSex = (userDoc.sex || userDoc.gender || '')
+        .toString()
+        .toLowerCase();
+      const privacy = (ev.privacy || 'public').toString().toLowerCase();
+      if (privacy === 'female-only' && userSex !== 'female') {
+        throw new HttpsError('permission-denied', 'Not eligible (gender)');
+      }
+      if (privacy === 'male-only' && userSex !== 'male') {
+        throw new HttpsError('permission-denied', 'Not eligible (gender)');
+      }
+
+      // Age eligibility
+      const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
+      if (range && range.length === 2) {
+        const [min, max] = range.map((n) =>
+          typeof n === 'number' ? n : parseInt(n, 10)
+        );
+        const age = getAgeFromDob(userDoc.dob);
+        if (typeof age === 'number') {
+          if (
+            (typeof min === 'number' && age < min) ||
+            (typeof max === 'number' && age > max)
+          ) {
+            throw new HttpsError('permission-denied', 'Not eligible (age)');
+          }
+        }
+      }
+
+      // Capacity check
+      const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
+      if (
+        typeof ev.capacity === 'number' &&
+        ev.capacity > 0 &&
+        attendeesArr.length >= ev.capacity &&
+        !attendeesArr.includes(userId)
+      ) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Event is full. Join the waitlist if available.'
+        );
+      }
+
+      if (ownerId) {
+        const viewerBlocked = Array.isArray(userDoc.blocked)
+          ? userDoc.blocked.includes(ownerId)
+          : false;
+        const viewerBlockedBy = Array.isArray(userDoc.blockedBy)
+          ? userDoc.blockedBy.includes(ownerId)
+          : false;
+        const hostBlocksViewer = Array.isArray(hostData.blocked)
+          ? hostData.blocked.includes(userId)
+          : false;
+        const hostBlockedByViewer = Array.isArray(hostData.blockedBy)
+          ? hostData.blockedBy.includes(userId)
+          : false;
+        if (
+          viewerBlocked ||
+          viewerBlockedBy ||
+          hostBlocksViewer ||
+          hostBlockedByViewer
+        ) {
+          throw new HttpsError(
+            'permission-denied',
+            'You cannot join this event.'
+          );
+        }
+      }
+
+      // Compute participants union (owner + attendees + user)
+      const participants = new Set(attendeesArr);
+      if (ownerId) participants.add(ownerId);
+      participants.add(userId);
+      const participantsArray = Array.from(participants);
+
+      // Prepare attendee snippet
+      const snippet = userSnap.exists
+        ? buildSnippetFromUser(userId, userSnap.data())
+        : {
+            uid: userId,
+            name: 'User',
+            photoURL: null,
+            verified: false,
+            rating: null,
+          };
+
+      const updates = {};
+      if (!attendeesArr.includes(userId)) {
+        updates.attendees = admin.firestore.FieldValue.arrayUnion(userId);
+        updates.attendeesCount = admin.firestore.FieldValue.increment(1);
+        updates[`attendeeSnippets.${userId}`] = snippet;
+      }
+      if (Object.keys(updates).length) tx.update(eventRef, updates);
+
+      if (!chatSnap.exists) {
+        tx.set(chatRef, {
+          eventId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdBy: ownerId || req.auth.uid,
+          participants: participantsArray,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+          messageCount: 0,
+          isArchived: false,
+          pinned: null,
+        });
+      } else {
+        tx.update(chatRef, {
+          participants: admin.firestore.FieldValue.arrayUnion(
+            ...participantsArray
+          ),
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      tx.update(userRef, {
+        attendingEvents: admin.firestore.FieldValue.arrayUnion(eventId),
+      });
+      return { chatId: eventId, participants: participantsArray, ownerId };
+    });
+
+    // Notify host that someone joined their event (best-effort outside transaction)
+    try {
+      if (result.ownerId && result.ownerId !== userId) {
+        const eventSnap = await eventRef.get();
+        const eventData = eventSnap.data();
+        const userSnap = await userRef.get();
+        const userData = userSnap.exists ? userSnap.data() : {};
+        const userName = buildUserDisplayName(userData);
+
+        await db.collection('notifications').add({
+          type: 'event_joined',
+          recipientId: result.ownerId,
+          eventId,
+          userId, // who joined
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          linkType: 'event',
+          linkId: eventId,
+          message: `${userName} joined ${eventData?.title || 'your event'}`,
+          userName,
+          read: false,
+        });
+      }
+    } catch (e) {
+      logger.error('[rsvpEvent] event_joined notify error', e?.message || e);
     }
+
+    return result;
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', err?.message || 'RSVP failed');
   }
-);
+});
 
 // Callable: allow a signed-in attendee to leave an event (removes from attendees, updates user arrays, prunes chat participants)
 // App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
-exports.leaveEvent = onCall(
-  JOIN_CALLABLE_OPTIONS,
-  async (req) => {
-    const auth = req.auth;
-    const data = req.data || {};
-    const eventId = data.eventId;
-    const uid = auth?.uid;
+exports.leaveEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
+  const auth = req.auth;
+  const data = req.data || {};
+  const eventId = data.eventId;
+  const uid = auth?.uid;
 
-    if (!auth || !uid) {
-      throw new HttpsError('unauthenticated', 'Authentication required');
-    }
-    if (!eventId) {
-      throw new HttpsError('invalid-argument', 'Missing eventId');
-    }
+  if (!auth || !uid) {
+    throw new HttpsError('unauthenticated', 'Authentication required');
+  }
+  if (!eventId) {
+    throw new HttpsError('invalid-argument', 'Missing eventId');
+  }
 
-    const eventRef = db.doc(`events/${eventId}`);
-    const chatRef = db.doc(`chats/${eventId}`);
-    const userRef = db.doc(`users/${uid}`);
+  const eventRef = db.doc(`events/${eventId}`);
+  const chatRef = db.doc(`chats/${eventId}`);
+  const userRef = db.doc(`users/${uid}`);
 
-    try {
-      const result = await db.runTransaction(async (tx) => {
-        // READS first
-        const [evSnap, chatSnap] = await Promise.all([
-          tx.get(eventRef),
-          tx.get(chatRef),
-        ]);
-        if (!evSnap.exists)
-          throw new HttpsError('not-found', 'Event not found');
-        const ev = evSnap.data();
+  try {
+    const result = await db.runTransaction(async (tx) => {
+      // READS first
+      const [evSnap, chatSnap] = await Promise.all([
+        tx.get(eventRef),
+        tx.get(chatRef),
+      ]);
+      if (!evSnap.exists) throw new HttpsError('not-found', 'Event not found');
+      const ev = evSnap.data();
 
-        // Host cannot leave via this API
-        if (ev.ownerId === uid) {
-          throw new HttpsError(
-            'failed-precondition',
-            'Hosts cannot leave their own event'
-          );
-        }
+      // Host cannot leave via this API
+      if (ev.ownerId === uid) {
+        throw new HttpsError(
+          'failed-precondition',
+          'Hosts cannot leave their own event'
+        );
+      }
 
-        const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
-        const alreadyGone = !attendeesArr.includes(uid);
+      const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
+      const alreadyGone = !attendeesArr.includes(uid);
 
-        // WRITES
-        const updates = {};
-        if (!alreadyGone) {
-          updates.attendees = admin.firestore.FieldValue.arrayRemove(uid);
-          updates.attendeesCount = admin.firestore.FieldValue.increment(-1);
-          updates[`attendeeSnippets.${uid}`] =
-            admin.firestore.FieldValue.delete();
-          tx.update(eventRef, updates);
-        }
+      // WRITES
+      const updates = {};
+      if (!alreadyGone) {
+        updates.attendees = admin.firestore.FieldValue.arrayRemove(uid);
+        updates.attendeesCount = admin.firestore.FieldValue.increment(-1);
+        updates[`attendeeSnippets.${uid}`] =
+          admin.firestore.FieldValue.delete();
+        tx.update(eventRef, updates);
+      }
 
-        // Update chat participants (if chat exists)
-        if (chatSnap.exists) {
-          tx.update(chatRef, {
-            participants: admin.firestore.FieldValue.arrayRemove(uid),
-            lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-          });
-        }
-
-        // Update user mirrors (best-effort; presence not required)
-        tx.update(userRef, {
-          attendingEvents: admin.firestore.FieldValue.arrayRemove(eventId),
-          attendedEvents: admin.firestore.FieldValue.arrayRemove(eventId),
+      // Update chat participants (if chat exists)
+      if (chatSnap.exists) {
+        tx.update(chatRef, {
+          participants: admin.firestore.FieldValue.arrayRemove(uid),
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         });
+      }
 
-        return { ok: true, removed: !alreadyGone };
+      // Update user mirrors (best-effort; presence not required)
+      tx.update(userRef, {
+        attendingEvents: admin.firestore.FieldValue.arrayRemove(eventId),
+        attendedEvents: admin.firestore.FieldValue.arrayRemove(eventId),
       });
 
-      logger.log('[leaveEvent] success', { eventId, uid });
-      return result;
-    } catch (err) {
-      if (err instanceof HttpsError) throw err;
-      logger.error('[leaveEvent] error', err?.message || err);
-      throw new HttpsError('internal', err?.message || 'Leave event failed');
-    }
+      return { ok: true, removed: !alreadyGone };
+    });
+
+    logger.log('[leaveEvent] success', { eventId, uid });
+    return result;
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('[leaveEvent] error', err?.message || err);
+    throw new HttpsError('internal', err?.message || 'Leave event failed');
   }
-);
+});
 
 // Callable: delete (soft) an event — runs with admin privileges to avoid client rule issues
 // App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
@@ -1329,100 +1333,95 @@ exports.deleteEvent = onCall(
 
 // Callable: request to join an RSVP event (adds caller to requests, notifies host)
 // App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
-exports.requestToJoinEvent = onCall(
-  JOIN_CALLABLE_OPTIONS,
-  async (req) => {
-    const uid = req.auth?.uid;
-    const { eventId } = req.data || {};
-    if (!uid)
-      throw new HttpsError('unauthenticated', 'Authentication required');
-    if (!eventId) throw new HttpsError('invalid-argument', 'Missing eventId');
+exports.requestToJoinEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
+  const uid = req.auth?.uid;
+  const { eventId } = req.data || {};
+  if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
+  if (!eventId) throw new HttpsError('invalid-argument', 'Missing eventId');
 
-    const eventRef = db.doc(`events/${eventId}`);
-    const notifRef = db.collection('notifications');
+  const eventRef = db.doc(`events/${eventId}`);
+  const notifRef = db.collection('notifications');
 
-    try {
-      const result = await db.runTransaction(async (tx) => {
-        const [evSnap, userSnap] = await Promise.all([
-          tx.get(eventRef),
-          tx.get(db.doc(`users/${uid}`)),
-        ]);
-        if (!evSnap.exists)
-          throw new HttpsError('not-found', 'Event not found');
-        const ev = evSnap.data();
-        if (ev.isDeleted === true)
-          throw new HttpsError('failed-precondition', 'Event archived');
-        if ((ev.privacy || 'public').toLowerCase() !== 'rsvp')
-          throw new HttpsError('failed-precondition', 'Event is not RSVP');
-        if (ev.ownerId === uid || ev.hostId === uid)
-          throw new HttpsError('failed-precondition', 'Host cannot request');
+  try {
+    const result = await db.runTransaction(async (tx) => {
+      const [evSnap, userSnap] = await Promise.all([
+        tx.get(eventRef),
+        tx.get(db.doc(`users/${uid}`)),
+      ]);
+      if (!evSnap.exists) throw new HttpsError('not-found', 'Event not found');
+      const ev = evSnap.data();
+      if (ev.isDeleted === true)
+        throw new HttpsError('failed-precondition', 'Event archived');
+      if ((ev.privacy || 'public').toLowerCase() !== 'rsvp')
+        throw new HttpsError('failed-precondition', 'Event is not RSVP');
+      if (ev.ownerId === uid || ev.hostId === uid)
+        throw new HttpsError('failed-precondition', 'Host cannot request');
 
-        // Eligibility checks against user profile
-        const userDoc = userSnap.exists ? userSnap.data() : {};
-        const userSex = (userDoc.sex || userDoc.gender || '')
-          .toString()
-          .toLowerCase();
-        const privacy = (ev.privacy || 'public').toString().toLowerCase();
-        if (privacy === 'female-only' && userSex !== 'female') {
-          throw new HttpsError('permission-denied', 'Not eligible (gender)');
-        }
-        if (privacy === 'male-only' && userSex !== 'male') {
-          throw new HttpsError('permission-denied', 'Not eligible (gender)');
-        }
-        const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
-        if (range && range.length === 2) {
-          const [min, max] = range.map((n) =>
-            typeof n === 'number' ? n : parseInt(n, 10)
-          );
-          const age = getAgeFromDob(userDoc.dob);
-          if (typeof age === 'number') {
-            if (
-              (typeof min === 'number' && age < min) ||
-              (typeof max === 'number' && age > max)
-            ) {
-              throw new HttpsError('permission-denied', 'Not eligible (age)');
-            }
+      // Eligibility checks against user profile
+      const userDoc = userSnap.exists ? userSnap.data() : {};
+      const userSex = (userDoc.sex || userDoc.gender || '')
+        .toString()
+        .toLowerCase();
+      const privacy = (ev.privacy || 'public').toString().toLowerCase();
+      if (privacy === 'female-only' && userSex !== 'female') {
+        throw new HttpsError('permission-denied', 'Not eligible (gender)');
+      }
+      if (privacy === 'male-only' && userSex !== 'male') {
+        throw new HttpsError('permission-denied', 'Not eligible (gender)');
+      }
+      const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
+      if (range && range.length === 2) {
+        const [min, max] = range.map((n) =>
+          typeof n === 'number' ? n : parseInt(n, 10)
+        );
+        const age = getAgeFromDob(userDoc.dob);
+        if (typeof age === 'number') {
+          if (
+            (typeof min === 'number' && age < min) ||
+            (typeof max === 'number' && age > max)
+          ) {
+            throw new HttpsError('permission-denied', 'Not eligible (age)');
           }
         }
+      }
 
-        const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
-        const requests = Array.isArray(ev.requests) ? ev.requests : [];
-        if (attendees.includes(uid))
-          throw new HttpsError('already-exists', 'Already an attendee');
-        if (requests.includes(uid)) return { ok: true, alreadyRequested: true };
+      const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
+      const requests = Array.isArray(ev.requests) ? ev.requests : [];
+      if (attendees.includes(uid))
+        throw new HttpsError('already-exists', 'Already an attendee');
+      if (requests.includes(uid)) return { ok: true, alreadyRequested: true };
 
-        tx.update(eventRef, {
-          requests: admin.firestore.FieldValue.arrayUnion(uid),
-          waitlistCount: admin.firestore.FieldValue.increment(1),
-        });
-
-        const ownerId = ev.ownerId;
-        const requesterName = buildUserDisplayName(userDoc);
-        if (ownerId) {
-          tx.set(notifRef.doc(), {
-            type: 'rsvp_request',
-            recipientId: ownerId,
-            eventId,
-            requesterId: uid,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            message: `${requesterName} requested to join your event`,
-            linkType: 'event',
-            linkId: eventId,
-            requesterName,
-            read: false,
-          });
-        }
-
-        return { ok: true };
+      tx.update(eventRef, {
+        requests: admin.firestore.FieldValue.arrayUnion(uid),
+        waitlistCount: admin.firestore.FieldValue.increment(1),
       });
 
-      return result;
-    } catch (err) {
-      if (err instanceof HttpsError) throw err;
-      throw new HttpsError('internal', err?.message || 'Request failed');
-    }
+      const ownerId = ev.ownerId;
+      const requesterName = buildUserDisplayName(userDoc);
+      if (ownerId) {
+        tx.set(notifRef.doc(), {
+          type: 'rsvp_request',
+          recipientId: ownerId,
+          eventId,
+          requesterId: uid,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          message: `${requesterName} requested to join your event`,
+          linkType: 'event',
+          linkId: eventId,
+          requesterName,
+          read: false,
+        });
+      }
+
+      return { ok: true };
+    });
+
+    return result;
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', err?.message || 'Request failed');
   }
-);
+});
 
 // Callable: host accepts an RSVP request
 exports.acceptRsvpRequest = onCall(
