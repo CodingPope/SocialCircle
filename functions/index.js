@@ -202,24 +202,29 @@ function buildUserTierUpdate(tier) {
         plan: USER_TIERS.PAID,
         isPopular: false,
       };
-    case USER_TIERS.POPULAR:
-      return {
+    case USER_TIERS.POPULAR: {
+      const out = {
         accountTier: USER_TIERS.POPULAR,
         premiumActive: false,
-        // prefer FieldValue.delete() when available; fall back to undefined
-        premiumTier: fieldDelete(),
         plan: 'free',
         isPopular: true,
       };
+      const del = fieldDelete();
+      if (del !== undefined) out.premiumTier = del;
+      return out;
+    }
     case USER_TIERS.BASIC:
-    default:
-      return {
+    default: {
+      const out = {
         accountTier: USER_TIERS.BASIC,
         premiumActive: false,
-        premiumTier: fieldDelete(),
         plan: 'free',
         isPopular: false,
       };
+      const del = fieldDelete();
+      if (del !== undefined) out.premiumTier = del;
+      return out;
+    }
   }
 }
 
