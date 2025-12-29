@@ -26,6 +26,14 @@ const {
 admin.initializeApp();
 const db = admin.firestore(); // convenience
 const FieldValue = admin.firestore.FieldValue;
+function fieldDelete() {
+  try {
+    if (FieldValue && typeof FieldValue.delete === 'function') return FieldValue.delete();
+  } catch (e) {
+    // ignore
+  }
+  return undefined;
+}
 const projectId = process.env.GCLOUD_PROJECT;
 const ENFORCE_APPCHECK =
   process.env.ENFORCE_APPCHECK === '1' ||
@@ -198,7 +206,8 @@ function buildUserTierUpdate(tier) {
       return {
         accountTier: USER_TIERS.POPULAR,
         premiumActive: false,
-        premiumTier: FieldValue.delete(),
+        // prefer FieldValue.delete() when available; fall back to undefined
+        premiumTier: fieldDelete(),
         plan: 'free',
         isPopular: true,
       };
@@ -207,7 +216,7 @@ function buildUserTierUpdate(tier) {
       return {
         accountTier: USER_TIERS.BASIC,
         premiumActive: false,
-        premiumTier: FieldValue.delete(),
+        premiumTier: fieldDelete(),
         plan: 'free',
         isPopular: false,
       };
