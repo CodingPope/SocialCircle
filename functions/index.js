@@ -569,7 +569,13 @@ exports.adminBackfillTiers = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
         if (needsUpdate) {
           updated += 1;
           if (!dryRun) {
-            if (normalizeUserFlags && forcedUserTier) {
+            if (normalizeUserFlags) {
+              // When normalizeUserFlags is requested, apply the full
+              // user tier update (accountTier, plan, premiumActive,
+              // and isPopular) based on the derived tier. Previously
+              // we only did this when a forcedUserTier was provided,
+              // which left `isPopular` unpopulated during normal
+              // backfills.
               const updates = buildUserTierUpdate(derived);
               batch.set(docSnap.ref, updates, { merge: true });
             } else {
