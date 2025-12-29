@@ -13,6 +13,15 @@ const {
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const { geohashForLocation } = require('geofire-common');
+const {
+  BUSINESS_TIERS,
+  USER_TIERS,
+  normalizeUserTier,
+  normalizeBusinessTier,
+  deriveUserTier,
+  hasUserTier,
+  hasBusinessTier,
+} = require('./tiers');
 
 admin.initializeApp();
 const db = admin.firestore(); // convenience
@@ -25,6 +34,12 @@ const JOIN_CALLABLE_OPTIONS = Object.freeze({
   region: 'us-central1',
   memory: '256MiB',
   timeoutSeconds: 60,
+  enforceAppCheck: ENFORCE_APPCHECK,
+});
+const ADMIN_CALLABLE_OPTIONS = Object.freeze({
+  region: 'us-central1',
+  memory: '256MiB',
+  timeoutSeconds: 120,
   enforceAppCheck: ENFORCE_APPCHECK,
 });
 
@@ -124,6 +139,79 @@ function normalizeSexMetric(value) {
   if (['prefer_not_say', 'prefer not to say'].includes(raw))
     return 'prefer_not_say';
   return 'other';
+}
+
+async function syncAccountTierClaims(uid, accountTier) {
+  try {
+    const userRecord = await admin.auth().getUser(uid);
+    const currentClaims = userRecord.customClaims || {};
+    if (currentClaims.accountTier === accountTier) return null;
+    await admin.auth().setCustomUserClaims(uid, {
+      ...currentClaims,
+      accountTier,
+    });
+    return true;
+  } catch (err) {
+    if (err?.code === 'auth/user-not-found') return null;
+    logger.warn('[tiers] syncAccountTierClaims failed:', err?.message || err);
+    return null;
+  }
+}
+
+function buildUserTierPatch(user) {
+  const nextTier = deriveUserTier(user);
+  if (!nextTier || user?.accountTier === nextTier) return null;
+  return { accountTier: nextTier };
+}
+
+function requireUserTier(user, requiredTier, context = 'This action') {
+  if (!hasUserTier(user, requiredTier)) {
+    const expected = normalizeUserTier(requiredTier) || USER_TIERS.BASIC;
+    throw new HttpsError(
+      'permission-denied',
+      `${context} requires ${expected} tier.`
+    );
+  }
+}
+
+function requireBusinessTier(business, requiredTier, context = 'This action') {
+  if (!hasBusinessTier(business, requiredTier)) {
+    const expected = normalizeBusinessTier(requiredTier) || BUSINESS_TIERS.TIER1;
+    throw new HttpsError(
+      'permission-denied',
+      `${context} requires ${expected} business tier.`
+    );
+  }
+}
+
+function buildUserTierUpdate(tier) {
+  switch (tier) {
+    case USER_TIERS.PAID:
+      return {
+        accountTier: USER_TIERS.PAID,
+        premiumActive: true,
+        premiumTier: USER_TIERS.PAID,
+        plan: USER_TIERS.PAID,
+        isPopular: false,
+      };
+    case USER_TIERS.POPULAR:
+      return {
+        accountTier: USER_TIERS.POPULAR,
+        premiumActive: false,
+        premiumTier: FieldValue.delete(),
+        plan: 'free',
+        isPopular: true,
+      };
+    case USER_TIERS.BASIC:
+    default:
+      return {
+        accountTier: USER_TIERS.BASIC,
+        premiumActive: false,
+        premiumTier: FieldValue.delete(),
+        plan: 'free',
+        isPopular: false,
+      };
+  }
 }
 
 function buildUserDisplayName(user = {}) {
@@ -318,6 +406,287 @@ exports.syncAuthWithSoftDelete = onDocumentUpdated(
     }
   }
 );
+
+// Description: Keep accountTier in sync with premium/popular flags.
+exports.syncUserAccountTierOnCreate = onDocumentCreated(
+  'users/{userId}',
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const patch = buildUserTierPatch(snap.data() || {});
+    if (!patch) {
+      const derived = deriveUserTier(snap.data() || {});
+      if (derived) await syncAccountTierClaims(event.params.userId, derived);
+      return;
+    }
+    await snap.ref.set(patch, { merge: true });
+    await syncAccountTierClaims(event.params.userId, patch.accountTier);
+  }
+);
+
+exports.syncUserAccountTierOnUpdate = onDocumentUpdated(
+  'users/{userId}',
+  async (event) => {
+    const after = event.data.after;
+    if (!after) return;
+    const beforeData = event.data.before?.data() || {};
+    const afterData = after.data() || {};
+    const tierInputsChanged = [
+      'premiumActive',
+      'premiumTier',
+      'plan',
+      'isPopular',
+      'accountTier',
+    ].some((key) => beforeData[key] !== afterData[key]);
+    if (!tierInputsChanged) return;
+
+    const patch = buildUserTierPatch(afterData);
+    if (patch) {
+      await after.ref.set(patch, { merge: true });
+      await syncAccountTierClaims(event.params.userId, patch.accountTier);
+      return;
+    }
+
+    const derived = deriveUserTier(afterData);
+    if (derived) await syncAccountTierClaims(event.params.userId, derived);
+  }
+);
+
+// Description: Ensure businessTier defaults to tier1 when businesses are created.
+exports.ensureBusinessTierOnCreate = onDocumentCreated(
+  'businesses/{bizId}',
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const data = snap.data() || {};
+    const normalized = normalizeBusinessTier(data.businessTier);
+    if (normalized) return;
+    await snap.ref.set({ businessTier: BUSINESS_TIERS.TIER1 }, { merge: true });
+  }
+);
+
+// -------------------- TIERS: ADMIN HELPERS --------------------
+exports.adminSetUserTier = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
+  assertAdmin(req);
+  const { uid, accountTier } = req.data || {};
+  if (!uid) throw new HttpsError('invalid-argument', 'Missing uid');
+  const normalized = normalizeUserTier(accountTier);
+  if (!normalized) {
+    throw new HttpsError('invalid-argument', 'Invalid accountTier');
+  }
+
+  const userRef = db.collection('users').doc(uid);
+  const snap = await userRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'User not found');
+
+  const updates = buildUserTierUpdate(normalized);
+  await userRef.set(updates, { merge: true });
+  await syncAccountTierClaims(uid, normalized);
+
+  return { ok: true, uid, accountTier: normalized };
+});
+
+exports.adminSetBusinessTier = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
+  assertAdmin(req);
+  const { bizId, businessTier } = req.data || {};
+  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
+  const normalized = normalizeBusinessTier(businessTier);
+  if (!normalized) {
+    throw new HttpsError('invalid-argument', 'Invalid businessTier');
+  }
+
+  const bizRef = db.collection('businesses').doc(bizId);
+  const snap = await bizRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Business not found');
+
+  await bizRef.set({ businessTier: normalized }, { merge: true });
+  return { ok: true, bizId, businessTier: normalized };
+});
+
+exports.adminBackfillTiers = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
+  try {
+    assertAdmin(req);
+    const data = req.data || {};
+    const dryRun = data.dryRun === true;
+    const syncClaims = data.syncClaims !== false;
+    const forceClaims = data.forceClaims === true;
+    const scope = String(data.scope || 'all').toLowerCase();
+    const limit = Number(data.limit || 0);
+    const userCursor = data.userCursor || null;
+    const businessCursor = data.businessCursor || null;
+    const normalizeUserFlags = data.normalizeUserFlags === true;
+    const forceUserTierRaw = data.forceUserTier;
+    const forceBusinessTierRaw = data.forceBusinessTier;
+    const forcedUserTier = forceUserTierRaw
+      ? normalizeUserTier(forceUserTierRaw)
+      : null;
+    const forcedBusinessTier = forceBusinessTierRaw
+      ? normalizeBusinessTier(forceBusinessTierRaw)
+      : null;
+
+    if (forceUserTierRaw && !forcedUserTier) {
+      throw new HttpsError('invalid-argument', 'Invalid forceUserTier');
+    }
+    if (forceBusinessTierRaw && !forcedBusinessTier) {
+      throw new HttpsError('invalid-argument', 'Invalid forceBusinessTier');
+    }
+
+    const backfillUsers = async ({ startAfter }) => {
+    const pageSize = 250;
+    let processed = 0;
+    let updated = 0;
+    let claimsSynced = 0;
+    let cursor = startAfter;
+    let done = false;
+
+    while (true) {
+      if (limit && processed >= limit) break;
+      const pageLimit = limit
+        ? Math.min(pageSize, limit - processed)
+        : pageSize;
+      let q = db
+        .collection('users')
+        .orderBy('__name__')
+        .limit(pageLimit);
+      if (cursor) q = q.startAfter(cursor);
+
+      const snap = await q.get();
+      if (snap.empty) {
+        done = true;
+        break;
+      }
+
+      const batch = db.batch();
+      let writes = 0;
+      const claimQueue = [];
+
+      snap.docs.forEach((docSnap) => {
+        processed += 1;
+        const userData = docSnap.data() || {};
+        const derived = forcedUserTier || deriveUserTier(userData);
+        const current = normalizeUserTier(userData.accountTier);
+        const needsUpdate = current !== derived;
+        if (needsUpdate) {
+          updated += 1;
+          if (!dryRun) {
+            if (normalizeUserFlags && forcedUserTier) {
+              const updates = buildUserTierUpdate(derived);
+              batch.set(docSnap.ref, updates, { merge: true });
+            } else {
+              batch.set(
+                docSnap.ref,
+                { accountTier: derived },
+                { merge: true }
+              );
+            }
+            writes += 1;
+          }
+        }
+        if (syncClaims && (needsUpdate || forceClaims)) {
+          claimQueue.push({ uid: docSnap.id, tier: derived });
+        }
+      });
+
+      if (!dryRun && writes > 0) {
+        await batch.commit();
+      }
+
+      if (syncClaims && claimQueue.length > 0) {
+        for (const entry of claimQueue) {
+          await syncAccountTierClaims(entry.uid, entry.tier);
+          claimsSynced += 1;
+        }
+      }
+
+      cursor = snap.docs[snap.docs.length - 1]?.id || cursor;
+      if (snap.size < pageLimit) {
+        done = true;
+        break;
+      }
+    }
+
+    return {
+      processed,
+      updated,
+      claimsSynced,
+      nextCursor: done ? null : cursor,
+      done,
+    };
+  };
+
+    const backfillBusinesses = async ({ startAfter }) => {
+    const pageSize = 250;
+    let processed = 0;
+    let updated = 0;
+    let cursor = startAfter;
+    let done = false;
+
+    while (true) {
+      if (limit && processed >= limit) break;
+      const pageLimit = limit
+        ? Math.min(pageSize, limit - processed)
+        : pageSize;
+      let q = db
+        .collection('businesses')
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(pageLimit);
+      if (cursor) q = q.startAfter(cursor);
+
+      const snap = await q.get();
+      if (snap.empty) {
+        done = true;
+        break;
+      }
+
+      const batch = db.batch();
+      let writes = 0;
+
+      snap.docs.forEach((docSnap) => {
+        processed += 1;
+        const bizData = docSnap.data() || {};
+        const current = normalizeBusinessTier(bizData.businessTier);
+        const target = forcedBusinessTier || current || BUSINESS_TIERS.TIER1;
+        if (current === target) return;
+        updated += 1;
+        if (!dryRun) {
+          batch.set(docSnap.ref, { businessTier: target }, { merge: true });
+          writes += 1;
+        }
+      });
+
+      if (!dryRun && writes > 0) {
+        await batch.commit();
+      }
+
+      cursor = snap.docs[snap.docs.length - 1]?.id || cursor;
+      if (snap.size < pageLimit) {
+        done = true;
+        break;
+      }
+    }
+
+    return { processed, updated, nextCursor: done ? null : cursor, done };
+  };
+
+    const result = {};
+    if (scope === 'all' || scope === 'users') {
+      result.users = await backfillUsers({ startAfter: userCursor });
+    }
+    if (scope === 'all' || scope === 'businesses') {
+      result.businesses = await backfillBusinesses({
+        startAfter: businessCursor,
+      });
+    }
+
+    const payload = { ok: true, dryRun, scope, result };
+    logger.log('[adminBackfillTiers] completed', payload);
+    return payload;
+  } catch (err) {
+    logger.error('[adminBackfillTiers] error', err?.message || err);
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', err?.message || 'Backfill failed');
+  }
+});
 
 exports.getEvents = onCall(
   {
@@ -2940,6 +3309,37 @@ function assertAuth(req) {
   return uid;
 }
 
+function assertAdmin(req) {
+  const uid = req.auth?.uid || null;
+  if (req.auth?.token?.admin === true) return uid;
+  if (process.env.FUNCTIONS_EMULATOR || process.env.FIREBASE_EMULATOR_HUB) {
+    logger.warn('[admin] Emulator bypass for admin check');
+    return uid || 'emulator';
+  }
+  if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
+  throw new HttpsError('permission-denied', 'Admin privileges required');
+}
+
+async function markUserAsBusiness(uid) {
+  if (!uid) return;
+  try {
+    const userRef = db.collection('users').doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) return;
+    const data = snap.data() || {};
+    if (data.type === 'business') return;
+    await userRef.set(
+      {
+        type: 'business',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    logger.warn('[business] Failed to mark user as business', err?.message || err);
+  }
+}
+
 function normalizeType(t) {
   const v = String(t || '').toLowerCase();
   return v === 'multi' ? 'multi' : 'single';
@@ -3059,6 +3459,7 @@ exports.createBusinessDraft = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
     ownerId: uid, // FIX: Add ownerId for queries
     status: 'draft',
     type,
+    businessTier: BUSINESS_TIERS.TIER1,
     displayName: null,
     legalName: null,
     category: null,
@@ -3083,6 +3484,7 @@ exports.createBusinessDraft = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   };
   await ref.set(doc);
   await mirrorMembership(uid, ref.id, 'Owner');
+  await markUserAsBusiness(uid);
   logger.log('[business] draft created', ref.id, 'by', uid);
   return { ok: true, bizId: ref.id };
 });
@@ -3378,6 +3780,7 @@ exports.submitBusiness = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
     { status, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
     { merge: true }
   );
+  await markUserAsBusiness(uid);
   return { ok: true, status };
 });
 
