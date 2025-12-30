@@ -15,6 +15,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '../../auth/context/AuthContext';
 import auth from '@react-native-firebase/auth';
 import appCheck from '@react-native-firebase/app-check';
+import logger from '../../../lib/logger';
 import { useTheme } from '../../../theme';
 import { useSessionRole } from '../stores/sessionRoleStore';
 import { useBizOnboarding } from '../../business/stores/businessOnboardingStore';
