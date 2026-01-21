@@ -9,16 +9,18 @@ export function getNextOnboardingStep(userData) {
   if (!userData.sex) {
     return 'Sex';
   }
+  // TOS acceptance step (Guideline 1.2 compliance)
+  // Only show if user has never been prompted (tosPromptedAt is missing)
+  if (!userData.tosPromptedAt) {
+    return 'TOS';
+  }
   // Interests step
   if (!Array.isArray(userData.interests) || userData.interests.length === 0) {
     return 'InterestsScreen';
   }
-  // Location step (optional, remove if not needed)
-  if (
-    !userData.location ||
-    userData.location.latitude == null ||
-    userData.location.longitude == null
-  ) {
+  // Location step (optional - users can skip per Apple Guideline 5.1.5)
+  // Only show if user has never been prompted for location
+  if (!userData.locationPromptedAt) {
     return 'Location';
   }
   // All steps complete

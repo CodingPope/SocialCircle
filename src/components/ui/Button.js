@@ -32,7 +32,7 @@ const createStyles = (theme) => {
       fontSize: 16,
     },
     textPrimary: {
-      color: colors.neutral100,
+      color: '#FFFFFF',
     },
     textSecondary: {
       color: colors.primary,
@@ -57,12 +57,19 @@ export default function Button({
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const buttonVariantStyle = styles[variant] || styles.primary;
-  const textVariantKey = `text${variant.charAt(0).toUpperCase()}${variant.slice(1)}`;
+  const textVariantKey = `text${variant.charAt(0).toUpperCase()}${variant.slice(
+    1
+  )}`;
   const textVariantStyle = styles[textVariantKey] || styles.textPrimary;
 
   return (
     <TouchableOpacity
-      style={[styles.base, buttonVariantStyle, disabled && styles.disabled, style]}
+      style={[
+        styles.base,
+        buttonVariantStyle,
+        disabled && styles.disabled,
+        style,
+      ]}
       onPress={onPress}
       activeOpacity={0.85}
       disabled={disabled}
@@ -71,7 +78,9 @@ export default function Button({
       {children ? (
         children
       ) : (
-        <Text style={[styles.textBase, textVariantStyle, textStyle]}>{title}</Text>
+        <Text style={[styles.textBase, textVariantStyle, textStyle]}>
+          {title}
+        </Text>
       )}
     </TouchableOpacity>
   );

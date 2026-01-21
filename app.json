@@ -34,6 +34,7 @@
         "NSPhotoLibraryAddUsageDescription": "We save event photos and profile pictures to your library on request.",
         "NSRemindersUsageDescription": "Allow reminders access if you choose to manage reminders in Social Circle.",
         "NSCalendarsUsageDescription": "Allow calendar access so you can add events to your calendar.",
+        "NSUserTrackingUsageDescription": "We use analytics to improve app performance and personalize your experience. Your data is never sold.",
         "FIREBASE_ANALYTICS_COLLECTION_ENABLED": false
       },
       "googleServicesFile": "./GoogleService-Info.plist"
@@ -55,6 +56,7 @@
     },
     "plugins": [
       "expo-apple-authentication",
+      "expo-tracking-transparency",
       [
         "expo-notifications",
         {

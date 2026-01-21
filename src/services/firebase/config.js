@@ -16,6 +16,8 @@ logger.debug('[Firebase] Initializing configuration');
 let USE_FIREBASE_EMULATORS = '0';
 let FIREBASE_EMULATOR_HOST = '';
 let FORCE_FIREBASE_APPCHECK_DEBUG = '0';
+let DISABLE_FIREBASE_APPCHECK =
+  typeof __DEV__ !== 'undefined' && __DEV__ ? '1' : '0';
 try {
   const envVars = require('@env');
   if (envVars && envVars.USE_FIREBASE_EMULATORS) {
@@ -27,6 +29,9 @@ try {
   if (envVars && envVars.FORCE_FIREBASE_APPCHECK_DEBUG) {
     FORCE_FIREBASE_APPCHECK_DEBUG = envVars.FORCE_FIREBASE_APPCHECK_DEBUG;
   }
+  if (envVars && envVars.DISABLE_FIREBASE_APPCHECK) {
+    DISABLE_FIREBASE_APPCHECK = envVars.DISABLE_FIREBASE_APPCHECK;
+  }
   logger.debug('[Firebase] Environment variables loaded');
 } catch (error) {
   // @env module not available in production builds, use default
@@ -34,6 +39,8 @@ try {
     '[Firebase] Environment variables not available, using defaults'
   );
 }
+
+const isDevBuild = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
 
 let authInstance = null;
 
@@ -275,16 +282,18 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
   }
 
   // Description: Try to get an App Check token so the manual request passes enforceAppCheck
-  try {
-    const tokenResult = await appCheck().getToken(true);
-    if (tokenResult?.token) {
-      appCheckToken = tokenResult.token;
+  if (!APP_CHECK_DISABLED) {
+    try {
+      const tokenResult = await appCheck().getToken(true);
+      if (tokenResult?.token) {
+        appCheckToken = tokenResult.token;
+      }
+    } catch (tokenErr) {
+      logger.warn(
+        `[Firebase] Failed to get App Check token for ${name}:`,
+        tokenErr?.message || tokenErr
+      );
     }
-  } catch (tokenErr) {
-    logger.warn(
-      `[Firebase] Failed to get App Check token for ${name}:`,
-      tokenErr?.message || tokenErr
-    );
   }
 
   // Ensure we have a projectId for manual fetch URL
@@ -383,14 +392,16 @@ const callCallable = async (name, payload) => {
       );
     }
 
-    try {
-      // Preflight App Check token so callable has a valid token when enforced.
-      await appCheck().getToken(true);
-    } catch (tokenError) {
-      logger.warn(
-        `[Firebase] Failed to prefetch App Check token before ${name}:`,
-        tokenError?.message || tokenError
-      );
+    if (!APP_CHECK_DISABLED) {
+      try {
+        // Preflight App Check token so callable has a valid token when enforced.
+        await appCheck().getToken(true);
+      } catch (tokenError) {
+        logger.warn(
+          `[Firebase] Failed to prefetch App Check token before ${name}:`,
+          tokenError?.message || tokenError
+        );
+      }
     }
 
     logger.debug(`[Firebase] Calling ${name} with user ${user.uid}`);
@@ -448,6 +459,7 @@ if (__DEV__) {
 // Uses debug provider in dev, DeviceCheck (iOS) / Play Integrity (Android) in production
 // Reference: https://rnfirebase.io/app-check/usage
 let lastAlertedAppCheckToken = null;
+const APP_CHECK_DISABLED = DISABLE_FIREBASE_APPCHECK === '1';
 
 const logAppCheckDebugToken = (source, token) => {
   if (!token) {
@@ -486,7 +498,6 @@ const logAppCheckDebugToken = (source, token) => {
   }
 };
 
-const isDevBuild = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
 const shouldUseDebugAppCheck =
   isDevBuild ||
   FORCE_FIREBASE_APPCHECK_DEBUG === '1' ||
@@ -524,7 +535,11 @@ const scheduleDebugTokenRequest = (reason, delayMs = 0) => {
   }, delayMs);
 };
 
-if (shouldUseDebugAppCheck) {
+if (APP_CHECK_DISABLED) {
+  logger.info(
+    '[Firebase App Check] Disabled via DISABLE_FIREBASE_APPCHECK=1 (skipping initialization)'
+  );
+} else if (shouldUseDebugAppCheck) {
   try {
     const debugModeSource = isDevBuild ? 'dev build' : 'forced override';
     console.log(
@@ -1007,6 +1022,13 @@ export const setBusinessPrivacy = async (payload) =>
 
 export const submitBusiness = async (payload) =>
   callCallable('submitBusiness', payload); // { ok, status }
+
+// New: Upsert business in one step (used by simplified onboarding)
+export const createOrUpdateBusiness = async (payload) =>
+  callCallable('createOrUpdateBusiness', payload);
+
+export const switchToPersonalAccount = async () =>
+  callCallable('switchToPersonalAccount', {});
 
 // -------------------- USER VERIFICATION --------------------
 

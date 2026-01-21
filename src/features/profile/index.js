@@ -6,6 +6,7 @@ export { default as FriendsListSection } from './components/FriendsListSection';
 export { default as InfoArticleScreen } from './components/InfoArticleScreen';
 export { default as InterestSelector } from './components/InterestSelector';
 export { default as ManageInterestsScreen } from './components/ManageInterestsScreen';
+export { default as AccountTypeScreen } from './components/AccountTypeScreen';
 export { default as PrivacyInfoScreen } from './components/PrivacyInfoScreen';
 export { default as PrivacySettingsScreen } from './components/PrivacySettingsScreen';
 export { default as ProfileHeader } from './components/ProfileHeader';

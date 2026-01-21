@@ -131,8 +131,21 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).changedKeys().hasAny([
         'premiumActive', 'premiumTier', 'premiumSince', 'premiumUntil',
         'isPopular', 'popularScore',
-        'type', 'businessTier', 'plan'
+        'type', 'businessTier', 'plan', 'accountTier'
       ]);
+    }
+
+    // Tier helpers for rules-level gating (server-managed via custom claims)
+    function accountTier() {
+      return request.auth.token.accountTier is string
+        ? request.auth.token.accountTier
+        : 'basic';
+    }
+    function accountTierRank(t) {
+      return t == 'popular' ? 3 : t == 'paid' ? 2 : 1;
+    }
+    function hasAccountTier(required) {
+      return Rank(accountTier()) >= accountTierRank(required);
     }
 
     match /users/{uid} {
@@ -148,7 +161,15 @@ service cloud.firestore {
         // Type must be 'user' or missing (defaults to 'user')
         (!request.resource.data.keys().hasAny(['type']) || request.resource.data.type == 'user') &&
         // Disallow premium/business tier fields entirely on create
-        !request.resource.data.keys().hasAny(['premiumTier','premiumSince','premiumUntil','popularScore','businessTier','plan']);
+        !request.resource.data.keys().hasAny([
+          'premiumTier',
+          'premiumSince',
+          'premiumUntil',
+          'popularScore',
+          'businessTier',
+          'plan',
+          'accountTier'
+        ]);
 
       // Owners can update their profile, but not restricted fields
       allow update: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&

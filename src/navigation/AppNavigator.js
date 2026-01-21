@@ -1,6 +1,6 @@
 // src/navigation/AppNavigator.js
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -16,6 +16,7 @@ import {
   SexScreen,
   InterestsScreen,
   LocationScreen,
+  TOSAcceptanceScreen,
 } from '../features/auth';
 import {
   ProfileScreen,
@@ -33,19 +34,16 @@ import {
 } from '../features/notifications';
 import {
   ManageInterestsScreen,
+  AccountTypeScreen,
   PrivacyInfoScreen,
   InfoArticleScreen,
   useUserStore,
   useSessionRole,
 } from '../features/profile';
 import {
-  BusinessHomePlaceholder,
   BusinessOnboardingStack,
-  BusinessCircleScreen,
-  BusinessDiscoverScreen,
-  BusinessMapScreen,
   BusinessProfileScreen,
-  useBizOnboarding,
+  BusinessSettingsScreen,
 } from '../features/business';
 import { useAuth } from '../features/auth/context/AuthContext';
 
@@ -70,6 +68,7 @@ function OnboardingStackScreen({ initialRouteName = 'NameDob' }) {
     >
       <OnboardingStack.Screen name='NameDob' component={NameDobScreen} />
       <OnboardingStack.Screen name='Sex' component={SexScreen} />
+      <OnboardingStack.Screen name='TOS' component={TOSAcceptanceScreen} />
       <OnboardingStack.Screen name='Location' component={LocationScreen} />
       <OnboardingStack.Screen
         name='InterestsScreen'
@@ -95,14 +94,20 @@ function ProfileStackScreen() {
 
 // --- Main Tabs ---
 const Tab = createBottomTabNavigator();
-function MainTabs() {
+function MainTabs({ initialRouteName = 'Map', onConsumeConsumerRoute }) {
   const hasUnreadNotifications = useNotificationStore((s) => s.hasUnread);
   const theme = useTheme();
   const themeMode = useThemeStore((state) => state.mode);
 
+  React.useEffect(() => {
+    if (typeof onConsumeConsumerRoute === 'function') {
+      onConsumeConsumerRoute();
+    }
+  }, [onConsumeConsumerRoute]);
+
   return (
     <Tab.Navigator
-      initialRouteName='Map'
+      initialRouteName={initialRouteName}
       screenOptions={{
         headerShown: false,
         tabBarStyle: {
@@ -175,132 +180,53 @@ function MainTabs() {
   );
 }
 
-// Business Tabs (separate root)
-const BizTab = createBottomTabNavigator();
+// Business Stack (profile + settings via hamburger)
+const BizStack = createNativeStackNavigator();
 function BusinessTabs() {
-  const theme = useTheme();
-
   return (
-    <BizTab.Navigator
-      initialRouteName='BizProfile'
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: theme.colors.card,
-          borderTopColor: theme.colors.border,
-        },
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textSecondary,
-      }}
-    >
-      <BizTab.Screen
-        name='BizMap'
-        component={BusinessMapScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name='map-outline' color={color} size={size} />
-          ),
-          title: 'Map',
-        }}
-      />
-      <BizTab.Screen
-        name='BizDiscover'
-        component={BusinessDiscoverScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name='search-outline' color={color} size={size} />
-          ),
-          title: 'Discover',
-        }}
-      />
-      <BizTab.Screen
-        name='BizCircle'
-        component={BusinessCircleScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => <Radar color={color} size={size} />,
-          title: 'My Circle',
-        }}
-      />
-      <BizTab.Screen
-        name='BizProfile'
-        component={BusinessProfileScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name='briefcase-outline' color={color} size={size} />
-          ),
-          title: 'Profile',
-        }}
-      />
-    </BizTab.Navigator>
-  );
-}
-
-const BusinessRoot = createNativeStackNavigator();
-function BusinessRootScreen() {
-  // Peek so we don't clear before navigator mounts
-  const peek = useSessionRole((s) => s.peekNextBusinessRoute);
-  const consume = useSessionRole((s) => s.consumeNextBusinessRoute);
-  const { user, loading: authLoading } = useAuth();
-  const resumeLatestDraft = useBizOnboarding((s) => s.resumeLatestDraft);
-  const bizId = useBizOnboarding((s) => s.bizId);
-  const draftStatus = useBizOnboarding((s) => s.draft?.status);
-
-  useEffect(() => {
-    if (!authLoading && user?.uid) {
-      resumeLatestDraft(user.uid).catch(() => {});
-    }
-  }, [authLoading, resumeLatestDraft, user?.uid]);
-
-  const next = peek();
-  const status = (draftStatus || 'draft').toLowerCase();
-  let initial = 'BusinessOnboarding';
-  if (next) {
-    initial = next;
-  } else if (bizId && status !== 'draft') {
-    initial = 'BusinessTabs';
-  }
-
-  return (
-    <BusinessRoot.Navigator
-      key={initial}
-      screenOptions={{ headerShown: false }}
-      initialRouteName={initial}
-    >
-      <BusinessRoot.Screen name='BusinessTabs' component={BusinessTabs} />
-      <BusinessRoot.Screen
-        name='BusinessOnboarding'
-        component={BusinessOnboardingStack}
-        listeners={{
-          focus: () => {
-            // Once focused first time, consume flag
-            try {
-              consume();
-            } catch {}
-          },
-        }}
-      />
-      <BusinessRoot.Screen
-        name='BusinessHome'
-        component={BusinessHomePlaceholder}
-      />
-    </BusinessRoot.Navigator>
+    <BizStack.Navigator screenOptions={{ headerShown: false }}>
+      <BizStack.Screen name='BizProfile' component={BusinessProfileScreen} />
+      <BizStack.Screen name='BizSettings' component={BusinessSettingsScreen} />
+    </BizStack.Navigator>
   );
 }
 
 // --- Root Stack (Wraps Tabs & Non-tab Screens) ---
 const RootStack = createNativeStackNavigator();
 function RootStackScreen() {
+  const consumeNextConsumerRoute = useSessionRole(
+    (s) => s.consumeNextConsumerRoute
+  );
+  const peekNextConsumerRoute = useSessionRole((s) => s.peekNextConsumerRoute);
+  const consumerRoute = peekNextConsumerRoute?.() || null;
+  const initialTab =
+    consumerRoute === 'Profile' ? 'ProfileStack' : consumerRoute || 'Map';
+
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
-      <RootStack.Screen name='MainTabs' component={MainTabs} />
+      <RootStack.Screen name='MainTabs'>
+        {(props) => (
+          <MainTabs
+            {...props}
+            initialRouteName={initialTab}
+            onConsumeConsumerRoute={consumeNextConsumerRoute}
+          />
+        )}
+      </RootStack.Screen>
       {/* Business routes */}
       <RootStack.Screen
         name='BusinessOnboarding'
         component={BusinessOnboardingStack}
       />
       <RootStack.Screen
-        name='BusinessHome'
-        component={BusinessHomePlaceholder}
+        name='BusinessTabs'
+        component={BusinessTabs}
+        options={{ headerShown: false }}
+      />
+      <RootStack.Screen
+        name='BusinessProfile'
+        component={BusinessProfileScreen}
+        options={{ headerShown: true, title: 'Business profile' }}
       />
       <RootStack.Screen
         name='EventChat'
@@ -333,6 +259,11 @@ function RootStackScreen() {
         options={{ headerShown: false }}
       />
       <RootStack.Screen
+        name='AccountType'
+        component={AccountTypeScreen}
+        options={{ headerShown: false }}
+      />
+      <RootStack.Screen
         name='PrivacyInfo'
         component={PrivacyInfoScreen}
         options={{ headerShown: false }}
@@ -342,7 +273,32 @@ function RootStackScreen() {
         component={InfoArticleScreen}
         options={{ headerShown: false }}
       />
+      <RootStack.Screen
+        name='TOSAcceptance'
+        component={TOSAcceptanceScreen}
+        options={{ headerShown: false }}
+      />
     </RootStack.Navigator>
+  );
+}
+
+// --- Business Root Stack (profile stack + onboarding) ---
+const BizRootStack = createNativeStackNavigator();
+function BizRootStackScreen() {
+  return (
+    <BizRootStack.Navigator screenOptions={{ headerShown: false }}>
+      <BizRootStack.Screen name='BusinessTabs' component={BusinessTabs} />
+      <BizRootStack.Screen
+        name='BusinessOnboarding'
+        component={BusinessOnboardingStack}
+      />
+      <BizRootStack.Screen name='PrivacyInfo' component={PrivacyInfoScreen} />
+      <BizRootStack.Screen name='InfoArticle' component={InfoArticleScreen} />
+      <BizRootStack.Screen
+        name='TOSAcceptance'
+        component={TOSAcceptanceScreen}
+      />
+    </BizRootStack.Navigator>
   );
 }
 
@@ -361,6 +317,15 @@ function AppNavigator({ user, profileComplete, initialOnboardingStep }) {
       : storeProfileComplete;
 
   const sessionRole = useSessionRole((s) => s.role);
+  const setNextConsumerRoute = useSessionRole((s) => s.setNextConsumerRoute);
+  const { user: authUser } = useAuth();
+  const normalizedUserType = String(authUser?.type || user?.type || '')
+    .toLowerCase()
+    .trim();
+  const roleFromUserDoc =
+    normalizedUserType === 'business' ? 'business' : 'consumer';
+  const effectiveRole = sessionRole || roleFromUserDoc || 'consumer';
+  const effectiveBiz = effectiveRole === 'business';
 
   if (!effectiveUser) {
     return <AuthStackScreen />;
@@ -373,11 +338,7 @@ function AppNavigator({ user, profileComplete, initialOnboardingStep }) {
     );
   }
   // Choose root by session role
-  return sessionRole === 'business' ? (
-    <BusinessRootScreen />
-  ) : (
-    <RootStackScreen />
-  );
+  return effectiveBiz ? <BizRootStackScreen /> : <RootStackScreen />;
 }
 
 export default AppNavigator;

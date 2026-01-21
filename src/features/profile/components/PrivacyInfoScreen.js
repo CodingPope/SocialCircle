@@ -9,8 +9,11 @@ import {
   Platform,
   StatusBar,
   PanResponder,
+  Alert,
+  Linking,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Location from 'expo-location';
 import { db, serverTimestamp } from '../../../services/firebase/config';
 import { useUserStore } from '../stores/userStore';
 import {
@@ -100,6 +103,68 @@ export default function PrivacyInfoScreen({ navigation }) {
     navigation.navigate('InfoArticle', { title, contentKey });
   };
 
+  // Description: Handle TOS acceptance - navigate to TOS screen
+  const handleTOSAcceptance = () => {
+    // Navigate to TOS acceptance screen (reuses onboarding TOS screen)
+    navigation.navigate('TOSAcceptance', {
+      fromSettings: true,
+      onComplete: () => {
+        navigation.goBack();
+      },
+    });
+  };
+
+  // Description: Handle location permission request
+  const handleLocationPermission = async () => {
+    try {
+      const { status: currentStatus } =
+        await Location.getForegroundPermissionsAsync();
+
+      if (currentStatus === 'granted') {
+        Alert.alert(
+          'Location Already Enabled',
+          'You have already granted location permission. To change this, go to your device Settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+        return;
+      }
+
+      if (currentStatus === 'denied') {
+        Alert.alert(
+          'Permission Denied',
+          'Location permission was previously denied. Please enable it in your device Settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+        return;
+      }
+
+      // Request permission
+      const { status } = await Location.requestForegroundPermissionsAsync();
+
+      if (status === 'granted') {
+        Alert.alert('Success', 'Location permission granted!');
+      } else {
+        Alert.alert(
+          'Permission Denied',
+          'You can enable location in Settings anytime.',
+          [
+            { text: 'OK', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('Error handling location permission:', error);
+      Alert.alert('Error', 'Failed to update location permission.');
+    }
+  };
+
   // Description: Swipe right anywhere to go back (iOS-style), works on Android too
   const backSwipe = useRef(null);
   backSwipe.current =
@@ -130,6 +195,73 @@ export default function PrivacyInfoScreen({ navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Account & Permissions Section */}
+        <View style={styles.card}>
+          <Text style={[styles.title, { marginBottom: 12 }]}>
+            Account & Permissions
+          </Text>
+
+          {/* TOS Acceptance */}
+          <TouchableOpacity
+            style={styles.permissionRow}
+            onPress={handleTOSAcceptance}
+            accessible
+            accessibilityLabel='Review and accept Terms of Service'
+          >
+            <View style={styles.permissionLeft}>
+              <Ionicons
+                name={
+                  user?.tosAccepted
+                    ? 'checkmark-circle'
+                    : 'alert-circle-outline'
+                }
+                size={22}
+                color={
+                  user?.tosAccepted ? '#22C55E' : theme.colors.textSecondary
+                }
+              />
+              <View style={styles.permissionTextContainer}>
+                <Text style={styles.permissionTitle}>Terms of Service</Text>
+                <Text style={styles.permissionSubtitle}>
+                  {user?.tosAccepted ? 'Accepted' : 'Required to create events'}
+                </Text>
+              </View>
+            </View>
+            <Ionicons
+              name='chevron-forward'
+              size={20}
+              color={theme.colors.textSecondary}
+            />
+          </TouchableOpacity>
+
+          {/* Location Permission */}
+          <TouchableOpacity
+            style={styles.permissionRow}
+            onPress={handleLocationPermission}
+            accessible
+            accessibilityLabel='Manage location permission'
+          >
+            <View style={styles.permissionLeft}>
+              <Ionicons
+                name='location-outline'
+                size={22}
+                color={theme.colors.primary}
+              />
+              <View style={styles.permissionTextContainer}>
+                <Text style={styles.permissionTitle}>Location Services</Text>
+                <Text style={styles.permissionSubtitle}>
+                  Enable to discover nearby events
+                </Text>
+              </View>
+            </View>
+            <Ionicons
+              name='chevron-forward'
+              size={20}
+              color={theme.colors.textSecondary}
+            />
+          </TouchableOpacity>
+        </View>
+
         {/* Personalization toggle */}
         <View
           style={styles.card}
@@ -201,7 +333,7 @@ export default function PrivacyInfoScreen({ navigation }) {
         <View style={styles.card}>
           <Text style={styles.title}>Need help?</Text>
           <Text style={styles.subtitle}>
-            Reach out at support@socialcircle.app
+            Reach out at support@findyourcircle.app
           </Text>
         </View>
       </ScrollView>
@@ -269,5 +401,32 @@ const createStyles = (theme) =>
     linkText: {
       fontSize: 15,
       color: theme.colors.primary,
+    },
+    permissionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    permissionLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      gap: 12,
+    },
+    permissionTextContainer: {
+      flex: 1,
+    },
+    permissionTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 2,
+    },
+    permissionSubtitle: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
     },
   });

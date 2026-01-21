@@ -33,12 +33,14 @@ import {
   auth,
   getUserData,
   updateUserData,
+  switchToPersonalAccount,
   uploadProfileImage,
   db,
   reportContent,
   deleteEvent,
 } from '../../../services/firebase/config';
 import { useUserStore } from '../../profile/stores/userStore';
+import { useSessionRole } from '../../profile/stores/sessionRoleStore';
 import { useMyEvents } from '../hooks/useMyEvents';
 import * as ImagePicker from 'expo-image-picker';
 import { pickAndCompressImage } from '../../../lib/imagePicker';
@@ -109,15 +111,25 @@ const eventListsMatch = (left = [], right = []) => {
   return true;
 };
 
-export default function ProfileScreen({ navigation }) {
+export default function ProfileScreen({
+  navigation,
+  profileOverride = null,
+  mode = 'user',
+}) {
   // Description: Get current user from Zustand userStore
-  const user = useUserStore((state) => state.user);
+  const storeUser = useUserStore((state) => state.user);
+  const user =
+    profileOverride && storeUser
+      ? { ...storeUser, ...profileOverride, uid: storeUser.uid }
+      : storeUser;
   const myEvents = useMyEvents(user?.uid || '');
   const now = new Date();
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const scrollRef = useRef(null);
   useScrollToTop(scrollRef);
+  const setRole = useSessionRole((s) => s.setRole);
+  const setNextConsumerRoute = useSessionRole((s) => s.setNextConsumerRoute);
   useEffect(() => {
     const parent = navigation?.getParent?.();
     if (!parent) return;
@@ -516,7 +528,7 @@ export default function ProfileScreen({ navigation }) {
   };
 
   // --- Derived ---
-  const fullName = `${user.firstName} ${user.lastName}`;
+  const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ');
   const avatarURL =
     user.profileImage ||
     user.avatarURL ||
@@ -1291,6 +1303,19 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
+  const switchToPersonal = async () => {
+    try {
+      setRole('consumer');
+      setNextConsumerRoute('Profile');
+    } catch {}
+    if (!user?.uid) return;
+    try {
+      await switchToPersonalAccount();
+    } catch (err) {
+      console.warn('[profile] Failed to switch account type', err);
+    }
+  };
+
   const handleMenuOptionClick = (option) => {
     setSidebarVisible(false);
     switch (option) {
@@ -1299,6 +1324,23 @@ export default function ProfileScreen({ navigation }) {
         break;
       case 'Manage Interests':
         navigation.navigate('ManageInterestsScreen');
+        break;
+      case 'Account Type':
+        navigation.navigate('AccountType');
+        break;
+      case 'Switch to Business':
+        // For users who already have a business, just switch the session role
+        setRole('business');
+        setNextConsumerRoute('Profile');
+        break;
+      case 'Switch to personal':
+        switchToPersonal();
+        break;
+      case 'Light Mode':
+      case 'Dark Mode':
+        try {
+          toggleTheme();
+        } catch {}
         break;
       case 'Privacy and Info':
         navigation.navigate('PrivacyInfo');
@@ -1452,12 +1494,21 @@ export default function ProfileScreen({ navigation }) {
               <View style={styles.sidebarContentWrapper}>
                 {/* Top Options */}
                 <View style={styles.sidebarTopSection}>
-                  {[
-                    'Edit Profile',
-                    'Manage Interests',
-                    'Logout',
-                    'Privacy and Info',
-                  ].map((option) => (
+                  {(mode === 'business'
+                    ? ['Switch to personal', 'Logout', 'Privacy and Info']
+                    : [
+                        'Edit Profile',
+                        'Manage Interests',
+                        // Description: Show Account Type button only in dev builds (feature flag)
+                        ...(user?.type === 'business'
+                          ? ['Switch to Business']
+                          : __DEV__
+                          ? ['Account Type']
+                          : []),
+                        'Logout',
+                        'Privacy and Info',
+                      ]
+                  ).map((option) => (
                     <TouchableOpacity
                       key={option}
                       style={[
@@ -1484,7 +1535,7 @@ export default function ProfileScreen({ navigation }) {
                   ))}
 
                   {/* Get Verified Button - Show only if not already verified */}
-                  {!verified && (
+                  {!verified && mode !== 'business' && (
                     <TouchableOpacity
                       style={[
                         styles.sidebarOption,
@@ -1553,34 +1604,36 @@ export default function ProfileScreen({ navigation }) {
                 </View>
                 <View style={{ flex: 1 }} />
                 {/* Bottom Delete - moved to bottom */}
-                <View style={styles.sidebarBottomSection}>
-                  <TouchableOpacity
-                    style={[
-                      styles.sidebarOption,
-                      styles.sidebarDeleteOption,
-                      {
-                        backgroundColor: theme.colors.backgroundSecondary,
-                        borderBottomColor: theme.colors.border,
-                      },
-                    ]}
-                    onPress={() => {
-                      closeSidebar();
-                      setTimeout(
-                        () => handleMenuOptionClick('Delete Account'),
-                        200
-                      );
-                    }}
-                  >
-                    <Text
+                {mode !== 'business' && (
+                  <View style={styles.sidebarBottomSection}>
+                    <TouchableOpacity
                       style={[
-                        styles.sidebarOptionText,
-                        styles.sidebarDeleteText,
+                        styles.sidebarOption,
+                        styles.sidebarDeleteOption,
+                        {
+                          backgroundColor: theme.colors.backgroundSecondary,
+                          borderBottomColor: theme.colors.border,
+                        },
                       ]}
+                      onPress={() => {
+                        closeSidebar();
+                        setTimeout(
+                          () => handleMenuOptionClick('Delete Account'),
+                          200
+                        );
+                      }}
                     >
-                      Delete Account
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                      <Text
+                        style={[
+                          styles.sidebarOptionText,
+                          styles.sidebarDeleteText,
+                        ]}
+                      >
+                        Delete Account
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             </SafeAreaView>
           </Animated.View>

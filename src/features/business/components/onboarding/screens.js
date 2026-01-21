@@ -1,5 +1,4 @@
-// Description: Streamlined business onboarding screens (Intro -> Basics -> Location -> Review)
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,1152 +7,551 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  StyleSheet,
 } from 'react-native';
-import logger from '../../../../lib/logger';
+import { LinearGradient } from 'expo-linear-gradient';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import * as Location from 'expo-location';
-import { Ionicons } from '@expo/vector-icons';
-import {
-  useBizOnboarding,
-  BUSINESS_ONBOARDING_STAGES,
-} from '../../stores/businessOnboardingStore';
 import { useAuth } from '../../../auth/context/AuthContext';
-import { useThemeStore } from '../../../../store/themeStore';
+import { useBizOnboarding } from '../../stores/businessOnboardingStore';
+import { useSessionRole } from '../../../profile/stores/sessionRoleStore';
+import { useTheme } from '../../../../theme';
 
-const STAGE_SEQUENCE = [
-  BUSINESS_ONBOARDING_STAGES.BASICS,
-  BUSINESS_ONBOARDING_STAGES.LOCATION,
-  BUSINESS_ONBOARDING_STAGES.REVIEW,
-];
-
-const STAGE_LABELS = {
-  [BUSINESS_ONBOARDING_STAGES.INTRO]: 'Get started',
-  [BUSINESS_ONBOARDING_STAGES.BASICS]: 'Basics',
-  [BUSINESS_ONBOARDING_STAGES.LOCATION]: 'Location',
-  [BUSINESS_ONBOARDING_STAGES.REVIEW]: 'Review & submit',
-  [BUSINESS_ONBOARDING_STAGES.DONE]: 'Live',
-};
-
-export const stageToScreen = (stage) => {
-  switch (stage) {
-    case BUSINESS_ONBOARDING_STAGES.BASICS:
-      return 'Basics';
-    case BUSINESS_ONBOARDING_STAGES.LOCATION:
-      return 'Location';
-    case BUSINESS_ONBOARDING_STAGES.REVIEW:
-    case BUSINESS_ONBOARDING_STAGES.DONE:
-      return 'Review';
-    default:
-      return 'Intro';
-  }
-};
-
-const ProgressHeader = ({ stage }) => {
-  const index = STAGE_SEQUENCE.findIndex((value) => value === stage);
-  const total = STAGE_SEQUENCE.length;
-  const progress =
-    stage === BUSINESS_ONBOARDING_STAGES.DONE
-      ? 100
-      : Math.max(0, index) >= 0
-      ? ((index + 1) / total) * 100
-      : 0;
-
-  const activeIndex =
-    stage === BUSINESS_ONBOARDING_STAGES.DONE ? total - 1 : Math.max(index, 0);
-
+const Input = ({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  multiline,
+  icon,
+}) => {
+  const theme = useTheme();
   return (
-    <View style={{ marginBottom: 24 }}>
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          marginBottom: 8,
-        }}
-      >
-        <Text style={{ fontSize: 12, color: '#666' }}>
-          {STAGE_LABELS[stage] || 'Get started'}
-        </Text>
-        <Text style={{ fontSize: 12, color: '#666', fontWeight: '600' }}>
-          {Math.round(progress)}% complete
-        </Text>
-      </View>
-      <View
-        style={{
-          height: 6,
-          borderRadius: 3,
-          backgroundColor: '#E0E0E0',
-          overflow: 'hidden',
-        }}
-      >
-        <View
-          style={{
-            width: `${progress}%`,
-            height: '100%',
-            borderRadius: 3,
-            backgroundColor: '#2F80ED',
-          }}
-        />
-      </View>
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          marginTop: 10,
-        }}
-      >
-        {STAGE_SEQUENCE.map((value, idx) => (
-          <View key={value} style={{ alignItems: 'center', flex: 1 }}>
-            <View
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: 5,
-                backgroundColor: idx <= activeIndex ? '#2F80ED' : '#D5DBE4',
-              }}
-            />
-            <Text
-              numberOfLines={1}
-              style={{ fontSize: 10, color: '#888', marginTop: 6 }}
-            >
-              {STAGE_LABELS[value]}
-            </Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-};
-
-const InfoPill = ({ icon = 'information-circle-outline', text }) => (
-  <View
-    style={{
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: 12,
-      borderRadius: 12,
-      backgroundColor: '#EBF2FF',
-      marginBottom: 12,
-    }}
-  >
-    <Ionicons
-      name={icon}
-      size={20}
-      color='#2F80ED'
-      style={{ marginRight: 10 }}
-    />
-    <Text style={{ color: '#1A1A1A', flex: 1 }}>{text}</Text>
-  </View>
-);
-
-const MissingDraftNotice = ({ navigation, message }) => (
-  <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-    <View
-      style={{
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-      }}
-    >
-      <Ionicons
-        name='alert-circle-outline'
-        size={56}
-        color='#2F80ED'
-        style={{ marginBottom: 16 }}
-      />
-      <Text
-        style={{
-          fontSize: 18,
-          fontWeight: '700',
-          color: '#1A1A1A',
-          marginBottom: 8,
-        }}
-      >
-        Finish business setup
-      </Text>
+    <View style={{ marginBottom: 16 }}>
       <Text
         style={{
           fontSize: 14,
-          color: '#666',
-          textAlign: 'center',
-          lineHeight: 20,
-          marginBottom: 20,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: 8,
         }}
       >
-        {message ||
-          'We could not find your business draft. Start again to continue.'}
+        {label}
       </Text>
-      <TouchableOpacity
-        onPress={() => navigation.replace('Intro')}
+      <View
         style={{
-          backgroundColor: '#2F80ED',
-          paddingVertical: 12,
-          paddingHorizontal: 24,
-          borderRadius: 8,
+          flexDirection: 'row',
+          alignItems: multiline ? 'flex-start' : 'center',
+          backgroundColor: theme.colors.inputBackground,
+          borderRadius: 12,
+          borderWidth: 1.5,
+          borderColor: theme.colors.border,
+          paddingHorizontal: 14,
+          paddingVertical: multiline ? 12 : 0,
         }}
       >
-        <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 15 }}>
-          Return to start
-        </Text>
-      </TouchableOpacity>
+        {icon && (
+          <Ionicons
+            name={icon}
+            size={20}
+            color={theme.colors.textSecondary}
+            style={{ marginRight: 10, marginTop: multiline ? 2 : 0 }}
+          />
+        )}
+        <TextInput
+          value={value}
+          placeholder={placeholder}
+          placeholderTextColor={theme.colors.textSecondary}
+          onChangeText={onChangeText}
+          multiline={multiline}
+          numberOfLines={multiline ? 4 : 1}
+          style={{
+            flex: 1,
+            fontSize: 16,
+            color: theme.colors.text,
+            paddingVertical: multiline ? 0 : 14,
+            textAlignVertical: multiline ? 'top' : 'center',
+          }}
+        />
+      </View>
     </View>
-  </SafeAreaView>
-);
+  );
+};
 
-export function IntroScreen() {
+export const IntroScreen = () => {
   const navigation = useNavigation();
+  const theme = useTheme();
   const { user } = useAuth();
-  const {
-    start,
-    stage,
-    loading,
-    error,
-    draft,
-    bizId,
-    resumeLatestDraft,
-    hydrated,
-  } = useBizOnboarding();
-  const [refreshing, setRefreshing] = useState(false);
-  const hasDraft = Boolean(bizId);
-  const resumeRoute = stageToScreen(stage);
+  const start = useBizOnboarding((s) => s.start);
+  const loading = useBizOnboarding((s) => s.loading);
+  const setNextConsumerRoute = useSessionRole((s) => s.setNextConsumerRoute);
 
   const handleStart = async () => {
-    if (!user?.uid) {
-      Alert.alert('Sign in required', 'Please sign in to continue.');
-      return;
-    }
-    // Description: Pass user.uid to start() to ensure proper auth context
-    const id = await start(user.uid);
-    if (id) {
-      navigation.navigate('Basics');
-    } else if (error) {
-      // Description: Show alert for auth-specific errors
-      const isAuthError =
-        error?.toLowerCase().includes('unauthenticated') ||
-        error?.toLowerCase().includes('sign in') ||
-        error?.toLowerCase().includes('authentication');
-      if (isAuthError) {
-        Alert.alert(
-          'Authentication Error',
-          'Your session may have expired. Please sign out and sign back in.',
-          [{ text: 'OK' }]
-        );
-      }
-    }
+    const defaults = {
+      displayName: user?.displayName || user?.username || '',
+      contactEmail: user?.email || '',
+    };
+    await start(user?.uid, defaults);
+    navigation.navigate('Basics');
   };
 
-  const handleResume = () => {
-    navigation.navigate(resumeRoute);
-  };
-
-  const handleRefresh = async () => {
-    if (!user?.uid) return;
-    setRefreshing(true);
-    await resumeLatestDraft(user.uid, { force: true });
-    setRefreshing(false);
-  };
+  const styles = createIntroStyles(theme);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <View style={{ alignItems: 'center', marginBottom: 24 }}>
-          <Ionicons name='briefcase' size={64} color='#2F80ED' />
-          <Text
-            style={{
-              fontSize: 26,
-              fontWeight: '700',
-              color: '#1A1A1A',
-              marginTop: 16,
-            }}
-          >
-            Set up your business
-          </Text>
-          <Text
-            style={{
-              fontSize: 15,
-              color: '#666',
-              textAlign: 'center',
-              marginTop: 8,
-              lineHeight: 22,
-            }}
-          >
-            Create a Social Circle business profile in just a few minutes. You
-            can finish advanced settings later.
-          </Text>
-        </View>
-
-        <InfoPill text='Step 1: Add basics → Step 2: Pin your location → Step 3: Review & submit.' />
-
-        {hasDraft && (
-          <View
-            style={{
-              borderWidth: 1,
-              borderColor: '#D5DBE4',
-              backgroundColor: '#FFF',
-              borderRadius: 16,
-              padding: 16,
-              marginBottom: 24,
-            }}
-          >
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A1A' }}>
-              {draft?.displayName || 'Untitled business'}
-            </Text>
-            <Text
-              style={{
-                fontSize: 13,
-                color: '#2F80ED',
-                fontWeight: '600',
-                marginTop: 4,
-              }}
-            >
-              {STAGE_LABELS[stage]}
-            </Text>
-            <TouchableOpacity
-              onPress={handleResume}
-              style={{
-                marginTop: 16,
-                backgroundColor: '#2F80ED',
-                paddingVertical: 12,
-                borderRadius: 10,
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ color: '#FFF', fontWeight: '600' }}>
-                Resume setup
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleRefresh}
-              disabled={refreshing}
-              style={{
-                marginTop: 12,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: '#2F80ED',
-                paddingVertical: 12,
-                alignItems: 'center',
-              }}
-            >
-              {refreshing ? (
-                <ActivityIndicator color='#2F80ED' />
-              ) : (
-                <Text style={{ color: '#2F80ED', fontWeight: '600' }}>
-                  Refresh status
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {error && (
-          <View
-            style={{
-              backgroundColor: '#FEE',
-              borderRadius: 10,
-              padding: 12,
-              marginBottom: 16,
-              borderLeftWidth: 4,
-              borderLeftColor: '#E53E3E',
-            }}
-          >
-            <Text style={{ color: '#C53030' }}>{error}</Text>
-          </View>
-        )}
-
+    <SafeAreaView style={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         <TouchableOpacity
-          disabled={loading}
-          onPress={handleStart}
-          style={{
-            backgroundColor: loading ? '#A0AEC0' : '#2F80ED',
-            paddingVertical: 16,
-            borderRadius: 12,
-            alignItems: 'center',
-            shadowColor: '#000',
-            shadowOpacity: 0.1,
-            shadowRadius: 6,
-            elevation: 3,
-          }}
+          onPress={() =>
+            navigation.reset({
+              index: 0,
+              routes: [{ name: 'MainTabs' }],
+            }) || setNextConsumerRoute('Profile')
+          }
+          style={styles.backButton}
+          activeOpacity={0.6}
         >
-          {loading ? (
-            <ActivityIndicator color='#FFF' />
-          ) : (
-            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 16 }}>
-              {hasDraft ? 'Start a new business' : 'Start business setup'}
-            </Text>
-          )}
+          <Ionicons name='arrow-back' size={20} color={theme.colors.primary} />
+          <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
 
-        {!hydrated && (
-          <Text
-            style={{
-              fontSize: 12,
-              color: '#999',
-              textAlign: 'center',
-              marginTop: 16,
-            }}
+        <View style={styles.iconContainer}>
+          <LinearGradient
+            colors={['#3B82F6', '#8B5CF6', '#EC4899']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.iconGradient}
           >
-            Checking for an existing business draft…
-          </Text>
-        )}
+            <Ionicons name='storefront' size={36} color='#FFFFFF' />
+          </LinearGradient>
+        </View>
+
+        <Text style={styles.title}>Create a business profile</Text>
+        <Text style={styles.description}>
+          Share a public profile for your brand, add contact links, and get
+          discovered. We'll use your existing account—no extra login needed.
+        </Text>
+
+        <View style={styles.featureList}>
+          <FeatureBullet
+            icon='checkmark-circle'
+            text='Use your current account to create a business profile'
+            theme={theme}
+          />
+          <FeatureBullet
+            icon='business'
+            text='Add a name, category, and a way for people to contact you'
+            theme={theme}
+          />
+          <FeatureBullet
+            icon='flash'
+            text='Go live in one step—edit anytime'
+            theme={theme}
+          />
+        </View>
+
+        <TouchableOpacity
+          onPress={handleStart}
+          style={styles.ctaButton}
+          disabled={loading}
+          activeOpacity={0.8}
+        >
+          <LinearGradient
+            colors={['#3B82F6', '#2563EB']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.gradientButton}
+          >
+            {loading ? (
+              <ActivityIndicator color='#FFFFFF' />
+            ) : (
+              <>
+                <Text style={styles.ctaText}>
+                  Continue as{' '}
+                  {user?.username ? `@${user.username}` : 'your account'}
+                </Text>
+                <Ionicons name='arrow-forward' size={20} color='#FFFFFF' />
+              </>
+            )}
+          </LinearGradient>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
-}
+};
 
-export function BasicsScreen() {
+const FeatureBullet = ({ icon, text, theme }) => (
+  <View
+    style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 }}
+  >
+    <View
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: theme.colors.chipBackground,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+      }}
+    >
+      <Ionicons name={icon} size={18} color={theme.colors.primary} />
+    </View>
+    <Text
+      style={{
+        flex: 1,
+        fontSize: 15,
+        color: theme.colors.text,
+        lineHeight: 22,
+      }}
+    >
+      {text}
+    </Text>
+  </View>
+);
+
+const createIntroStyles = (theme) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    scrollContent: {
+      padding: 24,
+      flexGrow: 1,
+    },
+    backButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 24,
+      alignSelf: 'flex-start',
+    },
+    backText: {
+      color: theme.colors.primary,
+      fontWeight: '600',
+      fontSize: 16,
+      marginLeft: 6,
+    },
+    iconContainer: {
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    iconGradient: {
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      justifyContent: 'center',
+      alignItems: 'center',
+      shadowColor: '#3B82F6',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 8,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 12,
+      textAlign: 'center',
+    },
+    description: {
+      fontSize: 16,
+      color: theme.colors.textSecondary,
+      lineHeight: 24,
+      textAlign: 'center',
+      marginBottom: 32,
+    },
+    featureList: {
+      marginBottom: 32,
+    },
+    ctaButton: {
+      borderRadius: 14,
+      overflow: 'hidden',
+      shadowColor: '#2563EB',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 4,
+    },
+    gradientButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 16,
+      paddingHorizontal: 24,
+    },
+    ctaText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 17,
+      marginRight: 8,
+    },
+  });
+
+export const BasicsScreen = () => {
   const navigation = useNavigation();
-  const { bizId, draft, loading, error, saveBasics, stage } =
-    useBizOnboarding();
-  const [displayName, setDisplayName] = useState('');
-  const [category, setCategory] = useState('');
-  const [description, setDescription] = useState('');
-  const [website, setWebsite] = useState('');
-  const [supportEmail, setSupportEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const theme = useTheme();
+  const form = useBizOnboarding((s) => s.form);
+  const updateField = useBizOnboarding((s) => s.updateField);
+  const error = useBizOnboarding((s) => s.error);
+  const clearError = useBizOnboarding((s) => s.clearError);
 
   useEffect(() => {
-    if (!draft) return;
-    setDisplayName(draft.displayName || '');
-    setCategory(draft.category || '');
-    setDescription(draft.description || '');
-    setWebsite(draft.website || '');
-    setSupportEmail(draft.supportEmail || '');
-    setPhone(draft.phone || '');
-  }, [draft]);
-
-  if (!bizId) {
-    return (
-      <MissingDraftNotice
-        navigation={navigation}
-        message='Start a business draft to add your basics.'
-      />
-    );
-  }
-
-  const handleContinue = async () => {
-    const ok = await saveBasics({
-      displayName,
-      category,
-      description,
-      website,
-      supportEmail,
-      phone,
-    });
-    if (ok) navigation.navigate('Location');
-  };
-
-  const disabled = !displayName.trim() || !category.trim() || loading;
+    if (error) {
+      Alert.alert('Save failed', error, [{ text: 'OK', onPress: clearError }]);
+    }
+  }, [error, clearError]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 24 }}
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView contentContainerStyle={{ padding: 24 }}>
-          <ProgressHeader stage={stage} />
-          <Text
-            style={{
-              fontSize: 24,
-              fontWeight: '700',
-              color: '#1A1A1A',
-              marginBottom: 6,
-            }}
-          >
-            Tell us about your business
-          </Text>
-          <Text style={{ fontSize: 15, color: '#666', marginBottom: 20 }}>
-            This info helps people discover and trust your events.
-          </Text>
-
-          <InputBlock
-            label='Business name'
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder='e.g., The Coffee House'
-            required
-          />
-          <InputBlock
-            label='Category'
-            value={category}
-            onChangeText={setCategory}
-            placeholder='e.g., Cafe, Fitness Studio, Coworking'
-            required
-          />
-          <TextBlock
-            label='Short description'
-            value={description}
-            onChangeText={setDescription}
-            placeholder='What makes your business special?'
-            maxLength={200}
-          />
-          <InputBlock
-            label='Website'
-            value={website}
-            onChangeText={setWebsite}
-            placeholder='https://...'
-          />
-          <InputBlock
-            label='Support email'
-            value={supportEmail}
-            onChangeText={setSupportEmail}
-            placeholder='hello@business.com'
-          />
-          <InputBlock
-            label='Phone'
-            value={phone}
-            onChangeText={setPhone}
-            placeholder='(555) 555-5555'
-          />
-
-          {error && (
-            <View
-              style={{
-                backgroundColor: '#FEE',
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 16,
-                borderLeftWidth: 4,
-                borderLeftColor: '#E53E3E',
-              }}
-            >
-              <Text style={{ color: '#C53030' }}>{error}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            disabled={disabled}
-            onPress={handleContinue}
-            style={{
-              backgroundColor: disabled ? '#A0AEC0' : '#2F80ED',
-              paddingVertical: 16,
-              borderRadius: 12,
-              alignItems: 'center',
-              marginTop: 12,
-            }}
-          >
-            {loading ? (
-              <ActivityIndicator color='#FFF' />
-            ) : (
-              <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                Save & continue
-              </Text>
-            )}
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  );
-}
-
-export function LocationScreen() {
-  const navigation = useNavigation();
-  const { bizId, locations, loading, error, saveLocation, stage } =
-    useBizOnboarding();
-  const primary = useMemo(
-    () => (Array.isArray(locations) ? locations[0] : null),
-    [locations]
-  );
-  const [label, setLabel] = useState('');
-  const [address, setAddress] = useState('');
-  const [city, setCity] = useState('');
-  const [state, setState] = useState('');
-  const [country, setCountry] = useState('US');
-  const [coordinates, setCoordinates] = useState(null);
-  const [verifying, setVerifying] = useState(false);
-
-  useEffect(() => {
-    if (!primary) return;
-    setLabel(primary.label || '');
-    setAddress(primary.address || '');
-    setCity(primary.city || '');
-    setState(primary.state || '');
-    setCountry(primary.country || 'US');
-    if (
-      typeof primary.latitude === 'number' &&
-      typeof primary.longitude === 'number'
-    ) {
-      setCoordinates({
-        latitude: primary.latitude,
-        longitude: primary.longitude,
-      });
-    }
-  }, [primary]);
-
-  if (!bizId) {
-    return (
-      <MissingDraftNotice
-        navigation={navigation}
-        message='Start a draft before adding your location.'
-      />
-    );
-  }
-
-  const verifyAddress = async () => {
-    if (!address || !city) {
-      Alert.alert('Missing info', 'Enter your address and city first.');
-      return;
-    }
-    setVerifying(true);
-    try {
-      const query = `${address}, ${city}, ${state || ''} ${
-        country || ''
-      }`.trim();
-      const results = await Location.geocodeAsync(query);
-      if (results && results.length > 0) {
-        const { latitude, longitude } = results[0];
-        setCoordinates({ latitude, longitude });
-        Alert.alert(
-          'Location found',
-          'We matched your address to a map point.'
-        );
-      } else {
-        Alert.alert('Not found', 'We could not locate that address.');
-      }
-    } catch (err) {
-      logger.warn('Geocode error', err);
-      Alert.alert('Error', 'Unable to verify that address.');
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const useCurrentLocation = async () => {
-    setVerifying(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permission denied',
-          'Allow location access to use this feature.'
-        );
-        setVerifying(false);
-        return;
-      }
-      const result = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = result.coords;
-      setCoordinates({ latitude, longitude });
-      const addresses = await Location.reverseGeocodeAsync({
-        latitude,
-        longitude,
-      });
-      if (addresses && addresses.length > 0) {
-        const addr = addresses[0];
-        setAddress(`${addr.streetNumber || ''} ${addr.street || ''}`.trim());
-        setCity(addr.city || '');
-        setState(addr.region || '');
-        setCountry(addr.isoCountryCode?.toUpperCase() || 'US');
-      }
-      Alert.alert(
-        'Location set',
-        'We used your current location as the business address.'
-      );
-    } catch (err) {
-      logger.warn('Location error', err);
-      Alert.alert('Error', 'Unable to fetch your current location.');
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const handleContinue = async () => {
-    if (!coordinates) {
-      Alert.alert('Verify address', 'Please verify your address to continue.');
-      return;
-    }
-    const ok = await saveLocation({
-      label: label.trim() || `${city || 'Primary'} location`,
-      address,
-      city,
-      state,
-      country,
-      latitude: coordinates.latitude,
-      longitude: coordinates.longitude,
-    });
-    if (ok) {
-      navigation.navigate('Review');
-    }
-  };
-
-  const disabled = loading || !address.trim() || !city.trim() || !coordinates;
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <ScrollView contentContainerStyle={{ padding: 24 }}>
-          <ProgressHeader stage={stage} />
-          <Text
-            style={{
-              fontSize: 24,
-              fontWeight: '700',
-              color: '#1A1A1A',
-              marginBottom: 6,
-            }}
-          >
-            Where do you host?
-          </Text>
-          <Text style={{ fontSize: 15, color: '#666', marginBottom: 20 }}>
-            Pin your primary location so nearby members can find you.
-          </Text>
-
-          <InputBlock
-            label='Location label'
-            value={label}
-            onChangeText={setLabel}
-            placeholder='Main studio, Downtown cafe'
-          />
-          <InputBlock
-            label='Street address'
-            value={address}
-            onChangeText={setAddress}
-            placeholder='123 Market St'
-            required
-          />
-          <InputBlock
-            label='City'
-            value={city}
-            onChangeText={setCity}
-            placeholder='San Francisco'
-            required
-          />
-          <View style={{ flexDirection: 'row', marginBottom: 16 }}>
-            <InputInline
-              label='State / Region'
-              value={state}
-              onChangeText={setState}
-            />
-            <InputInline
-              label='Country'
-              value={country}
-              onChangeText={setCountry}
-              style={{ marginRight: 0 }}
-            />
-          </View>
-
-          <TouchableOpacity
-            onPress={verifyAddress}
-            disabled={verifying || !address || !city}
-            style={{
-              padding: 14,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: '#2F80ED',
-              backgroundColor: '#EBF5FF',
-              alignItems: 'center',
-              marginBottom: 12,
-            }}
-          >
-            {verifying ? (
-              <ActivityIndicator color='#2F80ED' />
-            ) : (
-              <Text style={{ color: '#2F80ED', fontWeight: '600' }}>
-                Verify address
-              </Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={useCurrentLocation}
-            disabled={verifying}
-            style={{
-              padding: 14,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderColor: '#27AE60',
-              alignItems: 'center',
-              marginBottom: 16,
-            }}
-          >
-            <Text style={{ color: '#27AE60', fontWeight: '600' }}>
-              Use current location
-            </Text>
-          </TouchableOpacity>
-
-          {coordinates && (
-            <View
-              style={{
-                backgroundColor: '#E8F5E9',
-                padding: 12,
-                borderRadius: 10,
-                flexDirection: 'row',
-                alignItems: 'center',
-                marginBottom: 16,
-              }}
-            >
-              <Ionicons
-                name='checkmark-circle'
-                size={22}
-                color='#27AE60'
-                style={{ marginRight: 10 }}
-              />
-              <Text style={{ color: '#1A1A1A', flex: 1 }}>
-                Ready to save: {coordinates.latitude.toFixed(4)},{' '}
-                {coordinates.longitude.toFixed(4)}
-              </Text>
-            </View>
-          )}
-
-          {error && (
-            <View
-              style={{
-                backgroundColor: '#FEE',
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 16,
-                borderLeftWidth: 4,
-                borderLeftColor: '#E53E3E',
-              }}
-            >
-              <Text style={{ color: '#C53030' }}>{error}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            disabled={disabled}
-            onPress={handleContinue}
-            style={{
-              backgroundColor: disabled ? '#A0AEC0' : '#2F80ED',
-              paddingVertical: 16,
-              borderRadius: 12,
-              alignItems: 'center',
-            }}
-          >
-            {loading ? (
-              <ActivityIndicator color='#FFF' />
-            ) : (
-              <Text style={{ color: '#FFF', fontWeight: '600', fontSize: 16 }}>
-                Save & review
-              </Text>
-            )}
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
-  );
-}
-
-export function ReviewScreen() {
-  const navigation = useNavigation();
-  const {
-    draft,
-    locations,
-    stage,
-    loading,
-    error,
-    submit,
-    refreshDraft,
-    bizId,
-  } = useBizOnboarding();
-  const primary = useMemo(
-    () => (Array.isArray(locations) ? locations[0] : null),
-    [locations]
-  );
-
-  useEffect(() => {
-    if (bizId && (!draft || !primary)) {
-      refreshDraft({ silent: true });
-    }
-  }, [bizId, draft, primary, refreshDraft]);
-
-  if (!bizId) {
-    return (
-      <MissingDraftNotice
-        navigation={navigation}
-        message='Start onboarding before reviewing.'
-      />
-    );
-  }
-
-  const isActive = stage === BUSINESS_ONBOARDING_STAGES.DONE;
-
-  const handleSubmit = async () => {
-    const res = await submit(true);
-    if (res) {
-      Alert.alert('Submitted', 'We will review your business shortly.');
-    }
-  };
-
-  const goTo = (target) => navigation.navigate(target);
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FA' }}>
-      <ScrollView contentContainerStyle={{ padding: 24 }}>
-        <ProgressHeader stage={stage} />
         <Text
           style={{
             fontSize: 24,
             fontWeight: '700',
-            color: '#1A1A1A',
             marginBottom: 8,
+            color: theme.colors.text,
           }}
         >
-          Review & launch
+          Business basics
         </Text>
-        <Text style={{ fontSize: 15, color: '#666', marginBottom: 20 }}>
-          Double-check your info and submit when you’re ready. You can make
-          additional changes later from Business Settings.
-        </Text>
-
-        <SummaryCard
-          title='Business basics'
-          status={draft?.displayName ? 'Complete' : 'Missing'}
-          description={draft?.displayName || 'Add your business name'}
-          onEdit={() => goTo('Basics')}
-        />
-
-        <SummaryCard
-          title='Primary location'
-          status={primary ? 'Complete' : 'Missing'}
-          description={
-            primary
-              ? `${primary.address || ''} · ${primary.city || ''}`
-              : 'Add your address'
-          }
-          onEdit={() => goTo('Location')}
-        />
-
-        {error && (
-          <View
-            style={{
-              backgroundColor: '#FEE',
-              borderRadius: 8,
-              padding: 12,
-              marginBottom: 16,
-              borderLeftWidth: 4,
-              borderLeftColor: '#E53E3E',
-            }}
-          >
-            <Text style={{ color: '#C53030' }}>{error}</Text>
-          </View>
-        )}
-
-        {isActive ? (
-          <View
-            style={{
-              backgroundColor: '#E8F5E9',
-              padding: 16,
-              borderRadius: 12,
-              marginBottom: 16,
-              flexDirection: 'row',
-              alignItems: 'center',
-            }}
-          >
-            <Ionicons
-              name='rocket'
-              size={28}
-              color='#27AE60'
-              style={{ marginRight: 12 }}
-            />
-            <Text style={{ color: '#1A1A1A', flex: 1 }}>
-              Your business is live! You can manage events and settings anytime.
-            </Text>
-          </View>
-        ) : (
-          <InfoPill
-            icon='shield-checkmark-outline'
-            text='Submissions may take up to 1 business day to approve.'
-          />
-        )}
-
-        <TouchableOpacity
-          onPress={
-            isActive
-              ? () => navigation.getParent()?.navigate('BusinessTabs')
-              : handleSubmit
-          }
+        <Text
           style={{
-            backgroundColor: '#2F80ED',
-            paddingVertical: 16,
-            borderRadius: 12,
-            alignItems: 'center',
-            marginTop: 12,
+            fontSize: 15,
+            color: theme.colors.textSecondary,
+            marginBottom: 24,
+            lineHeight: 22,
           }}
         >
-          {loading ? (
-            <ActivityIndicator color='#FFF' />
-          ) : (
-            <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 16 }}>
-              {isActive ? 'Go to business home' : 'Submit for review'}
-            </Text>
-          )}
-        </TouchableOpacity>
-
-        {!isActive && (
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={{ alignItems: 'center', marginTop: 16 }}
-          >
-            <Text style={{ color: '#666', fontSize: 15 }}>Back</Text>
-          </TouchableOpacity>
-        )}
+          Tell us about your business so people can find and connect with you.
+        </Text>
+        <Input
+          label='Business name*'
+          value={form.displayName}
+          onChangeText={(v) => updateField('displayName', v)}
+          placeholder='e.g. Sunrise Cafe'
+          icon='business'
+        />
+        <Input
+          label='Category*'
+          value={form.category}
+          onChangeText={(v) => updateField('category', v)}
+          placeholder='Cafe, Venue, Fitness...'
+          icon='pricetag'
+        />
+        <Input
+          label='Bio'
+          value={form.description}
+          onChangeText={(v) => updateField('description', v)}
+          placeholder='Short description of your business'
+          multiline
+          icon='document-text'
+        />
+        <Input
+          label='Logo URL (optional)'
+          value={form.logoUrl}
+          onChangeText={(v) => updateField('logoUrl', v)}
+          placeholder='https://...'
+          icon='image'
+        />
+        <NavButtons
+          onNext={() => navigation.navigate('Contact')}
+          primaryLabel='Next: Contact'
+          theme={theme}
+        />
       </ScrollView>
     </SafeAreaView>
   );
-}
+};
 
-function InputBlock({ label, required, ...props }) {
-  const themeMode = useThemeStore((state) => state.mode);
-  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
+export const ContactScreen = () => {
+  const navigation = useNavigation();
+  const theme = useTheme();
+  const { user } = useAuth();
+  const form = useBizOnboarding((s) => s.form);
+  const updateField = useBizOnboarding((s) => s.updateField);
+  const submit = useBizOnboarding((s) => s.submit);
+  const loading = useBizOnboarding((s) => s.loading);
+  const error = useBizOnboarding((s) => s.error);
+  const clearError = useBizOnboarding((s) => s.clearError);
 
-  return (
-    <View style={{ marginBottom: 16 }}>
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: '600',
-          color: '#1A1A1A',
-          marginBottom: 6,
-        }}
-      >
-        {label}
-        {required ? ' *' : ''}
-      </Text>
-      <TextInput
-        {...props}
-        style={{
-          borderWidth: 1,
-          borderColor: '#E0E0E0',
-          borderRadius: 10,
-          padding: 14,
-          fontSize: 15,
-          backgroundColor: '#FFF',
-        }}
-        keyboardAppearance={keyboardAppearance}
-      />
-    </View>
-  );
-}
+  useEffect(() => {
+    if (error) {
+      Alert.alert('Submit failed', error, [
+        { text: 'OK', onPress: clearError },
+      ]);
+    }
+  }, [error, clearError]);
 
-function TextBlock({ label, ...props }) {
-  const themeMode = useThemeStore((state) => state.mode);
-  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
+  const handleSubmit = async () => {
+    const bizId = await submit(user?.uid);
+    if (bizId) {
+      navigation.navigate('BusinessProfile', { bizId });
+    }
+  };
 
   return (
-    <View style={{ marginBottom: 16 }}>
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: '600',
-          color: '#1A1A1A',
-          marginBottom: 6,
-        }}
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <ScrollView
+        contentContainerStyle={{ padding: 24 }}
+        showsVerticalScrollIndicator={false}
       >
-        {label}
-      </Text>
-      <TextInput
-        {...props}
-        multiline
-        numberOfLines={4}
-        style={{
-          borderWidth: 1,
-          borderColor: '#E0E0E0',
-          borderRadius: 10,
-          padding: 14,
-          fontSize: 15,
-          backgroundColor: '#FFF',
-          textAlignVertical: 'top',
-          minHeight: 120,
-        }}
-        keyboardAppearance={keyboardAppearance}
-      />
-    </View>
-  );
-}
-
-function InputInline({ label, style, ...props }) {
-  const themeMode = useThemeStore((state) => state.mode);
-  const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
-
-  return (
-    <View style={[{ flex: 1, marginRight: 12 }, style]}>
-      <Text
-        style={{
-          fontSize: 14,
-          fontWeight: '600',
-          color: '#1A1A1A',
-          marginBottom: 6,
-        }}
-      >
-        {label}
-      </Text>
-      <TextInput
-        {...props}
-        style={{
-          borderWidth: 1,
-          borderColor: '#E0E0E0',
-          borderRadius: 10,
-          padding: 14,
-          fontSize: 15,
-          backgroundColor: '#FFF',
-        }}
-        keyboardAppearance={keyboardAppearance}
-      />
-    </View>
-  );
-}
-
-function SummaryCard({ title, description, status, onEdit }) {
-  return (
-    <View
-      style={{
-        backgroundColor: '#FFF',
-        borderRadius: 14,
-        padding: 16,
-        marginBottom: 16,
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
-      }}
-    >
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 8,
-        }}
-      >
-        <Text style={{ fontSize: 16, fontWeight: '700', color: '#1A1A1A' }}>
-          {title}
-        </Text>
-        <View
+        <Text
           style={{
-            paddingHorizontal: 10,
-            paddingVertical: 4,
-            borderRadius: 999,
-            backgroundColor: status === 'Complete' ? '#E8F5E9' : '#FFF8EB',
+            fontSize: 24,
+            fontWeight: '700',
+            marginBottom: 8,
+            color: theme.colors.text,
           }}
         >
-          <Text
-            style={{
-              color: status === 'Complete' ? '#27AE60' : '#F2994A',
-              fontSize: 12,
-              fontWeight: '600',
-            }}
-          >
-            {status}
-          </Text>
-        </View>
-      </View>
-      <Text style={{ color: '#4A5568', marginBottom: 12 }}>{description}</Text>
+          Contact & links
+        </Text>
+        <Text
+          style={{
+            fontSize: 15,
+            color: theme.colors.textSecondary,
+            marginBottom: 24,
+            lineHeight: 22,
+          }}
+        >
+          Add ways for people to reach you and discover your online presence.
+        </Text>
+        <Input
+          label='Email'
+          value={form.contactEmail}
+          onChangeText={(v) => updateField('contactEmail', v)}
+          placeholder='hello@business.com'
+          icon='mail'
+        />
+        <Input
+          label='Phone'
+          value={form.phone}
+          onChangeText={(v) => updateField('phone', v)}
+          placeholder='+1 (555) 123-4567'
+          icon='call'
+        />
+        <Input
+          label='Website'
+          value={form.website}
+          onChangeText={(v) => updateField('website', v)}
+          placeholder='https://your-site.com'
+          icon='globe'
+        />
+        <Input
+          label='Instagram'
+          value={form.instagram}
+          onChangeText={(v) => updateField('instagram', v)}
+          placeholder='@yourhandle'
+          icon='logo-instagram'
+        />
+        <Input
+          label='Facebook'
+          value={form.facebook}
+          onChangeText={(v) => updateField('facebook', v)}
+          placeholder='facebook.com/yourpage'
+          icon='logo-facebook'
+        />
+        <Input
+          label='TikTok'
+          value={form.tiktok}
+          onChangeText={(v) => updateField('tiktok', v)}
+          placeholder='@yourtiktok'
+          icon='logo-tiktok'
+        />
+        <NavButtons
+          onBack={() => navigation.goBack()}
+          onNext={handleSubmit}
+          primaryLabel='Create business profile'
+          loading={loading}
+          theme={theme}
+        />
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const NavButtons = ({ onBack, onNext, primaryLabel, loading, theme }) => (
+  <View
+    style={{
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginTop: 24,
+      gap: 12,
+    }}
+  >
+    {onBack && (
       <TouchableOpacity
-        onPress={onEdit}
+        onPress={onBack}
         style={{
-          alignSelf: 'flex-start',
-          paddingVertical: 6,
-          paddingHorizontal: 12,
-          borderRadius: 8,
-          borderWidth: 1,
-          borderColor: '#2F80ED',
+          flex: 1,
+          paddingVertical: 14,
+          borderRadius: 12,
+          borderWidth: 1.5,
+          borderColor: theme.colors.border,
+          alignItems: 'center',
+          backgroundColor: theme.colors.backgroundSecondary,
+        }}
+        disabled={loading}
+        activeOpacity={0.7}
+      >
+        <Text
+          style={{ fontWeight: '600', color: theme.colors.text, fontSize: 16 }}
+        >
+          Back
+        </Text>
+      </TouchableOpacity>
+    )}
+    <TouchableOpacity
+      onPress={onNext}
+      style={{
+        flex: onBack ? 2 : 1,
+        borderRadius: 12,
+        overflow: 'hidden',
+        shadowColor: '#2563EB',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 3,
+      }}
+      disabled={loading}
+      activeOpacity={0.8}
+    >
+      <LinearGradient
+        colors={['#3B82F6', '#2563EB']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={{
+          paddingVertical: 14,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'row',
         }}
       >
-        <Text style={{ color: '#2F80ED', fontWeight: '600' }}>Edit</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
+        {loading ? (
+          <ActivityIndicator color='#FFFFFF' />
+        ) : (
+          <>
+            <Text style={{ fontWeight: '700', color: '#FFFFFF', fontSize: 16 }}>
+              {primaryLabel || 'Continue'}
+            </Text>
+            {!onBack && (
+              <Ionicons
+                name='arrow-forward'
+                size={18}
+                color='#FFFFFF'
+                style={{ marginLeft: 6 }}
+              />
+            )}
+          </>
+        )}
+      </LinearGradient>
+    </TouchableOpacity>
+  </View>
+);

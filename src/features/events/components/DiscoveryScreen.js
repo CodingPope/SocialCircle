@@ -661,14 +661,35 @@ export default function DiscoveryScreen() {
           return;
         }
 
-        const [location, interests, pinned] = await Promise.all([
-          Location.getCurrentPositionAsync({}),
+        // Description: Get location with fallback - don't require permission
+        let coords = null;
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const location = await Location.getCurrentPositionAsync({});
+            coords = location.coords;
+          }
+        } catch (err) {
+          logger.warn('Failed to get GPS location:', err);
+        }
+
+        // Fallback to user's saved location or Denver default
+        if (!coords) {
+          coords = user?.location || {
+            latitude: 39.7392,
+            longitude: -104.9903,
+          };
+        }
+
+        const [interests, pinned] = await Promise.all([
           fetchUserInterests(),
           loadPinnedInterests(),
         ]);
 
         if (!isMounted) return;
-        setGpsLocation({ coords: location.coords });
+        if (coords && coords.latitude && coords.longitude) {
+          setGpsLocation({ coords });
+        }
 
         const { orderedInterests, pinnedSnapshot } = mergeInterestsWithPinned(
           interests,
@@ -697,7 +718,7 @@ export default function DiscoveryScreen() {
 
         const newEvents = await fetchHotEvents(
           orderedInterests,
-          location.coords,
+          coords,
           discoveryRadius
         );
         if (!isMounted) return;

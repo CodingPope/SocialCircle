@@ -5,7 +5,7 @@ import {
   init as analyticsInit,
   setOptIn as analyticsSetOptIn,
 } from '../../../services/analyticsService';
-import { useSessionRole } from '../../profile';
+import { useSessionRole } from '../../profile/stores/sessionRoleStore';
 
 const AuthContext = createContext({ user: null, loading: true });
 if (!global.unsubscribeAllListeners) {
@@ -53,6 +53,15 @@ export function AuthProvider({ children }) {
             ...data,
           };
           setUser(next);
+          try {
+            sessionRoleStore
+              .getState()
+              .setRole(
+                String(data.type || '').toLowerCase() === 'business'
+                  ? 'business'
+                  : 'consumer'
+              );
+          } catch {}
           setLoading(false);
           // Initialize analytics respecting opt-in
           try {
@@ -63,6 +72,9 @@ export function AuthProvider({ children }) {
           if (err?.code === 'permission-denied') {
             const next = { uid: firebaseUser.uid, email: firebaseUser.email };
             setUser(next);
+            try {
+              sessionRoleStore.getState().setRole('consumer');
+            } catch {}
             setLoading(false);
             try {
               analyticsInit({ ...next, analyticsOptIn: false });

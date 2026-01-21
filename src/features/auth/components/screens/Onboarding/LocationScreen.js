@@ -14,9 +14,13 @@ import {
   getCurrentPositionAsync,
 } from 'expo-location';
 import { useUserStore } from '../../../../profile';
-import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalyticsService';
+import {
+  logOnboardingStepComplete,
+  logOnboardingDone,
+} from '../../../../../services/onboardingAnalyticsService';
 import { geohashForLocation } from 'geofire-common';
 import { mergeUserFields } from '../../../../profile/api/userService';
+import { serverTimestamp } from '../../../../../services/firebase/config';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import Button from '../../../../../components/ui/Button';
 import { useTheme } from '../../../../../theme';
@@ -34,21 +38,27 @@ const createStyles = (theme) =>
     },
     panel: {
       width: '100%',
-      backgroundColor: 'rgba(255,255,255,0.9)',
+      backgroundColor: theme.isDark
+        ? 'rgba(30, 41, 59, 0.95)'
+        : 'rgba(255, 255, 255, 0.9)',
       borderRadius: theme.radii.lg,
       padding: theme.spacing.lg,
       alignItems: 'center',
+      borderWidth: 1,
+      borderColor: theme.isDark
+        ? 'rgba(148, 163, 184, 0.2)'
+        : 'rgba(226, 232, 240, 0.5)',
     },
     title: {
       fontSize: 22,
       fontWeight: '700',
       marginBottom: theme.spacing.md,
-      color: theme.colors.neutral900,
+      color: theme.isDark ? '#FFFFFF' : theme.colors.neutral900,
       textAlign: 'center',
     },
     subtitle: {
       fontSize: 16,
-      color: theme.colors.neutral700,
+      color: theme.isDark ? '#FFFFFF' : theme.colors.neutral700,
       marginBottom: theme.spacing.xl,
       textAlign: 'center',
     },
@@ -88,6 +98,9 @@ const createStyles = (theme) =>
       flex: 1,
       marginHorizontal: theme.spacing.sm / 2,
     },
+    skipButton: {
+      marginTop: theme.spacing.md,
+    },
   });
 
 export default function LocationScreen({ navigation }) {
@@ -111,6 +124,19 @@ export default function LocationScreen({ navigation }) {
     }
   };
 
+  // Description: Mark onboarding as complete and navigate to main app
+  const completeOnboarding = async () => {
+    try {
+      await logOnboardingDone({ source: 'location_screen' });
+      useUserStore.getState().setProfileComplete(true);
+      // AppNavigator will automatically switch to main app when profileComplete becomes true
+    } catch (err) {
+      console.warn('[Location] Failed to mark onboarding complete:', err);
+      // Still set profileComplete even if analytics logging fails
+      useUserStore.getState().setProfileComplete(true);
+    }
+  };
+
   const saveLocation = async ({ coords, city }) => {
     const payload = {};
     if (
@@ -128,6 +154,7 @@ export default function LocationScreen({ navigation }) {
 
     await mergeUserFields(user.uid, {
       ...payload,
+      locationPromptedAt: serverTimestamp(),
       deviceToken: user?.deviceToken ?? null,
       pushOptIn: user?.pushOptIn ?? false,
     });
@@ -139,6 +166,7 @@ export default function LocationScreen({ navigation }) {
         ? { coarseGeohash5: payload.coarseGeohash5 }
         : {}),
       ...(payload.city ? { city: payload.city } : {}),
+      locationPromptedAt: new Date(),
     });
   };
 
@@ -163,8 +191,8 @@ export default function LocationScreen({ navigation }) {
         method: 'gps_prompt',
         granted: true,
       });
-      // Navigate to next onboarding screen
-      navigation.replace('InterestsScreen');
+      // Description: Location is the last onboarding step - mark complete
+      await completeOnboarding();
     } catch (err) {
       // If GPS fails for any reason, allow manual fallback
       console.warn(
@@ -174,6 +202,32 @@ export default function LocationScreen({ navigation }) {
       setManualVisible(true);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Description: Skip location entirely and proceed to next screen (Apple Guideline 5.1.5 compliance)
+  const handleSkip = async () => {
+    try {
+      // Save that user was prompted but chose to skip
+      await mergeUserFields(user.uid, {
+        locationPromptedAt: serverTimestamp(),
+        deviceToken: user?.deviceToken ?? null,
+        pushOptIn: user?.pushOptIn ?? false,
+      });
+      setUser({
+        ...user,
+        locationPromptedAt: new Date(),
+      });
+      await logOnboardingStepComplete('location', {
+        method: 'skipped',
+        granted: false,
+      });
+      // Description: Location is the last onboarding step - mark complete
+      await completeOnboarding();
+    } catch (err) {
+      console.warn('[Location] Skip failed:', err);
+      // Still proceed even if save fails
+      await completeOnboarding();
     }
   };
 
@@ -243,7 +297,8 @@ export default function LocationScreen({ navigation }) {
       }
 
       setManualVisible(false);
-      navigation.replace('InterestsScreen');
+      // Description: Location is the last onboarding step - mark complete
+      await completeOnboarding();
     } catch (e) {
       Alert.alert(
         'Location Error',
@@ -260,13 +315,23 @@ export default function LocationScreen({ navigation }) {
         <View style={styles.panel}>
           <Text style={styles.title}>Share Your Location</Text>
           <Text style={styles.subtitle}>
-            To help you discover local events and friends, we need your location.
-            Your data is private and only used for Social Circle features.
+            To help you discover local events and friends, we need your
+            location. Your data is private and only used for Social Circle
+            features.
           </Text>
           {loading ? (
             <ActivityIndicator size='large' color='#ff6b6b' />
           ) : (
-            <Button title='Share My Location' onPress={handleGetLocation} />
+            <>
+              <Button title='Share My Location' onPress={handleGetLocation} />
+              <View style={styles.skipButton}>
+                <Button
+                  title='Skip for Now'
+                  variant='secondary'
+                  onPress={handleSkip}
+                />
+              </View>
+            </>
           )}
         </View>
       </View>
@@ -307,9 +372,12 @@ export default function LocationScreen({ navigation }) {
               <View style={styles.modalButtons}>
                 <View style={styles.modalButtonSpacing}>
                   <Button
-                    title='Cancel'
+                    title='Skip'
                     variant='secondary'
-                    onPress={() => setManualVisible(false)}
+                    onPress={() => {
+                      setManualVisible(false);
+                      handleSkip();
+                    }}
                   />
                 </View>
                 <View style={styles.modalButtonSpacing}>

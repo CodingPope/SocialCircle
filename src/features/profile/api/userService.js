@@ -103,6 +103,7 @@ const CLIENT_RESTRICTED_USER_KEYS = [
   'businessTier',
   'plan',
   'type',
+  'accountTier',
 ];
 
 function isTimestampLike(value) {

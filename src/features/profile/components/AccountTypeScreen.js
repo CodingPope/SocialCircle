@@ -19,6 +19,7 @@ import logger from '../../../lib/logger';
 import { useTheme } from '../../../theme';
 import { useSessionRole } from '../stores/sessionRoleStore';
 import { useBizOnboarding } from '../../business/stores/businessOnboardingStore';
+import { switchToPersonalAccount } from '../../../services/firebase/config';
 
 const BENEFITS = [
   {
@@ -62,9 +63,21 @@ export default function AccountTypeScreen({ navigation }) {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const { user, loading: authLoading } = useAuth();
   const role = useSessionRole((s) => s.role);
+  const setRole = useSessionRole((s) => s.setRole);
   const isBusiness = role === 'business';
   const { start, resumeLatestDraft, loading: bizLoading } = useBizOnboarding();
   const [starting, setStarting] = useState(false);
+  const userIsBusiness =
+    isBusiness || String(user?.type || '').toLowerCase() === 'business';
+
+  // If Firestore user record already says business, sync the session role.
+  React.useEffect(() => {
+    if (userIsBusiness && role !== 'business') {
+      try {
+        setRole('business');
+      } catch {}
+    }
+  }, [userIsBusiness, role, setRole]);
 
   const handleStartSetup = async () => {
     if (authLoading || starting || bizLoading) return;
@@ -79,7 +92,10 @@ export default function AccountTypeScreen({ navigation }) {
         // Force refresh ID token - helps when tokens have expired or not propagated
         await auth().currentUser?.getIdToken(true);
       } catch (tokenErr) {
-        logger.warn('[bizOnboarding] ID token refresh failed:', tokenErr?.message || tokenErr);
+        logger.warn(
+          '[bizOnboarding] ID token refresh failed:',
+          tokenErr?.message || tokenErr
+        );
       }
 
       // Try to prefetch an App Check token in dev to avoid UNAUTHENTICATED from enforced callables
@@ -87,7 +103,10 @@ export default function AccountTypeScreen({ navigation }) {
         try {
           await appCheck().getToken(true);
         } catch (acErr) {
-          logger.warn('[bizOnboarding] App Check token prefetch failed:', acErr?.message || acErr);
+          logger.warn(
+            '[bizOnboarding] App Check token prefetch failed:',
+            acErr?.message || acErr
+          );
         }
       }
       const existing = await resumeLatestDraft(user.uid, { force: true });
@@ -106,6 +125,21 @@ export default function AccountTypeScreen({ navigation }) {
       );
     } finally {
       setStarting(false);
+    }
+  };
+
+  const switchToPersonal = async () => {
+    try {
+      setRole('consumer');
+    } catch {}
+    if (!user?.uid) return;
+    try {
+      await switchToPersonalAccount();
+    } catch (error) {
+      Alert.alert(
+        'Unable to switch',
+        error?.message || 'Please try again in a moment.'
+      );
     }
   };
 
@@ -128,12 +162,12 @@ export default function AccountTypeScreen({ navigation }) {
           <View style={styles.badgeRow}>
             <View style={styles.badge}>
               <Text style={styles.badgeText}>
-                {isBusiness ? 'Business' : 'Personal'}
+                {userIsBusiness ? 'Business' : 'Personal'}
               </Text>
             </View>
             <Text style={styles.badgeNote}>
-              {isBusiness
-                ? 'Business tools are enabled for this session.'
+              {userIsBusiness
+                ? 'Business tools are enabled for this account.'
                 : 'Switch to business to unlock analytics and contact tools.'}
             </Text>
           </View>
@@ -189,28 +223,54 @@ export default function AccountTypeScreen({ navigation }) {
             </View>
           ))}
 
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              (isBusiness || starting || bizLoading) &&
-                styles.primaryButtonDisabled,
-            ]}
-            onPress={handleStartSetup}
-            disabled={isBusiness || starting || bizLoading}
-            accessibilityRole='button'
-          >
-            {starting || bizLoading ? (
-              <ActivityIndicator color='#FFFFFF' />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {isBusiness ? 'Business account active' : 'Start business setup'}
+          {userIsBusiness ? (
+            <>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={() =>
+                  navigation.navigate('BusinessOnboarding', {
+                    screen: 'BusinessHome',
+                  })
+                }
+                accessibilityRole='button'
+              >
+                <Text style={styles.primaryButtonText}>
+                  Manage business profile
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={switchToPersonal}
+                accessibilityRole='button'
+              >
+                <Text style={styles.secondaryButtonText}>
+                  Switch back to personal
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  (starting || bizLoading) && styles.primaryButtonDisabled,
+                ]}
+                onPress={handleStartSetup}
+                disabled={starting || bizLoading}
+                accessibilityRole='button'
+              >
+                {starting || bizLoading ? (
+                  <ActivityIndicator color='#FFFFFF' />
+                ) : (
+                  <Text style={styles.primaryButtonText}>
+                    Start business setup
+                  </Text>
+                )}
+              </TouchableOpacity>
+              <Text style={styles.helperText}>
+                We accept any email or phone for testing.
               </Text>
-            )}
-          </TouchableOpacity>
-          {!isBusiness && (
-            <Text style={styles.helperText}>
-              We accept any email or phone for testing.
-            </Text>
+            </>
           )}
         </View>
       </ScrollView>
@@ -325,6 +385,20 @@ const createStyles = (theme) => {
       color: '#FFFFFF',
       fontSize: 15,
       fontWeight: '700',
+    },
+    secondaryButton: {
+      marginTop: spacing.sm,
+      borderRadius: radii.md,
+      paddingVertical: spacing.md,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.card,
+    },
+    secondaryButtonText: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '600',
     },
     helperText: {
       marginTop: spacing.sm,

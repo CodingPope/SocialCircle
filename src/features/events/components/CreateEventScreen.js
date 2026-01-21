@@ -30,6 +30,9 @@ import {
   arrayUnion,
   getDocs,
   getDoc,
+  query,
+  where,
+  orderBy,
 } from '../../../services/firebase/firestoreCompat';
 import {
   db,
@@ -50,6 +53,8 @@ import {
   interpretStorageError,
   logStorageDiagnostic,
 } from '../../../services/firebase/storageUtils';
+import { getEventEndMs } from '../utils/dateUtils';
+import { canCreateEvent, showTOSRequiredAlert } from '../../../utils/tosHelper';
 
 // --- Date/Time constraints ---
 const MIN_LEAD_MINUTES = 30; // hard limit: at least 30 minutes in the future
@@ -58,6 +63,9 @@ const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
 const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
 const MINUTE_INCREMENT = 5; // tweak to 10 or 30 if you want fewer choices in the picker
 const MAX_EVENT_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_ACTIVE_EVENTS_REGULAR = 3;
+const ACTIVE_EVENT_CREATED_LOOKBACK_MS =
+  MAX_LEAD_DAYS * 24 * 60 * 60 * 1000 + 60 * 60 * 1000;
 
 const getAuthUser = () => {
   try {
@@ -78,6 +86,55 @@ const roundUpToMinuteIncrement = (inputDate) => {
   const remainder = minutes % MINUTE_INCREMENT;
   if (remainder !== 0) d.setMinutes(minutes + (MINUTE_INCREMENT - remainder));
   return d;
+};
+
+const shouldEnforceEventLimit = (profile) => {
+  if (!profile) return true;
+  const type = typeof profile.type === 'string' ? profile.type : 'user';
+  const isTieredType = type && type !== 'user';
+  const hasPaidAccess =
+    profile.premiumActive === true ||
+    profile.isPopular === true ||
+    typeof profile.businessTier === 'string' ||
+    (typeof profile.plan === 'string' && profile.plan !== 'free');
+  return !(isTieredType || hasPaidAccess);
+};
+
+const fetchActiveCreatedEventCount = async (uid) => {
+  const nowMs = Date.now();
+  const cutoff = Timestamp.fromDate(
+    new Date(nowMs - ACTIVE_EVENT_CREATED_LOOKBACK_MS)
+  );
+  const baseRef = collection(db, 'events');
+  let snap;
+
+  try {
+    const q = query(
+      baseRef,
+      where('ownerId', '==', uid),
+      where('createdAt', '>=', cutoff),
+      orderBy('createdAt', 'desc')
+    );
+    snap = await getDocs(q);
+  } catch (err) {
+    const message = (err?.message || '').toLowerCase();
+    const isIndexError =
+      err?.code === 'failed-precondition' || message.includes('index');
+    if (!isIndexError) throw err;
+    const fallback = query(baseRef, where('ownerId', '==', uid));
+    snap = await getDocs(fallback);
+  }
+
+  const activeCount = snap.docs
+    .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+    .filter((event) => event?.isDeleted !== true)
+    .filter((event) => {
+      if (event?.status && event.status !== 'active') return false;
+      const endMs = getEventEndMs(event);
+      return typeof endMs === 'number' && endMs > nowMs;
+    }).length;
+
+  return activeCount;
 };
 
 export default function CreateEventScreen({
@@ -271,6 +328,12 @@ export default function CreateEventScreen({
   };
 
   const handleCreate = async () => {
+    // Description: Check TOS acceptance (Apple Guideline 1.2 compliance)
+    if (!canCreateEvent(user)) {
+      showTOSRequiredAlert('create events');
+      return;
+    }
+
     if (!title.trim()) return Alert.alert('Title is required');
     if (title.trim().length > 40)
       return Alert.alert('Title must not exceed 40 characters');
@@ -315,6 +378,24 @@ export default function CreateEventScreen({
         'Privacy mismatch',
         'You can only create gender-restricted events matching your sex.'
       );
+    }
+
+    if (shouldEnforceEventLimit(user)) {
+      try {
+        const activeCount = await fetchActiveCreatedEventCount(user.uid);
+        if (activeCount >= MAX_ACTIVE_EVENTS_REGULAR) {
+          return Alert.alert(
+            'Event limit reached',
+            `Regular accounts can have up to ${MAX_ACTIVE_EVENTS_REGULAR} active events at a time. Finish or delete one of your events to create another.`
+          );
+        }
+      } catch (limitErr) {
+        console.warn('[CreateEvent] Event limit check failed:', limitErr);
+        return Alert.alert(
+          'Unable to create event',
+          'We could not verify your active events. Please try again.'
+        );
+      }
     }
 
     const eventLocation = manualLocation || location;
@@ -647,233 +728,233 @@ export default function CreateEventScreen({
         keyExtractor={(item) => item.key}
         renderItem={() => (
           <View>
-          {/* Image Preview */}
-          {imageUri ? (
-            <Image source={{ uri: imageUri }} style={styles.preview} />
-          ) : (
-            <View style={styles.previewPlaceholder}>
-              <Text style={styles.emptyStateText}>No Image</Text>
-            </View>
-          )}
-          <TouchableOpacity
-            style={styles.photoBtn}
-            onPress={pickImageAndUpload}
-          >
-            <Text style={styles.photoBtnText}>
-              {imageUri ? 'Change Photo' : 'Add Photo'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Title */}
-          <Text style={styles.label}>Title</Text>
-          <TextInput
-            style={styles.input}
-            value={title}
-            onChangeText={setTitle}
-            placeholder='Event title'
-            placeholderTextColor={theme.colors.textSecondary}
-            keyboardAppearance={keyboardAppearance}
-            selectionColor={theme.colors.primary}
-          />
-
-          {/* Description */}
-          <Text style={styles.label}>Description</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={description}
-            onChangeText={setDescription}
-            placeholder='What’s your event about?'
-            placeholderTextColor={theme.colors.textSecondary}
-            multiline
-            keyboardAppearance={keyboardAppearance}
-            selectionColor={theme.colors.primary}
-          />
-
-          {/* Date & Time */}
-          <Text style={styles.label}>Date & Time</Text>
-          <TouchableOpacity style={styles.input} onPress={showDatePicker}>
-            <Text style={styles.dateText}>
-              {date.toLocaleString('en-US', {
-                dateStyle: 'medium',
-                timeStyle: 'short',
-              })}
-            </Text>
-          </TouchableOpacity>
-          <DateTimePickerModal
-            isVisible={isDatePickerVisible}
-            mode='datetime'
-            date={date}
-            onConfirm={handleConfirmDate}
-            onCancel={hideDatePicker}
-            minimumDate={new Date(Date.now() + MIN_MILLIS)}
-            maximumDate={new Date(Date.now() + MAX_MILLIS)}
-            minuteInterval={MINUTE_INCREMENT}
-            themeVariant={theme.isDark ? 'dark' : 'light'}
-            textColor={theme.colors.text}
-            isDarkModeEnabled={theme.isDark}
-            buttonTextColorIOS={datePickerTheme.buttonColor}
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          />
-
-          {/* Address Input */}
-          <Text style={styles.label}>Location</Text>
-          <View style={{ zIndex: 10 }}>
-            <GooglePlacesAutocomplete
-              placeholder='Enter address'
-              placeholderTextColor={theme.colors.textSecondary}
-              minLength={2}
-              fetchDetails={true}
-              debounce={300}
-              enablePoweredByContainer={false}
-              keyboardShouldPersistTaps='handled'
-              predefinedPlaces={[]} // Prevents `.filter()` crash
-              styles={googlePlacesStyles}
-              textInputProps={{
-                value: placeInput,
-                onChangeText: setPlaceInput,
-                placeholderTextColor: theme.colors.textSecondary,
-                keyboardAppearance,
-                selectionColor: theme.colors.primary,
-              }}
-              onPress={(data, details = null) => {
-                if (details?.geometry?.location) {
-                  const { lat, lng } = details.geometry.location;
-                  setManualLocation({ latitude: lat, longitude: lng });
-                  setManualAddress(data?.description ?? '');
-                  Alert.alert('Location set', 'Pin will be placed on map.');
-                }
-              }}
-              query={{
-                key: GOOGLE_MAPS_API_KEY,
-                language: 'en',
-              }}
-            />
-          </View>
-          {manualLocation && (
-            <View style={styles.row}>
-              <Ionicons
-                name='location-outline'
-                size={20}
-                color={theme.colors.textSecondary}
-                style={{ marginRight: 8 }}
-              />
-              <Text style={styles.pinLocationText}>
-                Pin Location: {manualAddress || 'Unknown'}
+            {/* Image Preview */}
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.preview} />
+            ) : (
+              <View style={styles.previewPlaceholder}>
+                <Text style={styles.emptyStateText}>No Image</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.photoBtn}
+              onPress={pickImageAndUpload}
+            >
+              <Text style={styles.photoBtnText}>
+                {imageUri ? 'Change Photo' : 'Add Photo'}
               </Text>
-            </View>
-          )}
+            </TouchableOpacity>
 
-          {/* Interests */}
-          <Text style={styles.label}>Interest</Text>
-          <InterestSelector
-            selectedInterests={selectedInterest ? [selectedInterest] : []}
-            toggleInterest={(interest) => setSelectedInterest(interest)}
-            searchTerm={searchTerm}
-            setSearchTerm={setSearchTerm}
-          />
-
-          {/* Age Slider */}
-          <Text style={styles.label}>
-            Age Range: {ageRange[0]} - {ageRange[1]}
-          </Text>
-          <View style={styles.sliderWrapper}>
-            <MultiSlider
-              values={ageRange}
-              sliderLength={280}
-              onValuesChange={setAgeRange}
-              min={18}
-              max={99}
-              step={1}
-              allowOverlap={false}
-              snapped
-              selectedStyle={{ backgroundColor: theme.colors.primary }}
-              unselectedStyle={{ backgroundColor: theme.colors.border }}
-              markerStyle={{
-                height: 24,
-                width: 24,
-                borderRadius: 12,
-                backgroundColor: theme.colors.card,
-                borderWidth: 2,
-                borderColor: theme.colors.primary,
-              }}
-              pressedMarkerStyle={{
-                height: 24,
-                width: 24,
-                borderRadius: 12,
-                backgroundColor: theme.colors.primary,
-                borderColor: theme.colors.primary,
-              }}
-              trackStyle={{ height: 4 }}
+            {/* Title */}
+            <Text style={styles.label}>Title</Text>
+            <TextInput
+              style={styles.input}
+              value={title}
+              onChangeText={setTitle}
+              placeholder='Event title'
+              placeholderTextColor={theme.colors.textSecondary}
+              keyboardAppearance={keyboardAppearance}
+              selectionColor={theme.colors.primary}
             />
-          </View>
 
-          {/* Privacy */}
-          <Text style={styles.label}>Privacy</Text>
-          {Platform.OS === 'ios' ? (
-            <SegmentedControl
-              values={segments}
-              selectedIndex={privacyIndex}
-              onChange={(event) =>
-                setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
-              }
-              style={styles.segment}
-              backgroundColor={
-                theme.isDark ? theme.colors.backgroundSecondary : '#f0f0f0'
-              }
-              tintColor={theme.colors.primary}
-              fontStyle={{ color: theme.colors.text }}
-              activeFontStyle={{ color: '#fff', fontWeight: '600' }}
+            {/* Description */}
+            <Text style={styles.label}>Description</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder='What’s your event about?'
+              placeholderTextColor={theme.colors.textSecondary}
+              multiline
+              keyboardAppearance={keyboardAppearance}
+              selectionColor={theme.colors.primary}
             />
-          ) : (
-            <View style={styles.androidPrivacyWrapper}>
-              {segments.map((seg, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={[
-                    styles.androidPrivacyBtn,
-                    privacyIndex === idx && styles.androidPrivacyBtnActive,
-                  ]}
-                  onPress={() => setPrivacyIndex(idx)}
-                >
-                  <Text
-                    style={[
-                      styles.androidPrivacyTxt,
-                      privacyIndex === idx && styles.androidPrivacyTxtActive,
-                    ]}
-                  >
-                    {seg}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+
+            {/* Date & Time */}
+            <Text style={styles.label}>Date & Time</Text>
+            <TouchableOpacity style={styles.input} onPress={showDatePicker}>
+              <Text style={styles.dateText}>
+                {date.toLocaleString('en-US', {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+              </Text>
+            </TouchableOpacity>
+            <DateTimePickerModal
+              isVisible={isDatePickerVisible}
+              mode='datetime'
+              date={date}
+              onConfirm={handleConfirmDate}
+              onCancel={hideDatePicker}
+              minimumDate={new Date(Date.now() + MIN_MILLIS)}
+              maximumDate={new Date(Date.now() + MAX_MILLIS)}
+              minuteInterval={MINUTE_INCREMENT}
+              themeVariant={theme.isDark ? 'dark' : 'light'}
+              textColor={theme.colors.text}
+              isDarkModeEnabled={theme.isDark}
+              buttonTextColorIOS={datePickerTheme.buttonColor}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            />
+
+            {/* Address Input */}
+            <Text style={styles.label}>Location</Text>
+            <View style={{ zIndex: 10 }}>
+              <GooglePlacesAutocomplete
+                placeholder='Enter address'
+                placeholderTextColor={theme.colors.textSecondary}
+                minLength={2}
+                fetchDetails={true}
+                debounce={300}
+                enablePoweredByContainer={false}
+                keyboardShouldPersistTaps='handled'
+                predefinedPlaces={[]} // Prevents `.filter()` crash
+                styles={googlePlacesStyles}
+                textInputProps={{
+                  value: placeInput,
+                  onChangeText: setPlaceInput,
+                  placeholderTextColor: theme.colors.textSecondary,
+                  keyboardAppearance,
+                  selectionColor: theme.colors.primary,
+                }}
+                onPress={(data, details = null) => {
+                  if (details?.geometry?.location) {
+                    const { lat, lng } = details.geometry.location;
+                    setManualLocation({ latitude: lat, longitude: lng });
+                    setManualAddress(data?.description ?? '');
+                    Alert.alert('Location set', 'Pin will be placed on map.');
+                  }
+                }}
+                query={{
+                  key: GOOGLE_MAPS_API_KEY,
+                  language: 'en',
+                }}
+              />
             </View>
-          )}
+            {manualLocation && (
+              <View style={styles.row}>
+                <Ionicons
+                  name='location-outline'
+                  size={20}
+                  color={theme.colors.textSecondary}
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.pinLocationText}>
+                  Pin Location: {manualAddress || 'Unknown'}
+                </Text>
+              </View>
+            )}
 
-          {/* Capacity */}
-          <Text style={styles.label}>Capacity (optional)</Text>
-          <TextInput
-            style={styles.input}
-            value={capacity}
-            onChangeText={setCapacity}
-            placeholder='Leave empty for unlimited'
-            placeholderTextColor={theme.colors.textSecondary}
-            keyboardType='numeric'
-            keyboardAppearance={keyboardAppearance}
-            selectionColor={theme.colors.primary}
-          />
+            {/* Interests */}
+            <Text style={styles.label}>Interest</Text>
+            <InterestSelector
+              selectedInterests={selectedInterest ? [selectedInterest] : []}
+              toggleInterest={(interest) => setSelectedInterest(interest)}
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+            />
 
-          {/* Buttons */}
-          <TouchableOpacity
-            style={[styles.btn, uploading && styles.btnDis]}
-            onPress={handleCreate}
-            disabled={uploading}
-          >
-            <Text style={styles.btnTxt}>
-              {uploading ? 'Creating...' : 'Create Event'}
+            {/* Age Slider */}
+            <Text style={styles.label}>
+              Age Range: {ageRange[0]} - {ageRange[1]}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
+            <View style={styles.sliderWrapper}>
+              <MultiSlider
+                values={ageRange}
+                sliderLength={280}
+                onValuesChange={setAgeRange}
+                min={18}
+                max={99}
+                step={1}
+                allowOverlap={false}
+                snapped
+                selectedStyle={{ backgroundColor: theme.colors.primary }}
+                unselectedStyle={{ backgroundColor: theme.colors.border }}
+                markerStyle={{
+                  height: 24,
+                  width: 24,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.card,
+                  borderWidth: 2,
+                  borderColor: theme.colors.primary,
+                }}
+                pressedMarkerStyle={{
+                  height: 24,
+                  width: 24,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.primary,
+                  borderColor: theme.colors.primary,
+                }}
+                trackStyle={{ height: 4 }}
+              />
+            </View>
+
+            {/* Privacy */}
+            <Text style={styles.label}>Privacy</Text>
+            {Platform.OS === 'ios' ? (
+              <SegmentedControl
+                values={segments}
+                selectedIndex={privacyIndex}
+                onChange={(event) =>
+                  setPrivacyIndex(event.nativeEvent.selectedSegmentIndex)
+                }
+                style={styles.segment}
+                backgroundColor={
+                  theme.isDark ? theme.colors.backgroundSecondary : '#f0f0f0'
+                }
+                tintColor={theme.colors.primary}
+                fontStyle={{ color: theme.colors.text }}
+                activeFontStyle={{ color: '#fff', fontWeight: '600' }}
+              />
+            ) : (
+              <View style={styles.androidPrivacyWrapper}>
+                {segments.map((seg, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[
+                      styles.androidPrivacyBtn,
+                      privacyIndex === idx && styles.androidPrivacyBtnActive,
+                    ]}
+                    onPress={() => setPrivacyIndex(idx)}
+                  >
+                    <Text
+                      style={[
+                        styles.androidPrivacyTxt,
+                        privacyIndex === idx && styles.androidPrivacyTxtActive,
+                      ]}
+                    >
+                      {seg}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Capacity */}
+            <Text style={styles.label}>Capacity (optional)</Text>
+            <TextInput
+              style={styles.input}
+              value={capacity}
+              onChangeText={setCapacity}
+              placeholder='Leave empty for unlimited'
+              placeholderTextColor={theme.colors.textSecondary}
+              keyboardType='numeric'
+              keyboardAppearance={keyboardAppearance}
+              selectionColor={theme.colors.primary}
+            />
+
+            {/* Buttons */}
+            <TouchableOpacity
+              style={[styles.btn, uploading && styles.btnDis]}
+              onPress={handleCreate}
+              disabled={uploading}
+            >
+              <Text style={styles.btnTxt}>
+                {uploading ? 'Creating...' : 'Create Event'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onCancel} style={styles.cancelButton}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         )}
       />

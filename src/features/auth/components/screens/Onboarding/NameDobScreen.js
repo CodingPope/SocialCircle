@@ -76,9 +76,9 @@ export default function NameDobScreen({ navigation }) {
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const keyboardAppearance = theme.isDark ? 'dark' : 'light';
-  // State for name fields
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  // Description: Pre-populate firstName and lastName if provided by Apple Sign-In or social login
+  const [firstName, setFirstName] = useState(user?.firstName || '');
+  const [lastName, setLastName] = useState(user?.lastName || '');
   // State for name validation errors
   const [nameError, setNameError] = useState('');
   const [dob, setDob] = useState(new Date());
@@ -129,6 +129,14 @@ export default function NameDobScreen({ navigation }) {
     setNameError('');
     return true;
   };
+
+  // Description: Skip to next step if name already provided (e.g., from Apple Sign-In)
+  useEffect(() => {
+    if (user?.firstName && user?.lastName && user?.dob) {
+      // Description: User already has name and DOB from social sign-in, skip this screen
+      navigation.reset({ index: 0, routes: [{ name: 'Sex' }] });
+    }
+  }, [user?.firstName, user?.lastName, user?.dob, navigation]);
 
   // Description: Handles Next button press, validates names and age
   const onNext = async () => {

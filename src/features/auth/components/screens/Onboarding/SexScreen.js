@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import * as Location from 'expo-location';
-import { Modal, ActivityIndicator } from 'react-native';
 import {
   View,
   Text,
@@ -95,42 +93,6 @@ const createStyles = (theme) =>
     nextButtonContainer: {
       marginTop: theme.spacing.lg,
     },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: theme.colors.overlay,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    modalCard: {
-      backgroundColor: theme.colors.neutral100,
-      padding: theme.spacing.xl,
-      borderRadius: theme.radii.lg,
-      width: '85%',
-      alignItems: 'center',
-    },
-    modalTitle: {
-      fontSize: 20,
-      fontWeight: '700',
-      marginBottom: theme.spacing.md,
-      color: theme.colors.neutral900,
-      textAlign: 'center',
-    },
-    modalDescription: {
-      fontSize: 15,
-      color: theme.colors.neutral800,
-      marginBottom: theme.spacing.lg,
-      textAlign: 'center',
-    },
-    modalError: {
-      color: theme.colors.danger,
-      fontSize: 15,
-      marginBottom: theme.spacing.md,
-      textAlign: 'center',
-    },
-    modalActions: {
-      marginTop: theme.spacing.md,
-      width: '100%',
-    },
   });
 
 export default function SexScreen({ navigation }) {
@@ -142,9 +104,6 @@ export default function SexScreen({ navigation }) {
     valueToLabel(normalizeSex(user?.sex) || 'male')
   );
   const [loading, setLoading] = useState(false);
-  const [locationModalVisible, setLocationModalVisible] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
-  const [locationError, setLocationError] = useState('');
 
   const buttonScale = new Animated.Value(1);
 
@@ -194,43 +153,10 @@ export default function SexScreen({ navigation }) {
       await logOnboardingStepComplete('sex', {
         choice: normalizedSex || 'unknown',
       });
-      setLocationModalVisible(true);
+      // Description: Navigate to TOS screen (LocationScreen comes later in onboarding flow)
+      navigation.navigate('TOS');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGetLocation = async () => {
-    setLocationLoading(true);
-    setLocationError('');
-    try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setLocationError('Location permission is required to continue.');
-        setLocationLoading(false);
-        return;
-      }
-      let loc = await Location.getCurrentPositionAsync({});
-      const coords = {
-        latitude: loc.coords.latitude,
-        longitude: loc.coords.longitude,
-      };
-      await mergeUserFields(user.uid, {
-        location: coords,
-        deviceToken: user?.deviceToken ?? null,
-        pushOptIn: user?.pushOptIn ?? false,
-      });
-      setUser({ ...user, location: coords });
-      await logOnboardingStepComplete('location', {
-        method: 'gps_prompt',
-        granted: true,
-      });
-      setLocationModalVisible(false);
-      navigation.navigate('InterestsScreen');
-    } catch (err) {
-      setLocationError(err.message || 'Failed to get location.');
-    } finally {
-      setLocationLoading(false);
     }
   };
 
@@ -275,46 +201,6 @@ export default function SexScreen({ navigation }) {
           />
         </View>
       </Animated.View>
-
-      {/* Location Modal */}
-      <Modal
-        visible={locationModalVisible}
-        animationType='fade'
-        transparent
-        onRequestClose={() => {}}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Share Your Location</Text>
-            <Text style={styles.modalDescription}>
-              To help you discover local events and friends, we need your
-              location. Your data is private and only used for Social Circle
-              features.
-            </Text>
-            {locationLoading ? (
-              <ActivityIndicator
-                size='large'
-                color={theme.colors.primary}
-                style={{ marginVertical: 16 }}
-              />
-            ) : (
-              <View style={styles.modalActions}>
-                <Button title='Share My Location' onPress={handleGetLocation} />
-              </View>
-            )}
-            {locationError ? (
-              <View style={{ marginTop: theme.spacing.lg, width: '100%' }}>
-                <Text style={styles.modalError}>{locationError}</Text>
-                <Button
-                  title='Try Again'
-                  onPress={handleGetLocation}
-                  variant='secondary'
-                />
-              </View>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
     </AnimatedGradientBackground>
   );
 }

@@ -626,38 +626,36 @@ export default function MapScreen() {
     (async () => {
       try {
         const granted = await ensureForegroundPermission();
-        if (!granted) {
-          Alert.alert(
-            'Location Required',
-            'Enable location permissions to view nearby events. You can allow access in Settings.'
-          );
-          setInitialLoading(false);
-          return;
+
+        // Description: Graceful degradation for Apple Guideline 5.1.5
+        // Allow users to browse map even without location permission
+        let gpsCoords = null;
+        let fallbackCoords = null;
+
+        if (granted) {
+          const resolved = await resolveLocationWithFallback({
+            canUseDevice: true,
+            allowLastKnown: true,
+            locationOptions: {
+              accuracy: Location.Accuracy?.Balanced,
+              maximumAge: 15_000,
+              timeout: 15_000,
+              mayShowUserSettingsDialog: true,
+            },
+          });
+          gpsCoords = resolved?.coords || null;
         }
 
-        const resolved = await resolveLocationWithFallback({
-          canUseDevice: true,
-          allowLastKnown: true,
-          locationOptions: {
-            accuracy: Location.Accuracy?.Balanced,
-            maximumAge: 15_000,
-            timeout: 15_000,
-            mayShowUserSettingsDialog: true,
-          },
-        });
-
         const storedOverride = useDiscoveryLocationStore.getState().override;
-        const gpsCoords = resolved?.coords || null;
-        const fallbackCoords =
+        fallbackCoords =
           gpsCoords || storedOverride?.coords || user?.location || null;
 
+        // If no location available, use downtown Denver as default (initial launch city)
         if (!fallbackCoords) {
-          Alert.alert(
-            'Location Unavailable',
-            'We could not determine your location. Make sure Location Services are enabled on your device.'
-          );
-          setInitialLoading(false);
-          return;
+          fallbackCoords = {
+            latitude: 39.7392,
+            longitude: -104.9903,
+          };
         }
 
         const overrideRegion = storedOverride?.coords
@@ -680,10 +678,16 @@ export default function MapScreen() {
         }
       } catch (error) {
         console.error('Error loading map data:', error);
-        Alert.alert(
-          'Location Error',
-          'Unable to load events without a location. Please check permissions and try again.'
-        );
+        // Description: Still allow map to load even if there's an error - use Denver default
+        const defaultRegion = {
+          latitude: 39.7392,
+          longitude: -104.9903,
+          latitudeDelta: 0.0922 * 1.5,
+          longitudeDelta: 0.0421 * 1.5,
+        };
+        setRegion(defaultRegion);
+        setInitialLoading(false);
+      } finally {
         setInitialLoading(false);
       }
     })();

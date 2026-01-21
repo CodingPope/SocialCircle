@@ -41,7 +41,6 @@ import { AuthProvider } from './src/features/auth/context/AuthContext';
 // Initialize error reporting once at module load to capture early errors
 // Sentry temporarily disabled until __extends error is resolved
 import LoadingOverlay from './src/components/ui/LoadingOverlay'; // Added LoadingOverlay import
-import AnalyticsConsentPrompt from './src/components/analytics/AnalyticsConsentPrompt';
 import { recordDailySessionHeartbeat } from './src/services/sessionHeartbeatService';
 import {
   handleIncomingLink,
@@ -50,6 +49,8 @@ import {
 import { ThemeProvider, lightTheme, darkTheme } from './src/theme';
 import { useThemeStore } from './src/store/themeStore';
 import ErrorBoundary from './src/components/ErrorBoundary';
+import useTrackingPermission from './src/hooks/useTrackingPermission';
+import logger from './src/lib/logger';
 
 // Description: Keep splash screen visible while app loads
 SplashScreen.preventAutoHideAsync().catch((err) => {
@@ -70,10 +71,15 @@ function AppContent() {
   const [profileComplete, setProfileComplete] = useState(false);
   const [checking, setChecking] = useState(true);
   const [onboardingStep, setOnboardingStep] = useState(null);
-  const [showAnalyticsPrompt, setShowAnalyticsPrompt] = useState(false);
-  const [consentBusy, setConsentBusy] = useState(false);
   const [appReady, setAppReady] = useState(false);
   const themeMode = useThemeStore((state) => state.mode);
+
+  // Description: Use native iOS App Tracking Transparency (ATT) instead of custom prompt
+  const {
+    requestPermission,
+    status: attStatus,
+    canPrompt,
+  } = useTrackingPermission();
 
   console.log('[AppContent] State:', {
     storeLoading,
@@ -334,42 +340,11 @@ function AppContent() {
     check();
   }, [user]);
 
-  useEffect(() => {
-    if (!user?.uid || isBusinessSession) {
-      setShowAnalyticsPrompt(false);
-      return;
-    }
-    const hasDecision = typeof user?.analyticsOptIn === 'boolean';
-    const alreadyPrompted = !!user?.analyticsPromptedAt;
-    if (!hasDecision && !alreadyPrompted) {
-      setShowAnalyticsPrompt(true);
-    } else {
-      setShowAnalyticsPrompt(false);
-    }
-  }, [
-    user?.uid,
-    user?.analyticsOptIn,
-    user?.analyticsPromptedAt,
-    isBusinessSession,
-  ]);
-
-  useEffect(() => {
-    if (!user?.uid) {
-      clearNotifications();
-      return;
-    }
-    const unsub = subscribeNotifications(user.uid);
-    return () => {
-      try {
-        unsub && unsub();
-      } catch {}
-    };
-  }, [user?.uid, subscribeNotifications, clearNotifications]);
-
+  // Description: Persist analytics choice to Firestore and update local state
   const persistAnalyticsChoice = useCallback(
     async (accepted) => {
       if (!user?.uid || isBusinessSession) return;
-      setConsentBusy(true);
+
       const userDocRef = db.collection('users').doc(user.uid);
       const timestamp = serverTimestamp();
       const acceptedFlag = !!accepted;
@@ -418,9 +393,6 @@ function AppContent() {
           console.error('Failed to persist analytics consent', err);
           throw err;
         }
-      } finally {
-        setConsentBusy(false);
-        setShowAnalyticsPrompt(false);
       }
 
       if (!writeSucceeded) return;
@@ -454,8 +426,70 @@ function AppContent() {
         });
       } catch {}
     },
-    [setUser, user]
+    [setUser, user, isBusinessSession]
   );
+
+  // Description: Request App Tracking Transparency permission for iOS (Guideline 5.1.2)
+  // This replaces the custom analytics consent modal with Apple's native ATT prompt
+  useEffect(() => {
+    if (!user?.uid || isBusinessSession) return;
+
+    // Only request ATT if:
+    // 1. User hasn't made a decision yet (analyticsOptIn is undefined/null)
+    // 2. User hasn't been prompted before (analyticsPromptedAt is missing)
+    // 3. ATT status is 'undetermined' (native prompt not shown yet)
+    const hasDecision = typeof user?.analyticsOptIn === 'boolean';
+    const alreadyPrompted = !!user?.analyticsPromptedAt;
+
+    if (!hasDecision && !alreadyPrompted && canPrompt) {
+      // Request ATT permission (shows native iOS prompt)
+      (async () => {
+        try {
+          const result = await requestPermission();
+          const granted = result?.granted || false;
+
+          // Persist the user's choice to Firestore
+          await persistAnalyticsChoice(granted);
+        } catch (error) {
+          logger.error('[ATT] Failed to request permission:', error);
+          // On error, default to declined
+          await persistAnalyticsChoice(false);
+        }
+      })();
+    } else if (!hasDecision && !alreadyPrompted && attStatus === 'granted') {
+      // ATT already granted (edge case: user granted in system settings before app asked)
+      persistAnalyticsChoice(true);
+    } else if (
+      !hasDecision &&
+      !alreadyPrompted &&
+      (attStatus === 'denied' || attStatus === 'restricted')
+    ) {
+      // ATT already denied/restricted
+      persistAnalyticsChoice(false);
+    }
+  }, [
+    user?.uid,
+    user?.analyticsOptIn,
+    user?.analyticsPromptedAt,
+    isBusinessSession,
+    canPrompt,
+    attStatus,
+    requestPermission,
+    persistAnalyticsChoice,
+  ]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      clearNotifications();
+      return;
+    }
+    const unsub = subscribeNotifications(user.uid);
+    return () => {
+      try {
+        unsub && unsub();
+      } catch {}
+    };
+  }, [user?.uid, subscribeNotifications, clearNotifications]);
 
   const showLoadingOverlay = storeLoading || checking;
 
@@ -555,12 +589,6 @@ function AppContent() {
     <>
       {navigator}
       <LoadingOverlay visible={showLoadingOverlay} />
-      <AnalyticsConsentPrompt
-        visible={showAnalyticsPrompt}
-        busy={consentBusy}
-        onAccept={() => persistAnalyticsChoice(true)}
-        onDecline={() => persistAnalyticsChoice(false)}
-      />
     </>
   );
 }

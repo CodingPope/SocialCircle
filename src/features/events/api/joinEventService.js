@@ -11,6 +11,7 @@ import {
 } from '../../../services/analyticsService';
 import { trackRsvpYes, trackJoinEvent } from '../../../lib/analytics';
 import { callFirebaseFunction } from '../../../services/firebase/config';
+import { canJoinEvent } from '../../../utils/tosHelper';
 
 // Safe no-op
 const noop = () => {};
@@ -74,6 +75,14 @@ export async function joinEvent({
   };
 
   try {
+    // Description: Check TOS acceptance (Apple Guideline 1.2 compliance)
+    if (!canJoinEvent(user)) {
+      onShowMessage(
+        'You must accept Terms of Service to join events. Update this in Settings → Privacy & Legal → Terms of Service.'
+      );
+      return { status: 'tos-required', message: 'TOS acceptance required' };
+    }
+
     // Basic guards
     if (!event || !event.id) {
       onShowMessage('Event is unavailable.');

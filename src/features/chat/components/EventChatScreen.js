@@ -69,6 +69,8 @@ import { shareEventDetails } from '../../events/utils/shareUtils';
 import { addSocialCircleEventToCalendar } from '../../../services/calendarService';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
+import { canSendMessage, showTOSRequiredAlert } from '../../../utils/tosHelper';
+import { useUserStore } from '../../profile';
 
 // --- Date/Time editing constraints (mirror CreateEventScreen) ---
 const MIN_LEAD_MINUTES = 30;
@@ -763,6 +765,14 @@ const EventChatScreen = () => {
     const uid = auth().currentUser?.uid;
     if (!uid) {
       Alert.alert('Not signed in', 'Please sign in to send messages.');
+      return;
+    }
+
+    // Description: Check TOS acceptance (Apple Guideline 1.2 compliance)
+    // Get user from store to check tosAccepted
+    const currentUser = useUserStore.getState?.()?.user;
+    if (!canSendMessage(currentUser)) {
+      showTOSRequiredAlert('send messages');
       return;
     }
 

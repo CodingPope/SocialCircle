@@ -28,7 +28,8 @@ const db = admin.firestore(); // convenience
 const FieldValue = admin.firestore.FieldValue;
 function fieldDelete() {
   try {
-    if (FieldValue && typeof FieldValue.delete === 'function') return FieldValue.delete();
+    if (FieldValue && typeof FieldValue.delete === 'function')
+      return FieldValue.delete();
   } catch (e) {
     // ignore
   }
@@ -38,6 +39,11 @@ const projectId = process.env.GCLOUD_PROJECT;
 const ENFORCE_APPCHECK =
   process.env.ENFORCE_APPCHECK === '1' ||
   process.env.ENFORCE_APPCHECK === 'true';
+// Business callables are frequently exercised from simulators during onboarding.
+// Allow disabling App Check for this subset without affecting global enforcement.
+const BUSINESS_ENFORCE_APPCHECK =
+  process.env.BUSINESS_ENFORCE_APPCHECK === '1' ||
+  process.env.BUSINESS_ENFORCE_APPCHECK === 'true';
 const JOIN_CALLABLE_OPTIONS = Object.freeze({
   region: 'us-central1',
   memory: '256MiB',
@@ -184,7 +190,8 @@ function requireUserTier(user, requiredTier, context = 'This action') {
 
 function requireBusinessTier(business, requiredTier, context = 'This action') {
   if (!hasBusinessTier(business, requiredTier)) {
-    const expected = normalizeBusinessTier(requiredTier) || BUSINESS_TIERS.TIER1;
+    const expected =
+      normalizeBusinessTier(requiredTier) || BUSINESS_TIERS.TIER1;
     throw new HttpsError(
       'permission-denied',
       `${context} requires ${expected} business tier.`
@@ -546,147 +553,144 @@ exports.adminBackfillTiers = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
     }
 
     const backfillUsers = async ({ startAfter }) => {
-    const pageSize = 250;
-    let processed = 0;
-    let updated = 0;
-    let claimsSynced = 0;
-    let cursor = startAfter;
-    let done = false;
+      const pageSize = 250;
+      let processed = 0;
+      let updated = 0;
+      let claimsSynced = 0;
+      let cursor = startAfter;
+      let done = false;
 
-    while (true) {
-      if (limit && processed >= limit) break;
-      const pageLimit = limit
-        ? Math.min(pageSize, limit - processed)
-        : pageSize;
-      let q = db
-        .collection('users')
-        .orderBy('__name__')
-        .limit(pageLimit);
-      if (cursor) q = q.startAfter(cursor);
+      while (true) {
+        if (limit && processed >= limit) break;
+        const pageLimit = limit
+          ? Math.min(pageSize, limit - processed)
+          : pageSize;
+        let q = db.collection('users').orderBy('__name__').limit(pageLimit);
+        if (cursor) q = q.startAfter(cursor);
 
-      const snap = await q.get();
-      if (snap.empty) {
-        done = true;
-        break;
-      }
+        const snap = await q.get();
+        if (snap.empty) {
+          done = true;
+          break;
+        }
 
-      const batch = db.batch();
-      let writes = 0;
-      const claimQueue = [];
+        const batch = db.batch();
+        let writes = 0;
+        const claimQueue = [];
 
-      snap.docs.forEach((docSnap) => {
-        processed += 1;
-        const userData = docSnap.data() || {};
-        const derived = forcedUserTier || deriveUserTier(userData);
-        const current = normalizeUserTier(userData.accountTier);
-        const needsUpdate = current !== derived;
-        if (needsUpdate) {
-          updated += 1;
-          if (!dryRun) {
-            if (normalizeUserFlags) {
-              // When normalizeUserFlags is requested, apply the full
-              // user tier update (accountTier, plan, premiumActive,
-              // and isPopular) based on the derived tier. Previously
-              // we only did this when a forcedUserTier was provided,
-              // which left `isPopular` unpopulated during normal
-              // backfills.
-              const updates = buildUserTierUpdate(derived);
-              batch.set(docSnap.ref, updates, { merge: true });
-            } else {
-              batch.set(
-                docSnap.ref,
-                { accountTier: derived },
-                { merge: true }
-              );
+        snap.docs.forEach((docSnap) => {
+          processed += 1;
+          const userData = docSnap.data() || {};
+          const derived = forcedUserTier || deriveUserTier(userData);
+          const current = normalizeUserTier(userData.accountTier);
+          const needsUpdate = current !== derived;
+          if (needsUpdate) {
+            updated += 1;
+            if (!dryRun) {
+              if (normalizeUserFlags) {
+                // When normalizeUserFlags is requested, apply the full
+                // user tier update (accountTier, plan, premiumActive,
+                // and isPopular) based on the derived tier. Previously
+                // we only did this when a forcedUserTier was provided,
+                // which left `isPopular` unpopulated during normal
+                // backfills.
+                const updates = buildUserTierUpdate(derived);
+                batch.set(docSnap.ref, updates, { merge: true });
+              } else {
+                batch.set(
+                  docSnap.ref,
+                  { accountTier: derived },
+                  { merge: true }
+                );
+              }
+              writes += 1;
             }
-            writes += 1;
+          }
+          if (syncClaims && (needsUpdate || forceClaims)) {
+            claimQueue.push({ uid: docSnap.id, tier: derived });
+          }
+        });
+
+        if (!dryRun && writes > 0) {
+          await batch.commit();
+        }
+
+        if (syncClaims && claimQueue.length > 0) {
+          for (const entry of claimQueue) {
+            await syncAccountTierClaims(entry.uid, entry.tier);
+            claimsSynced += 1;
           }
         }
-        if (syncClaims && (needsUpdate || forceClaims)) {
-          claimQueue.push({ uid: docSnap.id, tier: derived });
-        }
-      });
 
-      if (!dryRun && writes > 0) {
-        await batch.commit();
-      }
-
-      if (syncClaims && claimQueue.length > 0) {
-        for (const entry of claimQueue) {
-          await syncAccountTierClaims(entry.uid, entry.tier);
-          claimsSynced += 1;
+        cursor = snap.docs[snap.docs.length - 1]?.id || cursor;
+        if (snap.size < pageLimit) {
+          done = true;
+          break;
         }
       }
 
-      cursor = snap.docs[snap.docs.length - 1]?.id || cursor;
-      if (snap.size < pageLimit) {
-        done = true;
-        break;
-      }
-    }
-
-    return {
-      processed,
-      updated,
-      claimsSynced,
-      nextCursor: done ? null : cursor,
-      done,
+      return {
+        processed,
+        updated,
+        claimsSynced,
+        nextCursor: done ? null : cursor,
+        done,
+      };
     };
-  };
 
     const backfillBusinesses = async ({ startAfter }) => {
-    const pageSize = 250;
-    let processed = 0;
-    let updated = 0;
-    let cursor = startAfter;
-    let done = false;
+      const pageSize = 250;
+      let processed = 0;
+      let updated = 0;
+      let cursor = startAfter;
+      let done = false;
 
-    while (true) {
-      if (limit && processed >= limit) break;
-      const pageLimit = limit
-        ? Math.min(pageSize, limit - processed)
-        : pageSize;
-      let q = db
-        .collection('businesses')
-        .orderBy(admin.firestore.FieldPath.documentId())
-        .limit(pageLimit);
-      if (cursor) q = q.startAfter(cursor);
+      while (true) {
+        if (limit && processed >= limit) break;
+        const pageLimit = limit
+          ? Math.min(pageSize, limit - processed)
+          : pageSize;
+        let q = db
+          .collection('businesses')
+          .orderBy(admin.firestore.FieldPath.documentId())
+          .limit(pageLimit);
+        if (cursor) q = q.startAfter(cursor);
 
-      const snap = await q.get();
-      if (snap.empty) {
-        done = true;
-        break;
-      }
-
-      const batch = db.batch();
-      let writes = 0;
-
-      snap.docs.forEach((docSnap) => {
-        processed += 1;
-        const bizData = docSnap.data() || {};
-        const current = normalizeBusinessTier(bizData.businessTier);
-        const target = forcedBusinessTier || current || BUSINESS_TIERS.TIER1;
-        if (current === target) return;
-        updated += 1;
-        if (!dryRun) {
-          batch.set(docSnap.ref, { businessTier: target }, { merge: true });
-          writes += 1;
+        const snap = await q.get();
+        if (snap.empty) {
+          done = true;
+          break;
         }
-      });
 
-      if (!dryRun && writes > 0) {
-        await batch.commit();
+        const batch = db.batch();
+        let writes = 0;
+
+        snap.docs.forEach((docSnap) => {
+          processed += 1;
+          const bizData = docSnap.data() || {};
+          const current = normalizeBusinessTier(bizData.businessTier);
+          const target = forcedBusinessTier || current || BUSINESS_TIERS.TIER1;
+          if (current === target) return;
+          updated += 1;
+          if (!dryRun) {
+            batch.set(docSnap.ref, { businessTier: target }, { merge: true });
+            writes += 1;
+          }
+        });
+
+        if (!dryRun && writes > 0) {
+          await batch.commit();
+        }
+
+        cursor = snap.docs[snap.docs.length - 1]?.id || cursor;
+        if (snap.size < pageLimit) {
+          done = true;
+          break;
+        }
       }
 
-      cursor = snap.docs[snap.docs.length - 1]?.id || cursor;
-      if (snap.size < pageLimit) {
-        done = true;
-        break;
-      }
-    }
-
-    return { processed, updated, nextCursor: done ? null : cursor, done };
-  };
+      return { processed, updated, nextCursor: done ? null : cursor, done };
+    };
 
     const result = {};
     if (scope === 'all' || scope === 'users') {
@@ -3320,7 +3324,9 @@ const BUSINESS_CALLABLE_OPTIONS = Object.freeze({
   memory: '256MiB',
   timeoutSeconds: 60,
   invoker: 'public',
-  enforceAppCheck: true,
+  // App Check can stay enabled globally; business endpoints can be exempted by
+  // setting BUSINESS_ENFORCE_APPCHECK=1 when ready to enforce.
+  enforceAppCheck: BUSINESS_ENFORCE_APPCHECK,
 });
 
 function assertAuth(req) {
@@ -3356,7 +3362,10 @@ async function markUserAsBusiness(uid) {
       { merge: true }
     );
   } catch (err) {
-    logger.warn('[business] Failed to mark user as business', err?.message || err);
+    logger.warn(
+      '[business] Failed to mark user as business',
+      err?.message || err
+    );
   }
 }
 
@@ -3488,7 +3497,6 @@ exports.createBusinessDraft = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
     supportEmail: null,
     phone: null,
     logoUrl: null,
-    coverUrl: null,
     brandColor: null,
     ageRestriction: 'none',
     genderRestriction: 'none',
@@ -3509,6 +3517,100 @@ exports.createBusinessDraft = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   return { ok: true, bizId: ref.id };
 });
 
+exports.createOrUpdateBusiness = onCall(
+  BUSINESS_CALLABLE_OPTIONS,
+  async (req) => {
+    const uid = assertAuth(req);
+    const {
+      bizId: incomingBizId,
+      type,
+      displayName,
+      category,
+      description,
+      logoUrl,
+      contactEmail,
+      phone,
+      website,
+      instagram,
+      facebook,
+      tiktok,
+    } = req.data || {};
+
+    const bizType = normalizeType(type);
+    if (!displayName || !category) {
+      throw new HttpsError(
+        'invalid-argument',
+        'Name and category are required'
+      );
+    }
+
+    const targetId = incomingBizId || db.collection('businesses').doc().id;
+    const ref = db.collection('businesses').doc(targetId);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const baseSlug = slugify(displayName);
+    const slug = baseSlug ? await ensureUniqueSlug(baseSlug) : null;
+    const snap = await ref.get();
+    const existing = snap.exists ? snap.data() || {} : {};
+
+    const doc = {
+      createdBy: existing.createdBy || uid,
+      ownerId: existing.ownerId || uid,
+      status: 'active',
+      type: bizType,
+      businessTier: existing.businessTier || BUSINESS_TIERS.TIER1,
+      displayName: String(displayName).slice(0, 80),
+      category: String(category).slice(0, 40),
+      description: description ? String(description).slice(0, 200) : null,
+      logoUrl: logoUrl || null,
+      supportEmail: contactEmail || existing.supportEmail || null,
+      phone: phone || existing.phone || null,
+      website: website || existing.website || null,
+      contact: {
+        email: contactEmail || null,
+        phone: phone || null,
+        website: website || null,
+        social: {
+          instagram: instagram || null,
+          facebook: facebook || null,
+          tiktok: tiktok || null,
+        },
+      },
+      members: existing.members || [{ uid, role: 'Owner' }],
+      slug: slug || existing.slug || null,
+      searchTokens: buildSearchTokens(displayName),
+      createdAt: existing.createdAt || now,
+      updatedAt: now,
+    };
+
+    await ref.set(doc, { merge: true });
+    await mirrorMembership(uid, ref.id, 'Owner');
+    await markUserAsBusiness(uid);
+    logger.log('[business] upserted business', ref.id, 'by', uid);
+    return { ok: true, bizId: ref.id, slug: doc.slug };
+  }
+);
+
+exports.switchToPersonalAccount = onCall(
+  BUSINESS_CALLABLE_OPTIONS,
+  async (req) => {
+    const uid = assertAuth(req);
+    const userRef = db.collection('users').doc(uid);
+    const snap = await userRef.get();
+    if (!snap.exists) {
+      throw new HttpsError('not-found', 'User not found');
+    }
+    await userRef.set(
+      {
+        type: 'user',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    logger.log('[business] switched to personal', uid);
+    return { ok: true };
+  }
+);
+
 exports.updateBusinessBasics = onCall(
   BUSINESS_CALLABLE_OPTIONS,
   async (req) => {
@@ -3521,6 +3623,10 @@ exports.updateBusinessBasics = onCall(
       website,
       supportEmail,
       phone,
+      contactEmail,
+      instagram,
+      facebook,
+      tiktok,
     } = req.data || {};
     if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
 
@@ -3540,6 +3646,43 @@ exports.updateBusinessBasics = onCall(
       updates.supportEmail = String(supportEmail).slice(0, 120);
     if (phone != null) updates.phone = String(phone).slice(0, 40);
 
+    const existingContact = biz.contact || {};
+    const existingSocial = existingContact.social || {};
+    const nextContact = { ...existingContact, social: { ...existingSocial } };
+    let contactTouched = false;
+
+    if (contactEmail != null || supportEmail != null) {
+      const resolvedEmail = contactEmail ?? supportEmail;
+      nextContact.email =
+        resolvedEmail != null ? String(resolvedEmail).slice(0, 120) : null;
+      contactTouched = true;
+    }
+    if (phone != null)
+      nextContact.phone = phone != null ? String(phone).slice(0, 40) : null;
+    if (website != null)
+      nextContact.website =
+        website != null ? String(website).slice(0, 180) : null;
+    if (instagram != null) {
+      nextContact.social.instagram =
+        instagram != null ? String(instagram).slice(0, 120) : null;
+      contactTouched = true;
+    }
+    if (facebook != null) {
+      nextContact.social.facebook =
+        facebook != null ? String(facebook).slice(0, 120) : null;
+      contactTouched = true;
+    }
+    if (tiktok != null) {
+      nextContact.social.tiktok =
+        tiktok != null ? String(tiktok).slice(0, 120) : null;
+      contactTouched = true;
+    }
+    if (phone != null || website != null) contactTouched = true;
+
+    if (contactTouched) {
+      updates.contact = nextContact;
+    }
+
     // Slug + search tokens when displayName present
     if (updates.displayName) {
       const base = slugify(updates.displayName);
@@ -3556,14 +3699,13 @@ exports.updateBusinessBasics = onCall(
 
 exports.updateBrandAssets = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
   const uid = assertAuth(req);
-  const { bizId, logoUrl, coverUrl, brandColor } = req.data || {};
+  const { bizId, logoUrl, brandColor } = req.data || {};
   if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
   const { ref, biz } = await getBusinessIfMember(bizId, uid);
   if (!hasRole(biz, uid, ['owner', 'manager']))
     throw new HttpsError('permission-denied', 'Owner/Manager only');
   const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
   if (logoUrl != null) updates.logoUrl = String(logoUrl);
-  if (coverUrl != null) updates.coverUrl = String(coverUrl);
   if (brandColor != null) updates.brandColor = String(brandColor).slice(0, 9);
   await ref.set(updates, { merge: true });
   return { ok: true };

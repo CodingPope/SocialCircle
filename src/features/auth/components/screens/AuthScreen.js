@@ -388,7 +388,7 @@ export default function AuthScreen({ navigation, route }) {
 
   // Description: Calculate googleDisabled AFTER googleRequest is declared to avoid ReferenceError
   const googleDisabled = !googleRequest;
-  
+
   const handleGooglePress = useCallback(() => {
     if (googleDisabled) {
       return;
@@ -448,18 +448,19 @@ export default function AuthScreen({ navigation, route }) {
 
         // If new user, create minimal profile (re-use createUser from profile services)
         if (result?.additionalUserInfo?.isNewUser) {
-          const {
-            createUser,
-          } = require('../../../profile/api/userService');
+          const { createUser } = require('../../../profile/api/userService');
           const token = await registerForPushTokenAsync().catch(() => null);
           const appleProfile = extractAppleProfileFields(
             credential,
             result.user
           );
+
+          // Description: Save firstName and lastName from Apple to Firestore immediately
+          // Apple only provides fullName on FIRST sign-in, so we must capture it now
           await createUser(result.user.uid, {
             email: appleProfile.email || result.user.email || '',
-            firstName: appleProfile.firstName,
-            lastName: appleProfile.lastName,
+            firstName: appleProfile.firstName || '',
+            lastName: appleProfile.lastName || '',
             appleRelayEmail: appleProfile.appleRelayEmail,
             deviceToken: token || null,
             pushOptIn: !!token,
@@ -554,9 +555,7 @@ export default function AuthScreen({ navigation, route }) {
           setRole('consumer');
 
           if (result.additionalUserInfo?.isNewUser) {
-            const {
-              createUser,
-            } = require('../../../profile/api/userService');
+            const { createUser } = require('../../../profile/api/userService');
             const token = await registerForPushTokenAsync().catch(() => null);
             await createUser(result.user.uid, {
               email: result.user.email,
@@ -596,7 +595,11 @@ export default function AuthScreen({ navigation, route }) {
       return;
     }
 
-    if (mode === 'signup' && shouldShowConfirm && password !== confirmPassword) {
+    if (
+      mode === 'signup' &&
+      shouldShowConfirm &&
+      password !== confirmPassword
+    ) {
       Alert.alert('Passwords do not match', 'Please re-enter your password.');
       return;
     }
@@ -700,9 +703,7 @@ export default function AuthScreen({ navigation, route }) {
         const userDocRef = doc(db, 'users', result.user.uid);
         const token = await registerForPushTokenAsync().catch(() => null);
         try {
-          const {
-            createUser,
-          } = require('../../../profile/api/userService');
+          const { createUser } = require('../../../profile/api/userService');
           await createUser(result.user.uid, {
             email: result.user.email,
             deviceToken: token || null,
@@ -867,49 +868,31 @@ export default function AuthScreen({ navigation, route }) {
 
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email</Text>
-            <TextInput
-              placeholder='you@example.com'
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize='none'
+              <TextInput
+                placeholder='you@example.com'
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize='none'
                 keyboardType='email-address'
-              autoCorrect={false}
-              spellCheck={false}
-              textContentType='emailAddress'
-              autoComplete='email'
-              style={styles.input}
-              placeholderTextColor={theme.colors.neutral500}
-              keyboardAppearance={keyboardAppearance}
-            />
-          </View>
+                autoCorrect={false}
+                spellCheck={false}
+                textContentType='emailAddress'
+                autoComplete='email'
+                style={styles.input}
+                placeholderTextColor={theme.colors.neutral500}
+                keyboardAppearance={keyboardAppearance}
+              />
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Password</Text>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
               <TextInput
                 placeholder='••••••••'
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
                 textContentType='password'
-              autoComplete='password'
-              autoCorrect={false}
-              spellCheck={false}
-              style={styles.input}
-              placeholderTextColor={theme.colors.neutral500}
-              keyboardAppearance={keyboardAppearance}
-            />
-          </View>
-
-          {shouldShowConfirm && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Confirm Password</Text>
-              <TextInput
-                placeholder='••••••••'
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry
-                textContentType='password'
-                autoComplete='password-new'
+                autoComplete='password'
                 autoCorrect={false}
                 spellCheck={false}
                 style={styles.input}
@@ -917,11 +900,29 @@ export default function AuthScreen({ navigation, route }) {
                 keyboardAppearance={keyboardAppearance}
               />
             </View>
-          )}
 
-          {mode === 'login' && (
-            <TouchableOpacity
-              style={styles.forgotPasswordLink}
+            {shouldShowConfirm && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Confirm Password</Text>
+                <TextInput
+                  placeholder='••••••••'
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry
+                  textContentType='password'
+                  autoComplete='password-new'
+                  autoCorrect={false}
+                  spellCheck={false}
+                  style={styles.input}
+                  placeholderTextColor={theme.colors.neutral500}
+                  keyboardAppearance={keyboardAppearance}
+                />
+              </View>
+            )}
+
+            {mode === 'login' && (
+              <TouchableOpacity
+                style={styles.forgotPasswordLink}
                 onPress={handlePasswordReset}
               >
                 <Text style={styles.linkText}>Forgot password?</Text>

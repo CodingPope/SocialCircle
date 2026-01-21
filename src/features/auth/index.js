@@ -6,6 +6,7 @@ export { default as InterestsScreen } from './components/screens/Onboarding/Inte
 export { default as LocationScreen } from './components/screens/Onboarding/LocationScreen';
 export { default as NameDobScreen } from './components/screens/Onboarding/NameDobScreen';
 export { default as SexScreen } from './components/screens/Onboarding/SexScreen';
+export { default as TOSAcceptanceScreen } from './components/screens/Onboarding/TOSAcceptanceScreen';
 
 export * from './api/hydrateUserStore';
 export * from './context/AuthContext';
