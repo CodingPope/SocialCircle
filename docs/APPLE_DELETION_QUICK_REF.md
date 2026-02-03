@@ -1,7 +1,9 @@
 # Apple Account Deletion - Quick Reference
 
 ## For Users
+
 **How to delete your account:**
+
 1. Open Social Circle app
 2. Go to Profile tab
 3. Tap menu (3 dots) → Settings
@@ -9,6 +11,7 @@
 5. Read warning and confirm
 
 **What happens:**
+
 - Account permanently deleted within 24 hours
 - All events, messages, and content removed
 - Cannot be undone
@@ -21,6 +24,7 @@
 ## For Developers
 
 ### Testing Deletion Flow (Local)
+
 ```bash
 # 1. Start emulators
 npm run start
@@ -33,6 +37,7 @@ npm test -- accountDeletion.test.js
 ```
 
 ### Testing Deletion Flow (Device)
+
 1. Create test account
 2. Add some events/messages
 3. Navigate to Profile → Menu → Delete Account
@@ -44,6 +49,7 @@ npm test -- accountDeletion.test.js
    - Messages deleted
 
 ### Deploying Cloud Function
+
 ```bash
 # Deploy only deletion function
 firebase deploy --only functions:deleteUserAccount
@@ -53,6 +59,7 @@ firebase deploy --only functions
 ```
 
 ### Monitoring Deletion Requests
+
 ```bash
 # View logs
 firebase functions:log --only deleteUserAccount
@@ -62,6 +69,7 @@ firebase functions:log --only deleteUserAccount --limit 10
 ```
 
 ### What Gets Deleted
+
 - ✅ User document (`users/{uid}`)
 - ✅ Firebase Auth user
 - ✅ User's events (`events` where `createdBy == uid`)
@@ -72,6 +80,7 @@ firebase functions:log --only deleteUserAccount --limit 10
 - ✅ Apple tokens (attempted revocation)
 
 ### What's NOT Deleted (Intentional)
+
 - ❌ Abuse reports (safety/legal)
 - ❌ Anonymized analytics (operational)
 - ❌ Data required by law
@@ -79,17 +88,20 @@ firebase functions:log --only deleteUserAccount --limit 10
 ### Error Scenarios
 
 **"Failed to delete account"**
+
 - Check cloud function logs
 - Verify user is authenticated
 - Check Firebase permissions
 - Ensure function deployed
 
 **"Permission denied"**
+
 - User must be signed in
 - Can only delete own account
 - Check auth state
 
 **Apple token revocation fails**
+
 - Non-critical, deletion continues
 - Check logs for details
 - Full implementation needs Apple credentials
@@ -97,11 +109,13 @@ firebase functions:log --only deleteUserAccount --limit 10
 ### Future Implementation: Full Apple Token Revocation
 
 **Required:**
+
 1. Apple Team ID
-2. Key ID  
+2. Key ID
 3. Private Key (p8 file from Apple Developer)
 
 **Implementation:**
+
 ```javascript
 // In functions/index.js revokeAppleToken()
 const jwt = require('jsonwebtoken');
@@ -113,13 +127,13 @@ const clientSecret = jwt.sign(
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + 86400,
     aud: 'https://appleid.apple.com',
-    sub: 'com.socialcirclellc.app'
+    sub: 'com.socialcirclellc.app',
   },
   APPLE_PRIVATE_KEY,
   {
     algorithm: 'ES256',
-    header: { kid: APPLE_KEY_ID }
-  }
+    header: { kid: APPLE_KEY_ID },
+  },
 );
 
 await fetch('https://appleid.apple.com/auth/revoke', {
@@ -129,13 +143,15 @@ await fetch('https://appleid.apple.com/auth/revoke', {
     client_id: 'com.socialcirclellc.app',
     client_secret: clientSecret,
     token: authorizationCode,
-    token_type_hint: 'refresh_token'
-  })
+    token_type_hint: 'refresh_token',
+  }),
 });
 ```
 
 ### Firestore Security Rules
+
 Ensure rules allow deletion:
+
 ```javascript
 // users collection
 match /users/{userId} {
@@ -144,13 +160,15 @@ match /users/{userId} {
 
 // events collection
 match /events/{eventId} {
-  allow delete: if request.auth != null && 
+  allow delete: if request.auth != null &&
                    request.auth.uid == resource.data.createdBy;
 }
 ```
 
 ### Support Requests
+
 If user reports deletion not working:
+
 1. Check Firebase logs for their UID
 2. Verify function executed
 3. Check for any failed steps
@@ -165,6 +183,7 @@ If user reports deletion not working:
 ## Apple Compliance Checklist
 
 Before App Store submission:
+
 - [ ] Delete option visible in app settings
 - [ ] Confirmation dialog warns of permanent deletion
 - [ ] Privacy policy updated with deletion info
@@ -177,6 +196,7 @@ Before App Store submission:
 ---
 
 ## Files Changed
+
 - `functions/index.js` - Cloud function
 - `src/features/events/components/ProfileScreen.js` - UI
 - `src/features/auth/components/screens/AuthScreen.js` - Apple integration
@@ -184,4 +204,5 @@ Before App Store submission:
 - `docs/APPLE_ACCOUNT_DELETION_COMPLIANCE.md` - Full documentation
 
 ## Questions?
+
 See full docs: `/docs/APPLE_ACCOUNT_DELETION_COMPLIANCE.md`

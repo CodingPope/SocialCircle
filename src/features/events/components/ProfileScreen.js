@@ -369,27 +369,29 @@ export default function ProfileScreen({
           onPress: async () => {
             try {
               setDeletingAccount(true);
-              
+
               // Call cloud function to permanently delete account
-              const deleteAccount = functions.httpsCallable('deleteUserAccount');
+              const deleteAccount =
+                functions.httpsCallable('deleteUserAccount');
               await deleteAccount();
-              
+
               // Sign out (auth user is already deleted, but clear local state)
               setUser(null);
-              
+
               // AppNavigator will render AuthStack when user is null
               setTimeout(() => {
                 Alert.alert(
                   'Account Deleted',
                   'Your account has been permanently deleted. All your data has been removed from our system.',
-                  [{ text: 'OK' }]
+                  [{ text: 'OK' }],
                 );
               }, 600);
             } catch (err) {
               console.error('[ProfileScreen] Account deletion failed:', err);
               Alert.alert(
                 'Deletion Failed',
-                err?.message || 'Failed to delete account. Please try again or contact support@findyourcircle.app'
+                err?.message ||
+                  'Failed to delete account. Please try again or contact support@findyourcircle.app',
               );
             } finally {
               setDeletingAccount(false);
@@ -1603,9 +1605,8 @@ export default function ProfileScreen({
                     <Switch
                       value={themeMode === 'dark'}
                       onValueChange={toggleTheme}
-                      trackColor={{ false: '#E5E7EB', true: '#34C759' }}
+                      trackColor={{ false: '#767577', true: '#34C759' }}
                       thumbColor='#FFFFFF'
-                      ios_backgroundColor='#E5E7EB'
                     />
                   </View>
 

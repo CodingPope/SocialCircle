@@ -282,7 +282,7 @@ const createStyles = (theme) => {
 async function generateNonce(length = 32) {
   const bytes = await Crypto.getRandomBytesAsync(length);
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
-    ''
+    '',
   );
 }
 
@@ -319,7 +319,7 @@ export default function AuthScreen({ navigation, route }) {
       }
       return null;
     },
-    [setProfileComplete, setUser]
+    [setProfileComplete, setUser],
   );
 
   const cardTitle = useMemo(() => {
@@ -345,7 +345,7 @@ export default function AuthScreen({ navigation, route }) {
       } catch {}
       setBusinessMode(!!nextBusiness);
     },
-    [navigation, setBusinessMode]
+    [navigation, setBusinessMode],
   );
 
   useEffect(() => {
@@ -417,7 +417,7 @@ export default function AuthScreen({ navigation, route }) {
       const rawNonce = await generateNonce();
       const hashed = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
-        rawNonce
+        rawNonce,
       );
 
       const credential = await AppleAuthentication.signInAsync({
@@ -437,7 +437,7 @@ export default function AuthScreen({ navigation, route }) {
       // FIXED: Use auth.AppleAuthProvider instead of OAuthProvider
       const oauthCredential = auth.AppleAuthProvider.credential(
         credential.identityToken,
-        rawNonce
+        rawNonce,
       );
 
       try {
@@ -452,7 +452,7 @@ export default function AuthScreen({ navigation, route }) {
           const token = await registerForPushTokenAsync().catch(() => null);
           const appleProfile = extractAppleProfileFields(
             credential,
-            result.user
+            result.user,
           );
 
           // Description: Save firstName and lastName from Apple to Firestore immediately
@@ -500,22 +500,22 @@ export default function AuthScreen({ navigation, route }) {
                             await user.linkWithCredential(pendingCred);
                             Alert.alert(
                               'Linked',
-                              'Apple account linked successfully.'
+                              'Apple account linked successfully.',
                             );
                           } catch (linkErr) {
                             Alert.alert(
                               'Link failed',
-                              linkErr?.message || String(linkErr)
+                              linkErr?.message || String(linkErr),
                             );
                           }
                           unsubscribe();
                         }
-                      }
+                      },
                     );
                   } catch (gErr) {
                     Alert.alert(
                       'Google Sign-In Failed',
-                      gErr?.message || String(gErr)
+                      gErr?.message || String(gErr),
                     );
                   }
                 },
@@ -524,7 +524,7 @@ export default function AuthScreen({ navigation, route }) {
                 text: 'Cancel',
                 style: 'cancel',
               },
-            ]
+            ],
           );
         } else {
           throw err;
@@ -540,7 +540,9 @@ export default function AuthScreen({ navigation, route }) {
       ];
       const isCanceled =
         (err && cancelCodes.includes(err.code)) ||
-        String(err?.message || '').toLowerCase().includes('cancel');
+        String(err?.message || '')
+          .toLowerCase()
+          .includes('cancel');
       if (!isCanceled) {
         logAuthError(err, 'apple-signin', {});
         const { title, message } = getAuthErrorMessage(err, 'login');
@@ -637,10 +639,10 @@ export default function AuthScreen({ navigation, route }) {
               'draft';
             const normalizedStatus = String(statusRaw || 'draft').toLowerCase();
             const sendToTabs = ['active', 'pending_review'].includes(
-              normalizedStatus
+              normalizedStatus,
             );
             setNextBusinessRoute(
-              sendToTabs ? 'BusinessTabs' : 'BusinessOnboarding'
+              sendToTabs ? 'BusinessTabs' : 'BusinessOnboarding',
             );
           } catch (resumeErr) {
             setNextBusinessRoute('BusinessOnboarding');
@@ -671,12 +673,12 @@ export default function AuthScreen({ navigation, route }) {
           if (hasPassword) {
             Alert.alert(
               'Account Exists',
-              'An account with this email already exists. Please log in.'
+              'An account with this email already exists. Please log in.',
             );
           } else {
             Alert.alert(
               'Use existing sign-in',
-              'This email is linked to a social login. Use that method.'
+              'This email is linked to a social login. Use that method.',
             );
           }
           setLoading(false);
@@ -686,7 +688,7 @@ export default function AuthScreen({ navigation, route }) {
         // Create account
         const result = await auth().createUserWithEmailAndPassword(
           email,
-          password
+          password,
         );
 
         // Ensure auth token is minted before any Firestore writes
@@ -721,7 +723,7 @@ export default function AuthScreen({ navigation, route }) {
         } catch (err) {
           Alert.alert(
             'Account Creation Error',
-            'Could not create user profile. Please try again.'
+            'Could not create user profile. Please try again.',
           );
           setLoading(false);
           return;
@@ -773,8 +775,8 @@ export default function AuthScreen({ navigation, route }) {
       .then(() =>
         Alert.alert(
           'Check Your Email',
-          'A password reset link has been sent to your email address. Please check your inbox and follow the instructions.'
-        )
+          'A password reset link has been sent to your email address. Please check your inbox and follow the instructions.',
+        ),
       )
       .catch((err) => {
         logAuthError(err, 'reset', { email: email.substring(0, 3) + '***' });

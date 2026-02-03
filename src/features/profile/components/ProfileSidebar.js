@@ -77,9 +77,8 @@ function DarkModeToggle({ isDarkMode, onToggle, theme }) {
       <Switch
         value={isDarkMode}
         onValueChange={onToggle}
-        trackColor={{ false: '#E5E7EB', true: '#34C759' }}
+        trackColor={{ false: '#767577', true: '#34C759' }}
         thumbColor='#FFFFFF'
-        ios_backgroundColor='#E5E7EB'
       />
     </View>
   );

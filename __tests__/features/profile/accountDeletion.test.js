@@ -8,22 +8,24 @@ describe('Account Deletion Flow', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     mockFunctions = {
       httpsCallable: jest.fn(() => jest.fn()),
     };
-    
+
     mockAuth = {
       deleteUser: jest.fn(),
       updateUser: jest.fn(),
     };
-    
+
     mockDb = {
       collection: jest.fn(() => ({
         doc: jest.fn(() => ({
-          get: jest.fn(() => Promise.resolve({
-            data: () => ({ uid: 'test-uid', email: 'test@example.com' }),
-          })),
+          get: jest.fn(() =>
+            Promise.resolve({
+              data: () => ({ uid: 'test-uid', email: 'test@example.com' }),
+            }),
+          ),
           delete: jest.fn(),
         })),
         where: jest.fn(() => ({

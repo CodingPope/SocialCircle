@@ -1,14 +1,17 @@
 # Apple Account Deletion Compliance Implementation
 
 ## Overview
+
 Social Circle now implements Apple-compliant account deletion as required by App Store Review Guideline 5.1.1(v). Users can permanently delete their accounts directly from the app, removing all personal data and user-generated content.
 
 ## What Was Implemented
 
 ### 1. Cloud Function: `deleteUserAccount` (functions/index.js)
+
 **Location:** `/functions/index.js` (after `enableAuthUser`)
 
 **What it does:**
+
 - Permanently deletes user's Firebase Auth account
 - Removes user document from Firestore
 - Deletes all user-created events
@@ -23,9 +26,11 @@ Social Circle now implements Apple-compliant account deletion as required by App
 **Error Handling:** Returns clear error messages, continues deletion even if some steps fail (e.g., storage already empty)
 
 ### 2. Client UI: ProfileScreen Delete Button
+
 **Location:** `/src/features/events/components/ProfileScreen.js`
 
 **Changes:**
+
 - Added `functions` import from Firebase service
 - Added `deletingAccount` loading state
 - Updated `handleDeleteAccount` to:
@@ -35,29 +40,35 @@ Social Circle now implements Apple-compliant account deletion as required by App
   - Clear local state after successful deletion
 
 **User Experience:**
+
 - Clear confirmation dialog explaining permanent deletion
 - States 24-hour timeline for complete removal
 - Shows success confirmation
 - Graceful error handling with support contact info
 
 ### 3. Apple Sign-In Token Capture
+
 **Location:** `/src/features/auth/components/screens/AuthScreen.js`
 
 **Changes:**
+
 - Captures `authorizationCode` from Apple credential
 - Stores it in user document during account creation
 - Enables future token revocation (placeholder implementation ready)
 
 **Note:** Full Apple token revocation requires:
+
 - Apple Team ID, Key ID, and private key from Apple Developer account
 - Generate client_secret JWT signed with Apple private key
 - POST to https://appleid.apple.com/auth/revoke
 
 ### 4. Privacy Policy Update
+
 **Location:** `/src/features/profile/components/InfoArticleScreen.js`
 
 **Changes:**
 Updated privacy policy text to clearly state:
+
 - Account and profile permanently deleted within 24 hours
 - All events, messages, and user-generated content removed
 - Apple Sign-In tokens revoked (if applicable)
@@ -74,13 +85,14 @@ Updated privacy policy text to clearly state:
 ✅ **Confirmation Steps:** Requires explicit confirmation to prevent accidents  
 ✅ **Apple Token Revocation:** Captures authorizationCode for future revocation  
 ✅ **Privacy Policy:** Updated with clear deletion information  
-✅ **User-Generated Content:** All events, messages, posts deleted  
+✅ **User-Generated Content:** All events, messages, posts deleted
 
 ⚠️ **Partial:** Apple token revocation implemented as placeholder (needs Apple credentials)
 
 ## Data Retention Policy
 
 ### Deleted Immediately:
+
 - User profile document
 - Firebase Auth account
 - User's created events
@@ -90,9 +102,11 @@ Updated privacy policy text to clearly state:
 - Device tokens
 
 ### Removed from Collections:
+
 - Event attendee lists (user removed)
 
 ### Not Deleted (Legal/Safety/Operational):
+
 - Abuse reports filed by or against the user (safety)
 - Anonymized analytics data (operational)
 - Any data required by law to retain
@@ -102,6 +116,7 @@ Updated privacy policy text to clearly state:
 Test suite created at: `__tests__/features/profile/accountDeletion.test.js`
 
 Run tests:
+
 ```bash
 npm test -- __tests__/features/profile/accountDeletion.test.js
 ```
@@ -109,6 +124,7 @@ npm test -- __tests__/features/profile/accountDeletion.test.js
 ## Deployment
 
 ### Cloud Functions
+
 ```bash
 cd functions
 npm install  # If new dependencies were added
@@ -117,22 +133,26 @@ firebase deploy --only functions:deleteUserAccount
 ```
 
 ### Mobile App
+
 Standard app deployment (already included in codebase)
 
 ## Future Enhancements
 
 ### Phase 2: Complete Apple Token Revocation
+
 1. Obtain Apple credentials (Team ID, Key ID, Private Key)
 2. Implement JWT signing for client_secret
 3. Complete `revokeAppleToken` function in `functions/index.js`
 4. Test with Apple's validation endpoint
 
 ### Phase 3: Scheduled Deletion
+
 - Allow users to schedule deletion for future date
 - Send confirmation email before deletion
 - Allow cancellation of scheduled deletion
 
 ### Phase 4: Data Export
+
 - Provide data export before deletion (GDPR/CCPA)
 - Generate downloadable ZIP of user data
 - Email download link to user
@@ -140,6 +160,7 @@ Standard app deployment (already included in codebase)
 ## Support
 
 If users have issues with account deletion:
+
 - Support email: support@findyourcircle.app
 - Deletion timeline: Within 24 hours
 - Manual deletion available if automated process fails

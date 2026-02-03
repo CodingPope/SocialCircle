@@ -20,8 +20,11 @@ export default function AnalyticsProvider({
   children,
 }) {
   const isBusinessSession = sessionRole === 'business';
-  const { requestPermission, status: attStatus, canPrompt } =
-    useTrackingPermission();
+  const {
+    requestPermission,
+    status: attStatus,
+    canPrompt,
+  } = useTrackingPermission();
 
   // Tag Sentry and initialize analytics with privacy flag when user changes
   useEffect(() => {
@@ -69,7 +72,28 @@ export default function AnalyticsProvider({
       const acceptedFlag = !!accepted;
       const localTimestamp = new Date();
       let writeSucceeded = false;
+
       try {
+        // Check if user document exists first
+        const userDoc = await userDocRef.get();
+        if (!userDoc.exists) {
+          logger.warn(
+            '[AnalyticsProvider] User document does not exist yet, skipping analytics persistence',
+          );
+          writeSucceeded = false;
+          // Update local state anyway
+          if (typeof setUser === 'function') {
+            setUser({
+              ...user,
+              analyticsOptIn: acceptedFlag,
+              analyticsConsentVersion: 1,
+              analyticsPromptedAt: localTimestamp,
+              analyticsUpdatedAt: localTimestamp,
+            });
+          }
+          return;
+        }
+
         await userDocRef.set(
           {
             analyticsOptIn: acceptedFlag,
@@ -81,33 +105,15 @@ export default function AnalyticsProvider({
         );
         writeSucceeded = true;
       } catch (err) {
-        if (err?.code === 'permission-denied') {
-          try {
-            await userDocRef.set(
-              {
-                analyticsOptIn: acceptedFlag,
-                analyticsUpdatedAt: timestamp,
-                analyticsPromptedAt: timestamp,
-                analyticsConsentVersion: 1,
-              },
-              { merge: true },
-            );
-            writeSucceeded = true;
-          } catch (fallbackErr) {
-            logger.warn(
-              'Failed to persist analytics consent (non-blocking)',
-              fallbackErr?.code || fallbackErr,
-            );
-            writeSucceeded = true;
-          }
-        } else {
-          logger.error('Failed to persist analytics consent', err);
-          writeSucceeded = true;
-        }
+        logger.warn(
+          '[AnalyticsProvider] Failed to persist analytics consent (non-blocking):',
+          err?.code || err?.message || err,
+        );
+        // Treat as non-fatal - analytics persistence can happen later
+        writeSucceeded = false;
       }
 
-      if (!writeSucceeded) return;
-
+      // Update local state even if write failed (analytics will sync later)
       if (typeof setUser === 'function') {
         try {
           setUser({
@@ -118,7 +124,10 @@ export default function AnalyticsProvider({
             analyticsUpdatedAt: localTimestamp,
           });
         } catch (err) {
-          logger.warn('Failed to update local user store with consent', err);
+          logger.warn(
+            '[AnalyticsProvider] Failed to update local user store with consent',
+            err,
+          );
         }
       }
 

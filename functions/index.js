@@ -42,7 +42,8 @@ const {
 } = require('./domains/scheduled');
 
 // Domain re-exports (business) - override inline implementations
-exports.updateBusinessBasics = require('./domains/business').updateBusinessBasics;
+exports.updateBusinessBasics =
+  require('./domains/business').updateBusinessBasics;
 exports.updateBrandAssets = require('./domains/business').updateBrandAssets;
 exports.addBusinessLocation = require('./domains/business').addBusinessLocation;
 exports.updateAudiencePolicies =
@@ -345,7 +346,7 @@ exports.deleteUserAccount = onCall(async (req) => {
         logger.info(`[deleteUserAccount] Revoked Apple tokens for: ${uid}`);
       } catch (appleErr) {
         logger.warn(
-          `[deleteUserAccount] Failed to revoke Apple token: ${appleErr.message}`
+          `[deleteUserAccount] Failed to revoke Apple token: ${appleErr.message}`,
         );
         // Continue with deletion even if token revocation fails
       }
@@ -361,7 +362,7 @@ exports.deleteUserAccount = onCall(async (req) => {
       .get();
     userEvents.docs.forEach((doc) => batch.delete(doc.ref));
     logger.info(
-      `[deleteUserAccount] Marking ${userEvents.size} events for deletion`
+      `[deleteUserAccount] Marking ${userEvents.size} events for deletion`,
     );
 
     // Remove user from event attendees (all events they joined)
@@ -383,7 +384,7 @@ exports.deleteUserAccount = onCall(async (req) => {
       .get();
     userMessages.docs.forEach((doc) => batch.delete(doc.ref));
     logger.info(
-      `[deleteUserAccount] Marking ${userMessages.size} messages for deletion`
+      `[deleteUserAccount] Marking ${userMessages.size} messages for deletion`,
     );
 
     // Delete chats where user is a member
@@ -393,7 +394,7 @@ exports.deleteUserAccount = onCall(async (req) => {
       .get();
     userChats.docs.forEach((doc) => batch.delete(doc.ref));
     logger.info(
-      `[deleteUserAccount] Marking ${userChats.size} chats for deletion`
+      `[deleteUserAccount] Marking ${userChats.size} chats for deletion`,
     );
 
     // Delete user document
@@ -414,12 +415,14 @@ exports.deleteUserAccount = onCall(async (req) => {
       logger.info(`[deleteUserAccount] Storage files deleted for: ${uid}`);
     } catch (storageErr) {
       logger.warn(
-        `[deleteUserAccount] Storage deletion failed: ${storageErr.message}`
+        `[deleteUserAccount] Storage deletion failed: ${storageErr.message}`,
       );
       // Continue - storage may be empty or already deleted
     }
 
-    logger.info(`[deleteUserAccount] Successfully completed deletion for: ${uid}`);
+    logger.info(
+      `[deleteUserAccount] Successfully completed deletion for: ${uid}`,
+    );
     return {
       success: true,
       message: 'Account permanently deleted',
@@ -427,11 +430,11 @@ exports.deleteUserAccount = onCall(async (req) => {
   } catch (error) {
     logger.error(
       `[deleteUserAccount] Failed for user ${uid}:`,
-      error?.message || error
+      error?.message || error,
     );
     throw new HttpsError(
       'internal',
-      'Failed to delete account. Please contact support.'
+      'Failed to delete account. Please contact support.',
     );
   }
 });
@@ -446,13 +449,13 @@ async function revokeAppleToken(authorizationCode) {
   // 1. Apple Team ID, Key ID, and private key
   // 2. Generate client_secret JWT
   // 3. POST to https://appleid.apple.com/auth/revoke
-  
+
   // For now, we log and skip actual revocation
   // TODO: Implement full Apple token revocation with proper credentials
   logger.warn(
-    '[revokeAppleToken] Apple token revocation not fully implemented. Authorization code stored but not revoked.'
+    '[revokeAppleToken] Apple token revocation not fully implemented. Authorization code stored but not revoked.',
   );
-  
+
   // Placeholder for future implementation:
   // const clientSecret = generateAppleClientSecret();
   // const response = await fetch('https://appleid.apple.com/auth/revoke', {
@@ -2263,20 +2266,15 @@ exports.switchToPersonalAccount =
   require('./domains/business').switchToPersonalAccount;
 exports.updateBusinessBasics =
   require('./domains/business').updateBusinessBasics;
-exports.updateBrandAssets =
-  require('./domains/business').updateBrandAssets;
-exports.addBusinessLocation =
-  require('./domains/business').addBusinessLocation;
+exports.updateBrandAssets = require('./domains/business').updateBrandAssets;
+exports.addBusinessLocation = require('./domains/business').addBusinessLocation;
 exports.updateAudiencePolicies =
   require('./domains/business').updateAudiencePolicies;
 exports.startBusinessVerification =
   require('./domains/business').startBusinessVerification;
-exports.verifyBusinessCode =
-  require('./domains/business').verifyBusinessCode;
-exports.addBusinessMember =
-  require('./domains/business').addBusinessMember;
-exports.setBusinessPrivacy =
-  require('./domains/business').setBusinessPrivacy;
+exports.verifyBusinessCode = require('./domains/business').verifyBusinessCode;
+exports.addBusinessMember = require('./domains/business').addBusinessMember;
+exports.setBusinessPrivacy = require('./domains/business').setBusinessPrivacy;
 exports.submitBusiness = require('./domains/business').submitBusiness;
 // -------------------- USER VERIFICATION --------------------
 

@@ -119,13 +119,13 @@ export default function InfoArticleScreen({ navigation, route }) {
       } catch (err) {
         Alert.alert(
           'Unable to Open',
-          'Please visit socialcircle.app/legal/terms-of-service in your browser.'
+          'Please visit socialcircle.app/legal/terms-of-service in your browser.',
         );
       }
     } else {
       Alert.alert(
         'Unable to Open',
-        'Please visit socialcircle.app/legal/terms-of-service in your browser.'
+        'Please visit socialcircle.app/legal/terms-of-service in your browser.',
       );
     }
   };
