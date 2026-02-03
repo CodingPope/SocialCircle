@@ -4,7 +4,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { db } from '../../../services/firebase/config';
+import { db } from '../../../services/firebase';
 import logger from '../../../lib/logger';
 
 // Build a minimal snippet from a user doc

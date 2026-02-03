@@ -34,7 +34,7 @@ import {
   followUser,
   unfollowUser,
   functions,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import {
   collection,
   getDocs,

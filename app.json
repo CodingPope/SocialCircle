@@ -3,13 +3,13 @@
     "name": "SocialCircle",
     "slug": "socialcircle",
     "scheme": "socialcircle",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
+      "image": "./assets/splash-tight.png",
+      "resizeMode": "cover",
       "backgroundColor": "#1a1d2e"
     },
     "ios": {
@@ -19,7 +19,7 @@
         "googleMapsApiKey": "${GOOGLE_MAPS_API_KEY}",
         "usesNonExemptEncryption": false
       },
-      "buildNumber": "2",
+      "buildNumber": "3",
       "useFrameworks": "dynamic",
       "entitlements": {
         "com.apple.developer.applesignin": ["Default"],
@@ -47,7 +47,7 @@
       },
       "config": {
         "googleMaps": {
-          "apiKey": ""
+          "apiKey": "${GOOGLE_MAPS_API_KEY}"
         }
       }
     },

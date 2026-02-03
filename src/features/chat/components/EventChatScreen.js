@@ -8,7 +8,6 @@ import React, {
 import {
   View,
   Text,
-  FlatList,
   TextInput,
   TouchableOpacity,
   Image,
@@ -29,30 +28,22 @@ import Modal from 'react-native-modal';
 import {
   collection,
   doc,
-  onSnapshot,
-  addDoc,
   query,
-  orderBy,
   getDoc,
   updateDoc,
   setDoc,
-  arrayUnion,
   arrayRemove,
-  writeBatch,
   serverTimestamp,
-  getDocs,
-  where,
   Timestamp,
 } from '../../../services/firebase/firestoreCompat';
-import { functions } from '../../../services/firebase/config';
+import { functions } from '../../../services/firebase';
 import { geohashForLocation } from 'geofire-common';
 import {
   db,
   auth,
-  sendNotification,
-  updateEventCount,
   deleteEvent, // import soft-delete helper
-} from '../../../services/firebase/config';
+  reportContent,
+} from '../../../services/firebase';
 import smileDefault from '../../../../assets/smileDefault.png';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import ReportModal from '../../events/components/ReportModal'; // Import reusable modal component
@@ -60,6 +51,7 @@ import {
   track as trackClient,
   trackReportContent,
 } from '../../../lib/analytics';
+import { useEventChatData } from '../hooks/useEventChatData';
 import { navigateToOtherUserProfile } from '../../../navigation/RootNavigation';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -71,49 +63,20 @@ import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { canSendMessage, showTOSRequiredAlert } from '../../../utils/tosHelper';
 import { useUserStore } from '../../profile';
+import MessageList from './MessageList';
+import ChatComposer from './ChatComposer';
+
+// Extracted components (available for progressive migration)
+// import EventChatHeader from './EventChatHeader';
+// import EventInfoModal from './EventInfoModal';
+// import { PinnedBanner, PinnedEditorModal } from './PinnedAnnouncementBanner';
 
 // --- Date/Time editing constraints (mirror CreateEventScreen) ---
-const MIN_LEAD_MINUTES = 30;
-const MAX_LEAD_DAYS = 7;
-const MINUTE_INCREMENT = 5;
-const MIN_MILLIS = MIN_LEAD_MINUTES * 60 * 1000;
-const MAX_MILLIS = MAX_LEAD_DAYS * 24 * 60 * 60 * 1000;
-
-const roundUpToMinuteIncrement = (inputDate) => {
-  const date = new Date(inputDate);
-  date.setSeconds(0);
-  date.setMilliseconds(0);
-  if (!MINUTE_INCREMENT || MINUTE_INCREMENT < 1) return date;
-  const minutes = date.getMinutes();
-  const remainder = minutes % MINUTE_INCREMENT;
-  if (remainder !== 0) {
-    date.setMinutes(minutes + (MINUTE_INCREMENT - remainder));
-  }
-  return date;
-};
-
-const getEditDateBounds = () => {
-  const now = new Date();
-  return {
-    min: new Date(now.getTime() + MIN_MILLIS),
-    max: new Date(now.getTime() + MAX_MILLIS),
-  };
-};
-
-const coerceDateWithinBounds = (rawDate) => {
-  if (!rawDate) return null;
-  const { min, max } = getEditDateBounds();
-  const rounded = roundUpToMinuteIncrement(rawDate);
-  if (rounded < min) return roundUpToMinuteIncrement(min);
-  if (rounded > max) return roundUpToMinuteIncrement(max);
-  return rounded;
-};
-
-const isWithinDateBounds = (candidate) => {
-  if (!(candidate instanceof Date)) return false;
-  const { min, max } = getEditDateBounds();
-  return candidate >= min && candidate <= max;
-};
+import {
+  getEditDateBounds,
+  coerceDateWithinBounds,
+  isWithinDateBounds,
+} from '../hooks/dateBounds';
 
 const EventChatScreen = () => {
   const route = useRoute();
@@ -135,15 +98,47 @@ const EventChatScreen = () => {
   const joinGraceDurationMsRaw =
     typeof joinGraceFromParams === 'number' ? joinGraceFromParams : 8000;
   const joinGraceDurationMs = Math.max(0, joinGraceDurationMsRaw);
-  const [event, setEvent] = useState(null);
-  const [attendees, setAttendees] = useState([]);
-  const [messages, setMessages] = useState([]);
+  const {
+    event,
+    attendees,
+    messages,
+    hostUser,
+    requesters,
+    pinned,
+    loading: dataLoading,
+    joinGraceActive,
+    setJoinGraceActive,
+    leaveEvent,
+    joinEventHandler,
+    sendMessage: sendChatMessage,
+    pinMessage,
+    unpinMessage,
+    editEvent,
+    reportMessage,
+    addToCalendar,
+    shareEvent,
+    toggleSaveEvent,
+    deleteEventSoft,
+    setEvent,
+    setPinned,
+    setRequesters,
+    setAttendees,
+  } = useEventChatData({
+    eventId,
+    joinIntent,
+    joinGraceDurationMs,
+  });
+
+  const [messagesLocal, setMessagesLocal] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
-  const [hostUser, setHostUser] = useState(null);
-  const [requesters, setRequesters] = useState([]); // Add state for requesters
+  // Local override to allow optimistic UI tweaks while dataLoading syncs
+  useEffect(() => {
+    setMessagesLocal(messages);
+    setLoading(dataLoading);
+  }, [messages, dataLoading]);
   const [isReportModalVisible, setIsReportModalVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [isEditingEvent, setIsEditingEvent] = useState(false);
@@ -156,13 +151,11 @@ const EventChatScreen = () => {
   const [editPlaceDetails, setEditPlaceDetails] = useState(null);
   const [editLocationCoords, setEditLocationCoords] = useState(null);
   const flatListRef = useRef(null);
-  const [pinned, setPinned] = useState(null);
   const [pinnedEditorVisible, setPinnedEditorVisible] = useState(false);
   const [pinnedDraft, setPinnedDraft] = useState('');
   const [pinnedSaving, setPinnedSaving] = useState(false);
   const [leaveInProgress, setLeaveInProgress] = useState(false);
   const [hasShownAccessAlert, setHasShownAccessAlert] = useState(false);
-  const [joinGraceActive, setJoinGraceActive] = useState(() => !!joinIntent);
   const sidebarScrollRef = useRef(null);
   const [sidebarScrollOffset, setSidebarScrollOffset] = useState(0);
   const [sidebarContentHeight, setSidebarContentHeight] = useState(0);
@@ -171,10 +164,6 @@ const EventChatScreen = () => {
     if (sidebarContentHeight <= sidebarContainerHeight) return 0;
     return Math.max(sidebarContentHeight - sidebarContainerHeight, 0);
   }, [sidebarContentHeight, sidebarContainerHeight]);
-
-  // Track listener unsubscribes so we can stop them immediately on leave
-  const eventUnsubRef = useRef(null);
-  const messagesUnsubRef = useRef(null);
 
   // --- Read-only / archived checks ---
   const isSoftDeleted = event?.isDeleted === true;
@@ -259,13 +248,13 @@ const EventChatScreen = () => {
   const handleSidebarLayout = useCallback(({ nativeEvent }) => {
     const nextHeight = nativeEvent?.layout?.height ?? 0;
     setSidebarContainerHeight((prev) =>
-      Math.abs(prev - nextHeight) > 0.5 ? nextHeight : prev
+      Math.abs(prev - nextHeight) > 0.5 ? nextHeight : prev,
     );
   }, []);
 
   const handleSidebarContentSizeChange = useCallback((_, height) => {
     setSidebarContentHeight((prev) =>
-      Math.abs(prev - height) > 0.5 ? height : prev
+      Math.abs(prev - height) > 0.5 ? height : prev,
     );
   }, []);
 
@@ -273,7 +262,7 @@ const EventChatScreen = () => {
     if (!joinGraceActive) return;
     const timeout = setTimeout(
       () => setJoinGraceActive(false),
-      joinGraceDurationMs
+      joinGraceDurationMs,
     );
     return () => clearTimeout(timeout);
   }, [joinGraceActive, joinGraceDurationMs]);
@@ -286,7 +275,7 @@ const EventChatScreen = () => {
     if (
       locationNameParam &&
       !/Fetching address|Address not available|Location not specified|Unknown address/i.test(
-        locationNameParam
+        locationNameParam,
       )
     ) {
       return locationNameParam;
@@ -326,7 +315,7 @@ const EventChatScreen = () => {
   };
 
   const [resolvedLocationLabel, setResolvedLocationLabel] = useState(
-    'Location not available'
+    'Location not available',
   );
 
   // Recompute when event or param changes
@@ -369,302 +358,7 @@ const EventChatScreen = () => {
     }
   }, [isModalVisible]);
 
-  // Helper: map attendeeSnippets -> UI attendee shape
-  const mapSnippetsToAttendees = (snippets) => {
-    const arr = Array.isArray(snippets)
-      ? snippets
-      : Object.values(snippets || {});
-    return arr
-      .filter((s) => s && s.uid)
-      .map((s) => ({
-        id: s.uid,
-        displayName: s.name || 'User',
-        photoURL: s.photoURL || null,
-        rating: typeof s.rating === 'number' ? s.rating : null,
-      }));
-  };
-
-  // Helper: batch fetch minimal user fields for a list of uids (chunks of 10)
-  const batchFetchUsersAsAttendees = async (uids) => {
-    if (!Array.isArray(uids) || !uids.length) return [];
-    const chunks = [];
-    for (let i = 0; i < uids.length; i += 10)
-      chunks.push(uids.slice(i, i + 10));
-    const results = [];
-    for (const chunk of chunks) {
-      try {
-        const q = query(
-          collection(db, 'users'),
-          where('__name__', 'in', chunk)
-        );
-        const snap = await getDocs(q);
-        snap.docs.forEach((d) => {
-          const u = d.data() || {};
-          results.push({
-            id: d.id,
-            displayName:
-              u.displayName ||
-              `${u.firstName || ''} ${u.lastName || ''}`.trim() ||
-              'User',
-            photoURL: u.photoURL || u.profileImage || u.avatarURL || null,
-            rating:
-              typeof u.rating === 'number'
-                ? u.rating
-                : typeof u.ranking === 'number'
-                ? u.ranking
-                : null,
-          });
-        });
-      } catch (e) {
-        console.warn(
-          '[EventChat] batch user fetch failed chunk, falling back',
-          e?.message || e
-        );
-        // Fallback to individual gets for this chunk to avoid dropping users
-        const individuals = await Promise.all(
-          chunk.map(async (uid) => {
-            try {
-              const snap = await getDoc(doc(db, 'users', uid));
-              const u = snap.exists ? snap.data() : {};
-              return {
-                id: uid,
-                displayName:
-                  u.displayName ||
-                  `${u.firstName || ''} ${u.lastName || ''}`.trim() ||
-                  'User',
-                photoURL: u.photoURL || u.profileImage || u.avatarURL || null,
-                rating:
-                  typeof u.rating === 'number'
-                    ? u.rating
-                    : typeof u.ranking === 'number'
-                    ? u.ranking
-                    : null,
-              };
-            } catch (err) {
-              return {
-                id: uid,
-                displayName: 'User',
-                photoURL: null,
-                rating: null,
-              };
-            }
-          })
-        );
-        results.push(...individuals);
-      }
-    }
-    return results;
-  };
-
-  // Fetch event info + attendees
-  useEffect(() => {
-    if (!auth().currentUser) return;
-
-    const unsub = onSnapshot(
-      doc(db, 'events', eventId),
-      async (snap) => {
-        if (!snap.exists) {
-          setEvent(null);
-          setAttendees([]);
-          return;
-        }
-
-        const data = snap.data() || {};
-        const nextEvent = { id: snap.id, ...data };
-
-        setEvent((prev) => {
-          if (
-            prev &&
-            prev.updatedAt?.seconds === nextEvent.updatedAt?.seconds &&
-            prev.attendees?.length === nextEvent.attendees?.length
-          ) {
-            return prev;
-          }
-          return nextEvent;
-        });
-
-        // Prefer denormalized attendeeSnippets, fallback to batched user fetch
-        try {
-          if (
-            data?.attendeeSnippets &&
-            (Array.isArray(data.attendeeSnippets) ||
-              typeof data.attendeeSnippets === 'object')
-          ) {
-            const mapped = mapSnippetsToAttendees(data.attendeeSnippets);
-            setAttendees((prev) => {
-              const same = prev.length === mapped.length;
-              return same ? prev : mapped;
-            });
-          } else if (Array.isArray(data?.attendees) && data.attendees.length) {
-            const attendeeData = await batchFetchUsersAsAttendees(
-              data.attendees
-            );
-            setAttendees((prev) => {
-              const same = prev.length === attendeeData.length;
-              return same ? prev : attendeeData;
-            });
-          } else {
-            setAttendees([]);
-          }
-        } catch (e) {
-          console.error('[EventChat] attendee hydrate error', e);
-          // Last-resort: previous per-uid approach (kept for safety)
-          if (Array.isArray(data?.attendees) && data.attendees.length) {
-            const attendeePromises = data.attendees.map(async (uid) => {
-              const userDoc = await getDoc(doc(db, 'users', uid));
-              const userData = userDoc.exists ? userDoc.data() : {};
-              return {
-                id: uid,
-                displayName:
-                  userData.displayName ||
-                  `${userData.firstName || ''} ${
-                    userData.lastName || ''
-                  }`.trim() ||
-                  'User',
-                photoURL:
-                  userData.photoURL ||
-                  userData.profileImage ||
-                  userData.avatarURL ||
-                  null,
-                rating:
-                  typeof userData.rating === 'number'
-                    ? userData.rating
-                    : typeof userData.ranking === 'number'
-                    ? userData.ranking
-                    : null,
-              };
-            });
-            const attendeeData = await Promise.all(attendeePromises);
-            setAttendees(attendeeData);
-          } else {
-            setAttendees([]);
-          }
-        }
-      },
-      (error) => {
-        if (error?.code === 'permission-denied') {
-          setEvent(null);
-          setAttendees([]);
-          return;
-        }
-        console.error('Event listener error:', error);
-      }
-    );
-
-    // Save unsub refs for immediate cleanup (leave flow)
-    eventUnsubRef.current = unsub;
-
-    // ✅ Track globally for logout cleanup
-    if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
-    global.unsubscribeAllListeners.push(unsub);
-
-    return () => {
-      try {
-        unsub && unsub();
-      } catch {}
-      if (eventUnsubRef.current === unsub) eventUnsubRef.current = null;
-    };
-  }, [eventId, auth().currentUser]);
-
-  // ✅ Chat messages listener (single source with error handler)
-  useEffect(() => {
-    if (!auth().currentUser) return;
-
-    const q = query(
-      collection(db, 'chats', eventId, 'messages'),
-      orderBy('createdAt', 'asc')
-    );
-
-    const unsub = onSnapshot(
-      q,
-      { includeMetadataChanges: true },
-      (snap) => {
-        // Ignore local pending writes to avoid brief flicker before rule rejection/commit
-        const items = snap.docs
-          .filter((d) => !d.metadata.hasPendingWrites)
-          .map((d) => ({ id: d.id, ...d.data() }));
-        setMessages(items);
-        setLoading(false);
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      },
-      (error) => {
-        if (error?.code === 'permission-denied') {
-          setMessages([]);
-          setLoading(false);
-          return;
-        }
-        console.error('Chat messages listener error:', error);
-      }
-    );
-
-    // Save unsub refs for immediate cleanup (leave flow)
-    messagesUnsubRef.current = unsub;
-
-    if (!global.unsubscribeAllListeners) global.unsubscribeAllListeners = [];
-    global.unsubscribeAllListeners.push(unsub);
-
-    return () => {
-      try {
-        unsub && unsub();
-      } catch {}
-      if (messagesUnsubRef.current === unsub) messagesUnsubRef.current = null;
-    };
-  }, [eventId, auth().currentUser]);
-
-  useEffect(() => {
-    if (!eventId) return;
-    const chatDocRef = doc(db, 'chats', eventId);
-    const unsub = onSnapshot(
-      chatDocRef,
-      (snap) => {
-        if (!snap.exists) {
-          setPinned(null);
-          return;
-        }
-        const data = snap.data() || {};
-        setPinned(data.pinned || null);
-      },
-      () => setPinned(null)
-    );
-    return () => {
-      try {
-        unsub && unsub();
-      } catch {}
-    };
-  }, [eventId]);
-
   // ✅ Host user info when event changes (no snapshot, just getDoc)
-  useEffect(() => {
-    const ownerId = event?.ownerId;
-    if (ownerId) {
-      getDoc(doc(db, 'users', ownerId)).then((userDoc) => {
-        if (userDoc.exists) {
-          const userData = userDoc.data();
-          setHostUser({
-            displayName:
-              userData.displayName ||
-              `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
-              'User',
-            photoURL: userData.profileImage || userData.avatarURL || null,
-            // Rating: prefer 'rating' (current), fallback to legacy 'ranking'
-            rating:
-              typeof userData.rating === 'number'
-                ? userData.rating
-                : typeof userData.ranking === 'number'
-                ? userData.ranking
-                : null,
-          });
-        } else {
-          setHostUser(null);
-        }
-      });
-    } else {
-      setHostUser(null);
-    }
-  }, [event?.ownerId]);
-
   // Check if current user is attendee
   const currentUid = auth().currentUser?.uid || null;
   const isAttendee =
@@ -743,7 +437,7 @@ const EventChatScreen = () => {
       'No Access',
       'Only attendees or the host can view this chat.',
       [{ text: 'OK', onPress: safeExitChat }],
-      { cancelable: false }
+      { cancelable: false },
     );
   }, [
     event,
@@ -757,7 +451,7 @@ const EventChatScreen = () => {
   ]);
 
   // Send message
-  const sendMessage = async () => {
+  const handleSendMessage = async () => {
     // Description: Validate input and permissions, then write message with server timestamp
     const trimmed = (input || '').trim();
     if (!trimmed) return;
@@ -781,7 +475,7 @@ const EventChatScreen = () => {
     if (!allowed) {
       Alert.alert(
         'Not allowed',
-        'Only attendees or the host can send messages.'
+        'Only attendees or the host can send messages.',
       );
       return;
     }
@@ -793,10 +487,9 @@ const EventChatScreen = () => {
     }
 
     try {
-      await addDoc(collection(db, 'chats', eventId, 'messages'), {
-        text: trimmed,
+      await sendChatMessage(trimmed, {
         senderId: uid,
-        createdAt: serverTimestamp(), // Use server time for stable ordering
+        createdAt: serverTimestamp(),
       });
       setInput('');
     } catch (err) {
@@ -817,7 +510,7 @@ const EventChatScreen = () => {
     if (isSoftDeleted || ended) {
       Alert.alert(
         'Action unavailable',
-        'Cannot modify requests for archived or ended events.'
+        'Cannot modify requests for archived or ended events.',
       );
       return;
     }
@@ -840,7 +533,7 @@ const EventChatScreen = () => {
               ...prev,
               requests: (prev.requests || []).filter((r) => r !== userId),
             }
-          : prev
+          : prev,
       );
     } catch (err) {
       console.error('Error accepting request:', err.message || err);
@@ -853,7 +546,7 @@ const EventChatScreen = () => {
     if (isSoftDeleted || ended) {
       Alert.alert(
         'Action unavailable',
-        'Cannot modify requests for archived or ended events.'
+        'Cannot modify requests for archived or ended events.',
       );
       return;
     }
@@ -875,7 +568,7 @@ const EventChatScreen = () => {
               ...prev,
               requests: (prev.requests || []).filter((r) => r !== userId),
             }
-          : prev
+          : prev,
       );
     } catch (err) {
       console.error('Error declining request:', err.message || err);
@@ -900,8 +593,8 @@ const EventChatScreen = () => {
             typeof userData.rating === 'number'
               ? userData.rating.toFixed(1)
               : typeof userData.ranking === 'number'
-              ? userData.ranking.toFixed(1)
-              : 'Unrated',
+                ? userData.ranking.toFixed(1)
+                : 'Unrated',
         };
       }
       return {
@@ -920,51 +613,6 @@ const EventChatScreen = () => {
       };
     }
   };
-
-  // Batch-fetch requester details when event requests change
-  useEffect(() => {
-    const fetchRequesters = async () => {
-      const uids = Array.isArray(event?.requests) ? event.requests : [];
-      if (!uids.length) {
-        setRequesters([]);
-        return;
-      }
-      try {
-        const users = await batchFetchUsersAsAttendees(uids);
-        setRequesters(
-          users.map((u) => ({
-            id: u.id,
-            displayName: u.displayName,
-            photoURL: u.photoURL || smileDefault,
-            rating: typeof u.rating === 'number' ? u.rating : null,
-          }))
-        );
-      } catch (err) {
-        // Fallback to existing per-user detail fetch
-        const requesterPromises = uids.map(async (userId) => {
-          const userDoc = await getDoc(doc(db, 'users', userId));
-          const userData = userDoc.exists ? userDoc.data() : {};
-          return {
-            id: userId,
-            displayName:
-              userData.displayName ||
-              `${userData.firstName || ''} ${userData.lastName || ''}`.trim() ||
-              'User',
-            photoURL: userData.profileImage || smileDefault,
-            rating:
-              typeof userData.rating === 'number'
-                ? Number(userData.rating)
-                : typeof userData.ranking === 'number'
-                ? Number(userData.ranking)
-                : null,
-          };
-        });
-        const resolved = await Promise.all(requesterPromises);
-        setRequesters(resolved);
-      }
-    };
-    fetchRequesters();
-  }, [event?.requests]);
 
   // Long press message handler
   const handleLongPressMessage = (message) => {
@@ -999,7 +647,7 @@ const EventChatScreen = () => {
                   style: 'destructive',
                   onPress: () => handleRemoveUser(attendee.id),
                 },
-              ]
+              ],
             ),
         },
         { text: 'Cancel', style: 'cancel' },
@@ -1016,7 +664,7 @@ const EventChatScreen = () => {
     if (isSoftDeleted || ended) {
       Alert.alert(
         'Action unavailable',
-        'Cannot remove attendees from archived or ended events.'
+        'Cannot remove attendees from archived or ended events.',
       );
       return;
     }
@@ -1073,16 +721,6 @@ const EventChatScreen = () => {
           onPress: async () => {
             setLeaveInProgress(true);
             try {
-              // Proactively stop listeners to avoid permission-denied errors during transition
-              try {
-                eventUnsubRef.current && eventUnsubRef.current();
-              } catch {}
-              try {
-                messagesUnsubRef.current && messagesUnsubRef.current();
-              } catch {}
-              eventUnsubRef.current = null;
-              messagesUnsubRef.current = null;
-
               const leave = functions.httpsCallable('leaveEvent');
               await leave({ eventId });
 
@@ -1093,10 +731,10 @@ const EventChatScreen = () => {
                   ? {
                       ...prev,
                       attendees: (prev.attendees || []).filter(
-                        (id) => id !== currentUid
+                        (id) => id !== currentUid,
                       ),
                     }
-                  : prev
+                  : prev,
               );
 
               // Navigate back out of chat
@@ -1115,7 +753,7 @@ const EventChatScreen = () => {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -1165,27 +803,27 @@ const EventChatScreen = () => {
     setEditLocation(sanitizedLocation);
     setEditDescription(event?.description || '');
     setEditDate(
-      coerceDateWithinBounds(toDateOrNull(event?.date) || new Date())
+      coerceDateWithinBounds(toDateOrNull(event?.date) || new Date()),
     );
     const loc = event?.location || {};
     const lat =
       typeof loc.latitude === 'number'
         ? loc.latitude
         : typeof loc.lat === 'number'
-        ? loc.lat
-        : typeof loc._lat === 'number'
-        ? loc._lat
-        : null;
+          ? loc.lat
+          : typeof loc._lat === 'number'
+            ? loc._lat
+            : null;
     const lng =
       typeof loc.longitude === 'number'
         ? loc.longitude
         : typeof loc.lng === 'number'
-        ? loc.lng
-        : typeof loc._long === 'number'
-        ? loc._long
-        : typeof loc.lon === 'number'
-        ? loc.lon
-        : null;
+          ? loc.lng
+          : typeof loc._long === 'number'
+            ? loc._long
+            : typeof loc.lon === 'number'
+              ? loc.lon
+              : null;
     if (typeof lat === 'number' && typeof lng === 'number') {
       setEditLocationCoords({ latitude: lat, longitude: lng });
     } else {
@@ -1201,7 +839,7 @@ const EventChatScreen = () => {
             latitude: lat || null,
             longitude: lng || null,
           }
-        : null
+        : null,
     );
     setIsEditDatePickerVisible(false);
     setEditDateDraft(null);
@@ -1260,7 +898,7 @@ const EventChatScreen = () => {
             isArchived: false,
             pinned: null,
           },
-          { merge: true }
+          { merge: true },
         );
       }
 
@@ -1285,7 +923,7 @@ const EventChatScreen = () => {
       console.error('Pinned announcement update failed:', err);
       Alert.alert(
         'Update failed',
-        'Unable to update the pinned announcement. Please try again.'
+        'Unable to update the pinned announcement. Please try again.',
       );
     } finally {
       setPinnedSaving(false);
@@ -1327,7 +965,7 @@ const EventChatScreen = () => {
 
   const handleInlineDateSave = () => {
     const nextDate = roundUpToMinuteIncrement(
-      editDateDraft || getCurrentEditDate()
+      editDateDraft || getCurrentEditDate(),
     );
     setEditDate(nextDate);
     setEditDateDraft(null);
@@ -1375,7 +1013,7 @@ const EventChatScreen = () => {
     if (!isWithinDateBounds(normalizedDate)) {
       Alert.alert(
         'Date out of range',
-        'Events can only be scheduled between 30 minutes and 7 days from now.'
+        'Events can only be scheduled between 30 minutes and 7 days from now.',
       );
       return;
     }
@@ -1409,7 +1047,7 @@ const EventChatScreen = () => {
         } catch (geoErr) {
           console.warn(
             'Failed to compute geohash for updated event location',
-            geoErr
+            geoErr,
           );
         }
       }
@@ -1431,7 +1069,7 @@ const EventChatScreen = () => {
               ...(updates.location ? { location: updates.location } : {}),
               ...(updates.geohash ? { geohash: updates.geohash } : {}),
             }
-          : prev
+          : prev,
       );
       setIsEditingEvent(false);
       setEditLocation('');
@@ -1443,7 +1081,7 @@ const EventChatScreen = () => {
       console.error('Event update failed:', err);
       Alert.alert(
         'Update failed',
-        'Unable to save your changes. Please try again.'
+        'Unable to save your changes. Please try again.',
       );
     } finally {
       setIsSavingEvent(false);
@@ -1524,8 +1162,8 @@ const EventChatScreen = () => {
             {isSoftDeleted
               ? 'This event has been archived. Chat is read-only.'
               : archived
-              ? 'This event ended over 3 days ago. Chat is read-only.'
-              : 'This event has ended. Chat remains open for 3 days.'}
+                ? 'This event ended over 3 days ago. Chat is read-only.'
+                : 'This event has ended. Chat remains open for 3 days.'}
           </Text>
         </View>
       )}
@@ -1563,10 +1201,9 @@ const EventChatScreen = () => {
         keyboardVerticalOffset={0}
       >
         {/* Chat Messages */}
-        <FlatList
+        <MessageList
           ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
+          messages={messages}
           renderItem={({ item }) => {
             const isSystem =
               item?.senderId === 'system' || item?.type === 'system';
@@ -1648,8 +1285,8 @@ const EventChatScreen = () => {
                         backgroundColor: isCurrentUser
                           ? theme.colors.primary
                           : theme.isDark
-                          ? '#475569'
-                          : '#F3F4F6',
+                            ? '#475569'
+                            : '#F3F4F6',
                       },
                     ]}
                   >
@@ -1670,48 +1307,22 @@ const EventChatScreen = () => {
 
         {/* Message Input */}
         {isAttendee || isCreator ? (
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.input}
-              placeholder={
-                isSoftDeleted
-                  ? 'Event archived — chat read-only'
-                  : archived
-                  ? 'Chat archived — read-only'
-                  : ended
-                  ? 'Event ended — chat open for 3 days'
-                  : 'Type a message...'
-              }
-              placeholderTextColor={theme.colors.textSecondary}
-              value={input}
-              onChangeText={setInput}
-              onSubmitEditing={() => {
-                if (!readOnly) sendMessage();
-              }}
-              editable={!readOnly}
-              returnKeyType='send'
-            />
-            <TouchableOpacity
-              onPress={sendMessage}
-              style={[
-                styles.sendButton,
-                (readOnly || !(input || '').trim()) && {
-                  opacity: 0.5,
-                },
-              ]}
-              disabled={readOnly || !(input || '').trim()}
-            >
-              <Text style={styles.sendText}>Send</Text>
-            </TouchableOpacity>
-          </View>
+          <ChatComposer
+            theme={theme}
+            input={input}
+            setInput={setInput}
+            onSend={handleSendMessage}
+            disabled={readOnly}
+            loading={loading}
+          />
         ) : (
           <View style={{ padding: 16, alignItems: 'center' }}>
             <Text style={{ color: '#888' }}>
               {isSoftDeleted
                 ? 'This event has been archived. Chat is read-only.'
                 : ended
-                ? 'This event has ended.'
-                : 'Only attendees or the event creator can chat in this event.'}
+                  ? 'This event has ended.'
+                  : 'Only attendees or the event creator can chat in this event.'}
             </Text>
           </View>
         )}
@@ -1916,8 +1527,8 @@ const EventChatScreen = () => {
                       ) {
                         Linking.openURL(
                           `https://maps.google.com/?q=${encodeURIComponent(
-                            resolvedLocationLabel
-                          )}`
+                            resolvedLocationLabel,
+                          )}`,
                         );
                       }
                     }}
@@ -1937,7 +1548,7 @@ const EventChatScreen = () => {
                 <View style={styles.rowBetween}>
                   <Text style={[styles.normalText, styles.dateText]}>
                     {formatEventDate(
-                      isCreator && isEditingEvent ? editDate : event?.date
+                      isCreator && isEditingEvent ? editDate : event?.date,
                     )}
                   </Text>
                   <TouchableOpacity
@@ -1949,19 +1560,18 @@ const EventChatScreen = () => {
 
                       // Add event to calendar
                       try {
-                        const result = await addSocialCircleEventToCalendar(
-                          event
-                        );
+                        const result =
+                          await addSocialCircleEventToCalendar(event);
                         if (result.success) {
                           console.log(
                             '[EventChatScreen] Event added to calendar:',
-                            result.eventId
+                            result.eventId,
                           );
                         }
                       } catch (error) {
                         console.error(
                           '[EventChatScreen] Calendar export failed:',
-                          error
+                          error,
                         );
                       }
                     }}
@@ -2032,9 +1642,9 @@ const EventChatScreen = () => {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.attendeeScrollContent}
                 >
-                  {attendees.slice(0, 10).map((item) => (
+                  {attendees.slice(0, 10).map((item, idx) => (
                     <TouchableOpacity
-                      key={item.id}
+                      key={item?.id || `attendee-${idx}`}
                       style={styles.attendeePill}
                       onPress={() => {
                         setIsModalVisible(false);
@@ -2076,9 +1686,9 @@ const EventChatScreen = () => {
                 <View style={styles.card}>
                   <Text style={styles.sectionTitle}>Requests</Text>
                   {requesters.length > 0 ? (
-                    requesters.map((requester) => (
+                    requesters.map((requester, idx) => (
                       <TouchableOpacity
-                        key={requester.id}
+                        key={requester?.id || `requester-${idx}`}
                         style={styles.requestItem}
                         onPress={() => {
                           setIsModalVisible(false);
@@ -2217,19 +1827,19 @@ const EventChatScreen = () => {
                                 safeExitChat();
                                 Alert.alert(
                                   'Event Deleted',
-                                  'The event has been deleted.'
+                                  'The event has been deleted.',
                                 );
                               })
                               .catch((error) => {
                                 console.error('Error deleting event:', error);
                                 Alert.alert(
                                   'Error',
-                                  'Failed to delete the event.'
+                                  'Failed to delete the event.',
                                 );
                               });
                           },
                         },
-                      ]
+                      ],
                     );
                   } else {
                     handleLeaveEvent();
@@ -2241,8 +1851,8 @@ const EventChatScreen = () => {
                   {leaveInProgress
                     ? 'Leaving...'
                     : isCreator
-                    ? 'Delete Event'
-                    : 'Leave Event'}
+                      ? 'Delete Event'
+                      : 'Leave Event'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -2398,7 +2008,7 @@ const EventChatScreen = () => {
 // Description: Create theme-aware styles for EventChatScreen
 const createStyles = (
   theme,
-  insets = { top: 0, bottom: 0, left: 0, right: 0 }
+  insets = { top: 0, bottom: 0, left: 0, right: 0 },
 ) =>
   StyleSheet.create({
     messageAvatar: {

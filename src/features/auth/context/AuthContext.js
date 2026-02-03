@@ -1,6 +1,6 @@
 // src/context/AuthContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { auth, db } from '../../../services/firebase/config';
+import { auth, db } from '../../../services/firebase';
 import {
   init as analyticsInit,
   setOptIn as analyticsSetOptIn,
@@ -63,9 +63,10 @@ export function AuthProvider({ children }) {
               );
           } catch {}
           setLoading(false);
-          // Initialize analytics respecting opt-in
+          // Initialize analytics with tracking off here; App.js will re-enable
+          // based on user preference + ATT gate to avoid accidental tracking.
           try {
-            await analyticsInit(next);
+            await analyticsInit({ ...next, analyticsOptIn: false });
           } catch {}
         },
         (err) => {

@@ -16,7 +16,7 @@ import {
   reportContent,
   arrayRemove,
   deleteField,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import { trackReportContent } from '../../../lib/analytics';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';

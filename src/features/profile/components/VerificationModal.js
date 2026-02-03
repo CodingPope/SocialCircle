@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import Modal from 'react-native-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { auth, db } from '../../../services/firebase/config';
+import { auth, db } from '../../../services/firebase';
 import { doc, updateDoc, serverTimestamp } from '../../../services/firebase/firestoreCompat';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';

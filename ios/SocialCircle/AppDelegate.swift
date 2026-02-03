@@ -19,7 +19,7 @@ public class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Initialize Firebase before React Native
+    // Description: Configure Firebase before anything else
     FirebaseApp.configure()
     
     let delegate = ReactNativeDelegate()

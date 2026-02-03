@@ -82,7 +82,13 @@ Your choices
 - Turn analytics on or off in Privacy & Info.
 - Disable push notifications in device settings.
 - Revoke any permission (photos, camera, calendar) in device settings.
-- Delete your account in Profile; we soft-delete your profile and remove it from discovery. Some data (event records, messages, reports) may remain for safety, legal, or operational reasons. You can request full deletion at support@findyourcircle.app.
+- Delete your account in Profile Settings. When you delete your account:
+  • Your account and profile are permanently deleted within 24 hours
+  • All your events, messages, and user-generated content are removed
+  • If you signed in with Apple, your Sign in with Apple tokens are revoked
+  • Some data may be retained for legal, safety, or operational reasons (reports, event attendance records for safety)
+  • This action cannot be undone
+  • For questions, email support@findyourcircle.app
 
 Retention
 We keep data as long as your account is active and as needed for safety and legal obligations.

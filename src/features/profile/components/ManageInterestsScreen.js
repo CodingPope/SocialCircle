@@ -19,7 +19,7 @@ import {
   getDocs,
   getDoc,
 } from '../../../services/firebase/firestoreCompat';
-import { db } from '../../../services/firebase/config';
+import { db } from '../../../services/firebase';
 import { useUserStore } from '../stores/userStore';
 import Button from '../../../components/ui/Button';
 import AnimatedGradientBackground from '../../../components/ui/AnimatedGradientBackground';

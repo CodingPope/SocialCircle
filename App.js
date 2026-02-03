@@ -1,12 +1,5 @@
-import React, {
-  useEffect,
-  useState,
-  useRef,
-  useCallback,
-  useMemo,
-} from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { AppState } from 'react-native';
-import * as Linking from 'expo-linking';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
@@ -16,41 +9,21 @@ import {
 } from '@react-navigation/native';
 import { navigationRef, navigate } from './src/navigation/RootNavigation';
 import { useUserStore, useSessionRole } from './src/features/profile';
-import { db, serverTimestamp } from './src/services/firebase/config';
+import { db } from './src/services/firebase/config';
 import AppNavigator from './src/navigation/AppNavigator';
-import * as Notifications from 'expo-notifications';
-import {
-  initPushForUser,
-  useNotificationStore,
-} from './src/features/notifications';
 import Constants from 'expo-constants';
-import {
-  initErrorReporting,
-  setUserInErrorReporting,
-} from './src/lib/errorReporting';
-import {
-  init as analyticsInit,
-  analyticsInit as configureAnalytics,
-  setOptIn as analyticsSetOptIn,
-  screen as analyticsScreen,
-  event as analyticsEvent,
-  deriveUserAnalyticsProps,
-} from './src/services/analyticsService';
+import { initErrorReporting } from './src/lib/errorReporting';
+import { screen as analyticsScreen } from './src/services/analyticsService';
 import { AuthProvider } from './src/features/auth/context/AuthContext';
 
 // Initialize error reporting once at module load to capture early errors
 // Sentry temporarily disabled until __extends error is resolved
 import LoadingOverlay from './src/components/ui/LoadingOverlay'; // Added LoadingOverlay import
 import { recordDailySessionHeartbeat } from './src/services/sessionHeartbeatService';
-import {
-  handleIncomingLink,
-  shouldEnableDeepLinking,
-} from './src/services/deepLinkingService';
 import { ThemeProvider, lightTheme, darkTheme } from './src/theme';
 import { useThemeStore } from './src/store/themeStore';
 import ErrorBoundary from './src/components/ErrorBoundary';
-import useTrackingPermission from './src/hooks/useTrackingPermission';
-import logger from './src/lib/logger';
+import AppProviders from './src/providers/AppProviders';
 
 // Description: Keep splash screen visible while app loads
 SplashScreen.preventAutoHideAsync().catch((err) => {
@@ -74,13 +47,6 @@ function AppContent() {
   const [appReady, setAppReady] = useState(false);
   const themeMode = useThemeStore((state) => state.mode);
 
-  // Description: Use native iOS App Tracking Transparency (ATT) instead of custom prompt
-  const {
-    requestPermission,
-    status: attStatus,
-    canPrompt,
-  } = useTrackingPermission();
-
   console.log('[AppContent] State:', {
     storeLoading,
     checking,
@@ -98,7 +64,7 @@ function AppContent() {
     const timeout = setTimeout(() => {
       if (!appReady) {
         console.warn(
-          '[AppContent] Timeout reached without app ready. Force hiding splash screen.'
+          '[AppContent] Timeout reached without app ready. Force hiding splash screen.',
         );
         console.warn('[AppContent] Debug state:', {
           storeLoading,
@@ -169,26 +135,6 @@ function AppContent() {
     };
   }, [themeMode]);
 
-  const subscribeNotifications = useNotificationStore((s) => s.subscribe);
-  const clearNotifications = useNotificationStore((s) => s.unsubscribe);
-
-  // Tag Sentry and initialize analytics with privacy flag when user changes
-  useEffect(() => {
-    try {
-      setUserInErrorReporting(user);
-    } catch {}
-    // Initialize analytics respecting opt-in; turn off when signed out
-    (async () => {
-      try {
-        if (user && user.uid) {
-          await analyticsInit(user);
-        } else {
-          await analyticsSetOptIn(false);
-        }
-      } catch {}
-    })();
-  }, [user?.uid, user?.analyticsOptIn]);
-
   // NEW: Start auth listener once on mount (since AuthProvider is not used)
   useEffect(() => {
     console.log('[AppContent] Setting up auth listener');
@@ -200,109 +146,13 @@ function AppContent() {
       } else {
         console.error(
           '[AppContent] listenAuthState is not a function:',
-          typeof listen
+          typeof listen,
         );
       }
     } catch (err) {
       console.error('[AppContent] Failed to start auth listener:', err);
     }
   }, []);
-
-  // NEW: Register a notification response listener (must be before any early return)
-  useEffect(() => {
-    const sub = Notifications.addNotificationResponseReceivedListener(
-      (resp) => {
-        const data = resp?.notification?.request?.content?.data || {};
-        // Deep link routing with proper screen targeting
-        try {
-          if (data.linkType === 'chat' && data.eventId) {
-            // Navigate to event chat for chat messages
-            navigate('EventChat', { eventId: data.eventId });
-          } else if (data.linkType === 'event' && data.eventId) {
-            // Navigate to event details for other event notifications
-            navigate('EventDetail', { eventId: data.eventId });
-          } else if (data.eventId && data.linkType === 'chat') {
-            // Fallback for older chat notifications
-            navigate('EventChat', { eventId: data.eventId });
-          } else if (data.eventId) {
-            // Default to event detail
-            navigate('EventDetail', { eventId: data.eventId });
-          } else if (data.linkType && data.linkId) {
-            // Generic navigation
-            navigate(data.linkType, { id: data.linkId });
-          }
-        } catch (err) {
-          console.error('[notification-handler] navigation error:', err);
-        }
-      }
-    );
-    return () => sub.remove();
-  }, []);
-
-  useEffect(() => {
-    if (!shouldEnableDeepLinking()) return;
-
-    const handleLink = (payload) => {
-      const url = typeof payload === 'string' ? payload : payload?.url;
-      if (url) handleIncomingLink(url);
-    };
-
-    let unsubscribeDynamic = null;
-    let linkingSub = null;
-    let mounted = true;
-
-    (async () => {
-      let dynamicLinksModule = null;
-      try {
-        dynamicLinksModule =
-          require('@react-native-firebase/dynamic-links').default;
-      } catch (err) {
-        console.warn(
-          '[deep-link] Dynamic Links module unavailable',
-          err?.message || err
-        );
-        return;
-      }
-
-      if (!mounted || typeof dynamicLinksModule !== 'function') return;
-
-      const instance = dynamicLinksModule();
-      try {
-        const initial = await instance.getInitialLink();
-        if (mounted && initial?.url) handleLink(initial.url);
-      } catch {}
-
-      unsubscribeDynamic = instance.onLink((link) => handleLink(link?.url));
-      linkingSub = Linking.addEventListener('url', ({ url }) =>
-        handleLink(url)
-      );
-    })();
-
-    return () => {
-      mounted = false;
-      try {
-        unsubscribeDynamic?.();
-      } catch {}
-      linkingSub?.remove?.();
-    };
-  }, []);
-
-  // NEW: Initialize push token once per session after login (per-uid guard)
-  const initializedPushRef = useRef(new Set());
-  useEffect(() => {
-    if (user?.uid && !initializedPushRef.current.has(user.uid)) {
-      initializedPushRef.current.add(user.uid);
-      (async () => {
-        try {
-          const userDocRef = db.collection('users').doc(user.uid);
-          const snap = await userDocRef.get();
-          if (snap.exists) {
-            await initPushForUser(user.uid);
-          }
-        } catch {}
-      })();
-    }
-  }, [user?.uid]);
 
   useEffect(() => {
     console.log('[AppContent] Checking user profile. User UID:', user?.uid);
@@ -321,7 +171,7 @@ function AppContent() {
             setProfileComplete(!nextStep);
           } else {
             console.log(
-              '[AppContent] User doc does not exist, setting onboarding to NameDob'
+              '[AppContent] User doc does not exist, setting onboarding to NameDob',
             );
             setProfileComplete(false);
             setOnboardingStep('NameDob');
@@ -339,157 +189,6 @@ function AppContent() {
     };
     check();
   }, [user]);
-
-  // Description: Persist analytics choice to Firestore and update local state
-  const persistAnalyticsChoice = useCallback(
-    async (accepted) => {
-      if (!user?.uid || isBusinessSession) return;
-
-      const userDocRef = db.collection('users').doc(user.uid);
-      const timestamp = serverTimestamp();
-      const acceptedFlag = !!accepted;
-      const localTimestamp = new Date();
-      let writeSucceeded = false;
-      try {
-        await userDocRef.set(
-          {
-            analyticsOptIn: acceptedFlag,
-            analyticsUpdatedAt: timestamp,
-            analyticsPromptedAt: timestamp,
-            analyticsConsentVersion: 1,
-          },
-          { merge: true }
-        );
-        writeSucceeded = true;
-      } catch (err) {
-        if (err?.code === 'permission-denied') {
-          try {
-            await userDocRef.set(
-              {
-                type: 'user',
-                email: user.email || '',
-                premiumActive: false,
-                isPopular: false,
-                status: 'active',
-                verified: false,
-                isDeleted: false,
-                deletedAt: null,
-                analyticsOptIn: acceptedFlag,
-                analyticsUpdatedAt: timestamp,
-                analyticsPromptedAt: timestamp,
-                analyticsConsentVersion: 1,
-              },
-              { merge: true }
-            );
-            writeSucceeded = true;
-          } catch (fallbackErr) {
-            console.error(
-              'Failed to persist analytics consent after fallback',
-              fallbackErr
-            );
-            throw fallbackErr;
-          }
-        } else {
-          console.error('Failed to persist analytics consent', err);
-          throw err;
-        }
-      }
-
-      if (!writeSucceeded) return;
-
-      if (typeof setUser === 'function') {
-        try {
-          setUser({
-            ...user,
-            analyticsOptIn: acceptedFlag,
-            analyticsConsentVersion: 1,
-            analyticsPromptedAt: localTimestamp,
-            analyticsUpdatedAt: localTimestamp,
-          });
-        } catch (err) {
-          console.warn('Failed to update local user store with consent', err);
-        }
-      }
-
-      try {
-        await analyticsSetOptIn(acceptedFlag);
-        await configureAnalytics({
-          optedIn: acceptedFlag,
-          uid: user.uid,
-          props: deriveUserAnalyticsProps({
-            ...user,
-            analyticsOptIn: acceptedFlag,
-          }),
-        });
-        await analyticsEvent('analytics_consent', {
-          status: acceptedFlag ? 'accepted' : 'declined',
-        });
-      } catch {}
-    },
-    [setUser, user, isBusinessSession]
-  );
-
-  // Description: Request App Tracking Transparency permission for iOS (Guideline 5.1.2)
-  // This replaces the custom analytics consent modal with Apple's native ATT prompt
-  useEffect(() => {
-    if (!user?.uid || isBusinessSession) return;
-
-    // Only request ATT if:
-    // 1. User hasn't made a decision yet (analyticsOptIn is undefined/null)
-    // 2. User hasn't been prompted before (analyticsPromptedAt is missing)
-    // 3. ATT status is 'undetermined' (native prompt not shown yet)
-    const hasDecision = typeof user?.analyticsOptIn === 'boolean';
-    const alreadyPrompted = !!user?.analyticsPromptedAt;
-
-    if (!hasDecision && !alreadyPrompted && canPrompt) {
-      // Request ATT permission (shows native iOS prompt)
-      (async () => {
-        try {
-          const result = await requestPermission();
-          const granted = result?.granted || false;
-
-          // Persist the user's choice to Firestore
-          await persistAnalyticsChoice(granted);
-        } catch (error) {
-          logger.error('[ATT] Failed to request permission:', error);
-          // On error, default to declined
-          await persistAnalyticsChoice(false);
-        }
-      })();
-    } else if (!hasDecision && !alreadyPrompted && attStatus === 'granted') {
-      // ATT already granted (edge case: user granted in system settings before app asked)
-      persistAnalyticsChoice(true);
-    } else if (
-      !hasDecision &&
-      !alreadyPrompted &&
-      (attStatus === 'denied' || attStatus === 'restricted')
-    ) {
-      // ATT already denied/restricted
-      persistAnalyticsChoice(false);
-    }
-  }, [
-    user?.uid,
-    user?.analyticsOptIn,
-    user?.analyticsPromptedAt,
-    isBusinessSession,
-    canPrompt,
-    attStatus,
-    requestPermission,
-    persistAnalyticsChoice,
-  ]);
-
-  useEffect(() => {
-    if (!user?.uid) {
-      clearNotifications();
-      return;
-    }
-    const unsub = subscribeNotifications(user.uid);
-    return () => {
-      try {
-        unsub && unsub();
-      } catch {}
-    };
-  }, [user?.uid, subscribeNotifications, clearNotifications]);
 
   const showLoadingOverlay = storeLoading || checking;
 
@@ -517,7 +216,7 @@ function AppContent() {
     };
     const subscription = AppState.addEventListener(
       'change',
-      handleAppStateChange
+      handleAppStateChange,
     );
     return () => subscription.remove();
   }, [user?.uid]);
@@ -586,10 +285,12 @@ function AppContent() {
     );
 
   return (
-    <>
-      {navigator}
-      <LoadingOverlay visible={showLoadingOverlay} />
-    </>
+    <AppProviders user={user} sessionRole={sessionRole} setUser={setUser}>
+      <>
+        {navigator}
+        <LoadingOverlay visible={showLoadingOverlay} />
+      </>
+    </AppProviders>
   );
 }
 

@@ -1,6 +1,6 @@
-import { db, Timestamp, getTimestampNow } from '../../../services/firebase/config';
+import { db, Timestamp, getTimestampNow } from '../../../services/firebase';
 import { geohashQueryBounds, distanceBetween } from 'geofire-common';
-import { getWithTTL } from '../utils/ttlCache';
+import { getWithTTL } from '../../../lib/ttlCache';
 
 function chunkArray(arr, chunkSize) {
   const result = [];
@@ -16,7 +16,7 @@ function chunkArray(arr, chunkSize) {
 export async function fetchHotEvents(
   interests,
   userLocation,
-  radiusInM = 32093
+  radiusInM = 32093,
 ) {
   try {
     if (!userLocation || !interests?.length) return [];
@@ -88,7 +88,7 @@ export async function fetchNewEvents(
   userLocation,
   lastDoc = null,
   pageSize = 10,
-  radiusInM = 23000
+  radiusInM = 23000,
 ) {
   try {
     if (!selectedInterest || !userLocation)
@@ -109,7 +109,7 @@ export async function fetchNewEvents(
           .where('status', '==', 'active')
           .where('isDeleted', '==', false)
           .where('createdAt', '>=', twentyFourHoursAgo)
-          .get()
+          .get(),
       );
 
       const snapshots = await Promise.all(promises);
@@ -134,7 +134,7 @@ export async function fetchNewEvents(
       }
 
       const results = Array.from(matchingDocs.values()).sort(
-        (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+        (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0),
       );
       return { events: results.slice(0, pageSize), lastDoc: null };
     };
@@ -156,7 +156,7 @@ export async function fetchThisWeekEvents(
   userLocation,
   lastDoc = null,
   pageSize = 10,
-  radiusInM = 23000
+  radiusInM = 23000,
 ) {
   try {
     if (!selectedInterest || !userLocation)
@@ -166,7 +166,7 @@ export async function fetchThisWeekEvents(
     const bounds = geohashQueryBounds(center, radiusInM);
     const now = getTimestampNow();
     const weekFromNow = Timestamp.fromMillis(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
     );
 
     const doFetch = async () => {
@@ -180,7 +180,7 @@ export async function fetchThisWeekEvents(
           .where('isDeleted', '==', false)
           .where('date', '>=', now)
           .where('date', '<=', weekFromNow)
-          .get()
+          .get(),
       );
 
       const snapshots = await Promise.all(promises);
@@ -205,7 +205,7 @@ export async function fetchThisWeekEvents(
       }
 
       const results = Array.from(matchingDocs.values()).sort(
-        (a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0)
+        (a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0),
       );
       return { events: results.slice(0, pageSize), lastDoc: null };
     };
@@ -226,7 +226,7 @@ export async function fetchTodayEvents(
   userLocation,
   lastDoc = null,
   pageSize = 10,
-  radiusInM = 23000
+  radiusInM = 23000,
 ) {
   try {
     if (!selectedInterest || !userLocation)
@@ -244,7 +244,7 @@ export async function fetchTodayEvents(
       0,
       0,
       0,
-      0
+      0,
     );
     const endOfDay = new Date(
       now.getFullYear(),
@@ -253,7 +253,7 @@ export async function fetchTodayEvents(
       23,
       59,
       59,
-      999
+      999,
     );
 
     const startTs = Timestamp.fromDate(startOfDay);
@@ -270,7 +270,7 @@ export async function fetchTodayEvents(
           .where('isDeleted', '==', false)
           .where('date', '>=', startTs)
           .where('date', '<=', endTs)
-          .get()
+          .get(),
       );
 
       const snapshots = await Promise.all(promises);
@@ -295,7 +295,7 @@ export async function fetchTodayEvents(
       }
 
       const results = Array.from(matchingDocs.values()).sort(
-        (a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0)
+        (a, b) => (a.date?.seconds || 0) - (b.date?.seconds || 0),
       );
       return { events: results.slice(0, pageSize), lastDoc: null };
     };

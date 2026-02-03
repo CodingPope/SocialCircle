@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { db, serverTimestamp } from '../../../../../services/firebase/config';
+import { db, serverTimestamp } from '../../../../../services/firebase';
 import { useUserStore } from '../../../../profile';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalyticsService';
@@ -69,18 +69,35 @@ const createStyles = (theme) => {
       borderColor: theme.isDark
         ? 'rgba(148, 163, 184, 0.2)'
         : 'rgba(226, 232, 240, 0.5)',
+      maxHeight: 400,
+    },
+    tosScrollView: {
+      maxHeight: 280,
+      marginVertical: spacing.md,
     },
     tosTitle: {
       fontSize: 18,
       fontWeight: '700',
       color: theme.isDark ? '#FFFFFF' : colors.neutral900,
+      marginBottom: spacing.sm,
+    },
+    versionText: {
+      fontSize: 12,
+      color: theme.isDark ? colors.neutral300 : colors.neutral500,
       marginBottom: spacing.md,
+    },
+    sectionTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.isDark ? '#FFFFFF' : colors.neutral900,
+      marginTop: spacing.md,
+      marginBottom: spacing.xs,
     },
     tosText: {
       fontSize: 14,
       color: theme.isDark ? '#FFFFFF' : colors.neutral700,
       lineHeight: 22,
-      marginBottom: spacing.md,
+      marginBottom: spacing.sm,
     },
     bulletPoint: {
       fontSize: 14,
@@ -175,13 +192,13 @@ export default function TOSAcceptanceScreen({ navigation, route }) {
         await Linking.openURL(tosUrl);
       } else {
         alert(
-          'Unable to open Terms of Service. Please visit socialcircle.app/legal/terms-of-service'
+          'Unable to open Terms of Service. Please visit socialcircle.app/legal/terms-of-service',
         );
       }
     } catch (error) {
       console.error('[TOS] Failed to open TOS link:', error);
       alert(
-        'Unable to open Terms of Service. Please visit socialcircle.app/legal/terms-of-service'
+        'Unable to open Terms of Service. Please visit socialcircle.app/legal/terms-of-service',
       );
     }
   };
@@ -202,7 +219,7 @@ export default function TOSAcceptanceScreen({ navigation, route }) {
           tosVersion: '1.0', // Increment when TOS changes
           tosPromptedAt: timestamp,
         },
-        { merge: true }
+        { merge: true },
       );
 
       // Update local user store
@@ -235,54 +252,7 @@ export default function TOSAcceptanceScreen({ navigation, route }) {
     } catch (error) {
       console.error('[TOS] Failed to save acceptance:', error);
       alert(
-        'Failed to save your acceptance. Please check your connection and try again.'
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Description: Allow user to decline TOS but continue with limited access
-  // They can browse events but cannot create/join/chat (UGC features blocked)
-  const handleDecline = async () => {
-    if (!user?.uid) return;
-
-    setSaving(true);
-    try {
-      const userDocRef = db.collection('users').doc(user.uid);
-      const timestamp = serverTimestamp();
-
-      await userDocRef.set(
-        {
-          tosAccepted: false,
-          tosDeclinedAt: timestamp,
-          tosVersion: '1.0',
-          tosPromptedAt: timestamp,
-        },
-        { merge: true }
-      );
-
-      // Update local user store
-      setUser({
-        ...user,
-        tosAccepted: false,
-        tosDeclinedAt: new Date(),
-        tosVersion: '1.0',
-        tosPromptedAt: new Date(),
-      });
-
-      // Log analytics event
-      await logOnboardingStepComplete('TOS', {
-        tosVersion: '1.0',
-        accepted: false,
-      });
-
-      // Continue to next onboarding step (read-only mode)
-      navigation.replace('InterestsScreen');
-    } catch (error) {
-      console.error('[TOS] Failed to save decline:', error);
-      alert(
-        'Failed to save your choice. Please check your connection and try again.'
+        'Failed to save your acceptance. Please check your connection and try again.',
       );
     } finally {
       setSaving(false);
@@ -317,29 +287,141 @@ export default function TOSAcceptanceScreen({ navigation, route }) {
           <Text style={styles.subtitle}>
             {fromSettings
               ? 'Review and update your Terms of Service acceptance. You need to accept to create events or join activities.'
-              : "Please review our terms. You can browse events without accepting, but you'll need to accept to create events or join activities."}
+              : 'Please review and accept our terms to continue using Social Circle.'}
           </Text>
 
           <View style={styles.tosContainer}>
-            <Text style={styles.tosTitle}>Key Points</Text>
-            <Text style={styles.tosText}>
-              By using Social Circle, you agree to:
+            <Text style={styles.tosTitle}>Terms of Service</Text>
+            <Text style={styles.versionText}>
+              Version 1.0 • Effective January 19, 2026
             </Text>
-            <Text style={styles.bulletPoint}>
-              • Be respectful and kind to all community members
-            </Text>
-            <Text style={styles.bulletPoint}>
-              • Not post harmful, illegal, or offensive content
-            </Text>
-            <Text style={styles.bulletPoint}>
-              • Follow community guidelines when creating events
-            </Text>
-            <Text style={styles.bulletPoint}>
-              • Take responsibility for events you host
-            </Text>
-            <Text style={styles.bulletPoint}>
-              • Respect others' privacy and safety
-            </Text>
+
+            <ScrollView
+              style={styles.tosScrollView}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+            >
+              <Text style={styles.tosText}>
+                By using Social Circle, you agree to the following:
+              </Text>
+
+              <Text style={styles.sectionTitle}>1. Acceptance of Terms</Text>
+              <Text style={styles.tosText}>
+                You must be at least 18 years old to use this app. By creating
+                an account, you certify you meet this requirement. If you use
+                Sign in with Apple, you agree to Apple's terms and conditions.
+              </Text>
+
+              <Text style={styles.sectionTitle}>2. Zero Tolerance Policy</Text>
+              <Text style={styles.tosText}>
+                We have ZERO TOLERANCE for: sexually explicit content; hate
+                speech; harassment; fraud; illegal activities; impersonation;
+                spam; stalking; or any harmful conduct. Violations result in
+                immediate account termination.
+              </Text>
+
+              <Text style={styles.sectionTitle}>3. User-Generated Content</Text>
+              <Text style={styles.tosText}>
+                You are solely responsible for all content you post. We employ
+                automated filtering, user reporting, manual review, and
+                reputation scoring to moderate content. Report violations via
+                the in-app report feature.
+              </Text>
+
+              <Text style={styles.sectionTitle}>4. Event Participation</Text>
+              <Text style={styles.tosText}>
+                You attend events at your own risk. We do NOT conduct background
+                checks, verify identities, or ensure event safety. Always meet
+                in public places. Hosts must provide accurate information;
+                attendees must RSVP honestly.
+              </Text>
+
+              <Text style={styles.sectionTitle}>5. Account Termination</Text>
+              <Text style={styles.tosText}>
+                We may suspend or terminate your account immediately for
+                violations, fraudulent activity, repeated reports, or providing
+                false information. No refunds are provided upon termination.
+              </Text>
+
+              <Text style={styles.sectionTitle}>6. Intellectual Property</Text>
+              <Text style={styles.tosText}>
+                By posting content, you grant us a worldwide, non-exclusive,
+                royalty-free license to display and distribute your content. You
+                retain ownership but agree to this license for app
+                functionality.
+              </Text>
+
+              <Text style={styles.sectionTitle}>
+                7. Privacy & Data Collection
+              </Text>
+              <Text style={styles.tosText}>
+                We collect account info, location data, event participation,
+                communications, device info, and usage analytics. Location is
+                optional but enhances discovery. See our Privacy Policy for
+                complete details.
+              </Text>
+
+              <Text style={styles.sectionTitle}>8. Business Accounts</Text>
+              <Text style={styles.tosText}>
+                Business accounts must represent legitimate, registered
+                businesses and may be required to provide verification
+                documents. Sponsored events must comply with all content
+                policies and advertising regulations.
+              </Text>
+
+              <Text style={styles.sectionTitle}>9. Disclaimers</Text>
+              <Text style={styles.tosText}>
+                The app is provided "AS IS" without warranties. We make NO
+                GUARANTEES regarding uninterrupted service, accuracy of
+                information, user safety, or success in making friends.
+              </Text>
+
+              <Text style={styles.sectionTitle}>
+                10. Limitation of Liability
+              </Text>
+              <Text style={styles.tosText}>
+                We are NOT liable for indirect, incidental, or consequential
+                damages; personal injury; property damage; or service
+                interruptions. Our total liability is capped at the greater of
+                $100 USD or amounts you paid in the prior 12 months.
+              </Text>
+
+              <Text style={styles.sectionTitle}>11. Indemnification</Text>
+              <Text style={styles.tosText}>
+                You agree to indemnify and hold harmless Social Circle from any
+                claims arising from your violations, content, conduct, event
+                participation, or infringement of third-party rights.
+              </Text>
+
+              <Text style={styles.sectionTitle}>12. Dispute Resolution</Text>
+              <Text style={styles.tosText}>
+                Disputes are governed by Colorado law and resolved through
+                binding arbitration under AAA rules. You waive the right to
+                participate in class actions or representative proceedings.
+              </Text>
+
+              <Text style={styles.sectionTitle}>13. Changes to Terms</Text>
+              <Text style={styles.tosText}>
+                We may update these Terms at any time. You will be notified via
+                in-app notification, email, or re-acceptance prompt. Continued
+                use after changes constitutes acceptance.
+              </Text>
+
+              <Text style={styles.sectionTitle}>14. Children's Privacy</Text>
+              <Text style={styles.tosText}>
+                We do NOT knowingly collect information from anyone under 18. If
+                we discover a minor has created an account, we will immediately
+                terminate it and delete all data.
+              </Text>
+
+              <Text style={styles.sectionTitle}>15. Additional Terms</Text>
+              <Text style={styles.tosText}>
+                These Terms include provisions for: contact & reporting
+                (safety@findyourcircle.app); severability; entire agreement;
+                export controls; force majeure; no waiver; assignment; and
+                survival of certain sections after termination.
+              </Text>
+            </ScrollView>
 
             <TouchableOpacity
               style={styles.linkButton}
@@ -351,7 +433,7 @@ export default function TOSAcceptanceScreen({ navigation, route }) {
                 size={20}
                 color={theme.colors.primary}
               />
-              <Text style={styles.linkButtonText}>Read Full Terms</Text>
+              <Text style={styles.linkButtonText}>Read Terms of Service</Text>
             </TouchableOpacity>
           </View>
 
@@ -375,23 +457,13 @@ export default function TOSAcceptanceScreen({ navigation, route }) {
                 saving
                   ? 'Saving...'
                   : fromSettings
-                  ? 'Save Changes'
-                  : 'Accept & Continue'
+                    ? 'Save Changes'
+                    : 'Accept & Continue'
               }
               onPress={handleAccept}
               disabled={!accepted || saving}
               style={!accepted || saving ? styles.disabledButton : null}
             />
-            {/* Only show decline button during onboarding, not from Settings */}
-            {!fromSettings && (
-              <Button
-                title='Continue Without Accepting'
-                onPress={handleDecline}
-                disabled={saving}
-                variant='secondary'
-                style={{ marginTop: theme.spacing.md }}
-              />
-            )}
           </View>
 
           {saving && (

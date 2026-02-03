@@ -29,15 +29,15 @@ export async function getIfFresh(key, ttlMs) {
   return value;
 }
 
-export async function setWithTTL(key, value) {
-  await writeRaw(key, { value, ts: Date.now() });
+export async function setWithTTL(key, value, ttlMs) {
+  await writeRaw(key, { value, ts: Date.now(), ttlMs });
 }
 
 export async function getWithTTL(key, fetcher, ttlMs) {
   const fresh = await getIfFresh(key, ttlMs);
   if (fresh != null) return fresh;
   const value = await fetcher();
-  await setWithTTL(key, value);
+  await setWithTTL(key, value, ttlMs);
   return value;
 }
 
@@ -57,3 +57,22 @@ export async function purgeExpired(keys, ttlMs) {
 export async function clearAll() {
   // naive clear: list not available; rely on caller to manage keys.
 }
+
+export async function backgroundRefresh(key, fetcher, ttlMs) {
+  try {
+    const value = await fetcher();
+    await setWithTTL(key, value, ttlMs);
+  } catch {}
+}
+
+const ttlCache = {
+  getIfFresh,
+  setWithTTL,
+  getWithTTL,
+  invalidate,
+  purgeExpired,
+  clearAll,
+  backgroundRefresh,
+};
+
+export default ttlCache;

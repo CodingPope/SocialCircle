@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Location from 'expo-location';
-import { db, serverTimestamp } from '../../../services/firebase/config';
+import { db, serverTimestamp } from '../../../services/firebase';
 import { useUserStore } from '../stores/userStore';
 import {
   setOptIn as analyticsSetOptIn,

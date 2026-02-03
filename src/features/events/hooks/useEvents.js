@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db } from '../../../services/firebase/config';
+import { db } from '../../../services/firebase';
 
 export function useEvents(interests = [], rollingDays = 7) {
   const [events, setEvents] = useState([]);

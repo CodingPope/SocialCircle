@@ -30,7 +30,7 @@ import {
   registerForPushTokenAsync,
   initPushForUser,
 } from '../../../notifications/api/pushService';
-import { auth } from '../../../../services/firebase/config';
+import { auth } from '../../../../services/firebase';
 import { track as trackClient } from '../../../../lib/analytics';
 import { createUser } from '../../../profile/api/userService';
 

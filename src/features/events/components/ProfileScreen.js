@@ -38,7 +38,8 @@ import {
   db,
   reportContent,
   deleteEvent,
-} from '../../../services/firebase/config';
+  functions,
+} from '../../../services/firebase';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useSessionRole } from '../../profile/stores/sessionRoleStore';
 import { useMyEvents } from '../hooks/useMyEvents';
@@ -76,6 +77,11 @@ import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import VerificationModal from '../../profile/components/VerificationModal';
 import logger from '../../../lib/logger';
+
+// Extracted components (available for progressive migration)
+// import ProfileSidebar from '../../profile/components/ProfileSidebar';
+// import ProfileStatsCard from '../../profile/components/ProfileStatsCard';
+// import ProfileTutorialOverlay from '../../profile/components/ProfileTutorialOverlay';
 
 const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -159,6 +165,7 @@ export default function ProfileScreen({
   // Ensure snippet fetcher from store
   const ensureSnippets = useUserSnippetStore((s) => s.ensureSnippets);
   const hostCacheRef = useRef(new Map());
+  const hasBusinessProfile = Boolean(user?.businessId);
 
   // --- Notification badge state ---
   const [unreadCount, setUnreadCount] = useState(0);
@@ -167,7 +174,7 @@ export default function ProfileScreen({
     // Listen for recipient notifications; compute unread locally to include docs without `read` field
     const notificationsQuery = query(
       collection(db, 'notifications'),
-      where('recipientId', '==', user.uid)
+      where('recipientId', '==', user.uid),
     );
 
     let unsub = onSnapshot(
@@ -193,7 +200,7 @@ export default function ProfileScreen({
           return;
         }
         logger.warn('Notifications listener error:', error?.message || error);
-      }
+      },
     );
 
     // Register globally so logout can proactively clean it up before signOut()
@@ -245,7 +252,7 @@ export default function ProfileScreen({
       }
       const q = query(
         collection(db, 'notifications'),
-        where('recipientId', '==', user.uid)
+        where('recipientId', '==', user.uid),
       );
       const snap = await getDocs(q);
       if (snap?.size) {
@@ -333,7 +340,7 @@ export default function ProfileScreen({
     if (!user?.uid) {
       Alert.alert(
         'Share unavailable',
-        'You need to be signed in to share your profile.'
+        'You need to be signed in to share your profile.',
       );
       return;
     }
@@ -353,38 +360,43 @@ export default function ProfileScreen({
     if (!user?.uid) return;
     Alert.alert(
       'Delete Account',
-      'This will permanently remove your profile and you will not be able to join or host events. Are you sure you want to continue?',
+      'This will permanently delete your account, profile, events, and messages. This action cannot be undone.\n\nYour account will be completely removed from our system within 24 hours.\n\nAre you sure you want to continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Delete Permanently',
           style: 'destructive',
           onPress: async () => {
             try {
-              // Soft delete user in Firestore
-              await updateDoc(doc(db, 'users', user.uid), {
-                isDeleted: true,
-                deletedAt: serverTimestamp(),
-                displayName: 'Deleted User',
-                profileImage: null,
-                bio: '',
-              });
-              // Sign out
-              await logout();
+              setDeletingAccount(true);
+              
+              // Call cloud function to permanently delete account
+              const deleteAccount = functions.httpsCallable('deleteUserAccount');
+              await deleteAccount();
+              
+              // Sign out (auth user is already deleted, but clear local state)
               setUser(null);
+              
               // AppNavigator will render AuthStack when user is null
               setTimeout(() => {
                 Alert.alert(
-                  'Profile Deleted',
-                  'Your profile has been deleted. You have been signed out.'
+                  'Account Deleted',
+                  'Your account has been permanently deleted. All your data has been removed from our system.',
+                  [{ text: 'OK' }]
                 );
               }, 600);
             } catch (err) {
-              Alert.alert('Error', 'Failed to delete account.');
+              console.error('[ProfileScreen] Account deletion failed:', err);
+              Alert.alert(
+                'Deletion Failed',
+                err?.message || 'Failed to delete account. Please try again or contact support@findyourcircle.app'
+              );
+            } finally {
+              setDeletingAccount(false);
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -406,6 +418,7 @@ export default function ProfileScreen({
   });
   const [interestPosts, setInterestPosts] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [groupEvents, setGroupEvents] = useState([]);
   const EVENTS_PAGE_SIZE = 10;
   const [visibleCount, setVisibleCount] = useState(EVENTS_PAGE_SIZE);
@@ -422,7 +435,7 @@ export default function ProfileScreen({
   // Add animated sidebar state/refs
   const sidebarPan = useRef(null);
   const sidebarAnim = useRef(
-    new Animated.Value(Dimensions.get('window').width)
+    new Animated.Value(Dimensions.get('window').width),
   ).current;
   const sidebarClosing = useRef(false);
   const menuButtonRef = useRef(null);
@@ -445,7 +458,7 @@ export default function ProfileScreen({
         // Move sidebarAnim with finger, but not past the screen width
         if (gestureState.dx > 0) {
           sidebarAnim.setValue(
-            Math.min(gestureState.dx, Dimensions.get('window').width)
+            Math.min(gestureState.dx, Dimensions.get('window').width),
           );
         }
       },
@@ -539,7 +552,7 @@ export default function ProfileScreen({
     if (!user?.createdAt) {
       logger.debug(
         '[ProfileScreen] No createdAt found on user object:',
-        user?.uid
+        user?.uid,
       );
       // Fallback to current month/year for newly created users
       const now = new Date();
@@ -550,7 +563,7 @@ export default function ProfileScreen({
       '[ProfileScreen] createdAt value:',
       user.createdAt,
       'type:',
-      typeof user.createdAt
+      typeof user.createdAt,
     );
 
     try {
@@ -578,7 +591,7 @@ export default function ProfileScreen({
       // Handle timestamp-like object with _type marker - use current date as fallback
       else if (user.createdAt._type === 'timestamp') {
         logger.debug(
-          '[ProfileScreen] createdAt is placeholder timestamp, using current date'
+          '[ProfileScreen] createdAt is placeholder timestamp, using current date',
         );
         date = new Date();
       }
@@ -604,8 +617,8 @@ export default function ProfileScreen({
     typeof user.followerCount === 'number'
       ? user.followerCount
       : Array.isArray(user.followers)
-      ? user.followers.length
-      : 0;
+        ? user.followers.length
+        : 0;
   const eventCount =
     (Array.isArray(user.createdEvents) ? user.createdEvents.length : 0) +
     (Array.isArray(user.attendedEvents) ? user.attendedEvents.length : 0);
@@ -629,17 +642,15 @@ export default function ProfileScreen({
         typeof data.followerCount === 'number'
           ? data.followerCount
           : Array.isArray(data.followers)
-          ? data.followers.length
-          : 0;
+            ? data.followers.length
+            : 0;
 
       // Refresh user events
       const fetchEventsByIds = async (ids) => {
         if (!ids.length) return [];
         // Use helper from firebase config if exposed
         try {
-          const {
-            getUserEventsByIds,
-          } = require('../../../services/firebase/config');
+          const { getUserEventsByIds } = require('../../../services/firebase');
           if (typeof getUserEventsByIds === 'function') {
             const res = await getUserEventsByIds(ids);
             return res.filter((e) => e.isDeleted !== true);
@@ -658,7 +669,7 @@ export default function ProfileScreen({
             const q = query(eventsRef, where('__name__', 'in', chunk));
             const snapshot = await getDocs(q);
             results = results.concat(
-              snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+              snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
             );
           }
           // Exclude soft-deleted
@@ -666,7 +677,7 @@ export default function ProfileScreen({
         } catch {
           // Fallback: filter from latest myEvents snapshot without re-triggering effects
           return (myEventsRef.current || []).filter(
-            (ev) => ids.includes(ev.id) && ev.isDeleted !== true
+            (ev) => ids.includes(ev.id) && ev.isDeleted !== true,
           );
         }
       };
@@ -687,10 +698,10 @@ export default function ProfileScreen({
         const timelinePosts = Array.isArray(postsResult?.posts)
           ? postsResult.posts
           : Array.isArray(postsResult)
-          ? postsResult
-          : [];
+            ? postsResult
+            : [];
         setInterestPosts(
-          timelinePosts.filter((post) => post?.isDeleted !== true)
+          timelinePosts.filter((post) => post?.isDeleted !== true),
         );
       } catch (err) {
         logger.warn('Failed to refresh interest posts', err);
@@ -729,7 +740,7 @@ export default function ProfileScreen({
 
       logger.debug(
         '[ProfileScreen] Fetched user data createdAt:',
-        data.createdAt
+        data.createdAt,
       );
 
       setBio(data.bio || '');
@@ -764,9 +775,7 @@ export default function ProfileScreen({
         if (!ids.length) return [];
         // Use helper from firebase config if exposed
         try {
-          const {
-            getUserEventsByIds,
-          } = require('../../../services/firebase/config');
+          const { getUserEventsByIds } = require('../../../services/firebase');
           if (typeof getUserEventsByIds === 'function') {
             const res = await getUserEventsByIds(ids);
             return res.filter((e) => e.isDeleted !== true);
@@ -785,7 +794,7 @@ export default function ProfileScreen({
             const q = query(eventsRef, where('__name__', 'in', chunk));
             const snapshot = await getDocs(q);
             results = results.concat(
-              snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+              snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
             );
           }
           // Exclude soft-deleted
@@ -793,7 +802,7 @@ export default function ProfileScreen({
         } catch {
           // Fallback: filter from latest myEvents snapshot without re-triggering effects
           return (myEventsRef.current || []).filter(
-            (ev) => ids.includes(ev.id) && ev.isDeleted !== true
+            (ev) => ids.includes(ev.id) && ev.isDeleted !== true,
           );
         }
       };
@@ -810,15 +819,15 @@ export default function ProfileScreen({
           query(
             eventsRef,
             where('ownerId', '==', user.uid),
-            where('isDeleted', '==', false)
-          )
+            where('isDeleted', '==', false),
+          ),
         ),
         getDocs(
           query(
             eventsRef,
             where('attendees', 'array-contains', user.uid),
-            where('isDeleted', '==', false)
-          )
+            where('isDeleted', '==', false),
+          ),
         ),
       ]);
       const createdByQuery = createdQSnap.docs
@@ -841,8 +850,8 @@ export default function ProfileScreen({
         creatorPosts = Array.isArray(postsResult?.posts)
           ? postsResult.posts
           : Array.isArray(postsResult)
-          ? postsResult
-          : [];
+            ? postsResult
+            : [];
       } catch (err) {
         logger.warn('Failed to load interest posts for profile timeline', err);
       }
@@ -850,7 +859,7 @@ export default function ProfileScreen({
       if (isMounted) setUserEvents({ created, attending, attended });
       if (isMounted)
         setInterestPosts(
-          creatorPosts.filter((post) => post?.isDeleted !== true)
+          creatorPosts.filter((post) => post?.isDeleted !== true),
         );
       if (isMounted) setLoadingEvents(false);
     }
@@ -870,7 +879,7 @@ export default function ProfileScreen({
       });
     }
     const liveEvents = myEvents.filter(
-      (event) => event?.id && !hiddenIds?.has(event.id)
+      (event) => event?.id && !hiddenIds?.has(event.id),
     );
     const nextCreated = mergeUniqueEvents(liveEvents);
     setUserEvents((prev) => {
@@ -884,7 +893,7 @@ export default function ProfileScreen({
     userEvents.created,
     userEvents.attending,
     userEvents.attended,
-    groupEvents
+    groupEvents,
   );
 
   // NEW: Current events = user’s events that have not ended yet
@@ -904,7 +913,7 @@ export default function ProfileScreen({
 
   const visibleIdsKey = useMemo(
     () => visibleEvents.map((e) => e.id).join('|'),
-    [visibleEvents]
+    [visibleEvents],
   );
 
   const timelineItems = useMemo(() => {
@@ -1016,10 +1025,10 @@ export default function ProfileScreen({
           typeof s?.rating === 'number'
             ? s.rating
             : typeof cached?.hostRating === 'number'
-            ? cached.hostRating
-            : typeof derivedRating === 'number'
-            ? derivedRating
-            : 0;
+              ? cached.hostRating
+              : typeof derivedRating === 'number'
+                ? derivedRating
+                : 0;
         const hostVerified =
           s?.verified === true ||
           cached?.hostVerified === true ||
@@ -1085,7 +1094,7 @@ export default function ProfileScreen({
     if (!location) return 'Location not available';
     if (location.latitude && location.longitude) {
       return `Lat: ${location.latitude.toFixed(
-        4
+        4,
       )}, Lng: ${location.longitude.toFixed(4)}`;
     }
     return 'Location not specified';
@@ -1110,7 +1119,7 @@ export default function ProfileScreen({
       const centeredLeft = (windowSize.width - tooltipWidth) / 2;
       const safeLeft = Math.min(
         Math.max(centeredLeft, 16),
-        windowSize.width - tooltipWidth - 16
+        windowSize.width - tooltipWidth - 16,
       );
       return {
         width: tooltipWidth,
@@ -1123,7 +1132,7 @@ export default function ProfileScreen({
       menuHighlightLayout.x + menuHighlightLayout.width - tooltipWidth;
     const left = Math.min(
       Math.max(horizontalOrigin, 16),
-      windowSize.width - tooltipWidth - 16
+      windowSize.width - tooltipWidth - 16,
     );
     const preferredTop =
       menuHighlightLayout.y + menuHighlightLayout.height + 18;
@@ -1135,7 +1144,7 @@ export default function ProfileScreen({
     if (!user?.uid) {
       Alert.alert(
         'Sign in required',
-        'Please sign in again before updating your profile photo.'
+        'Please sign in again before updating your profile photo.',
       );
       return;
     }
@@ -1148,7 +1157,7 @@ export default function ProfileScreen({
       if (!permissionResult.granted) {
         Alert.alert(
           'Permission needed',
-          'Photo library access is required to change your profile picture.'
+          'Photo library access is required to change your profile picture.',
         );
         return;
       }
@@ -1156,7 +1165,7 @@ export default function ProfileScreen({
       // Description: Use pickAndCompressImage which handles compression with PROFILE limits (5MB/1024px)
       const compressed = await pickAndCompressImage(
         { aspect: [1, 1] },
-        'PROFILE'
+        'PROFILE',
       );
 
       if (!compressed) {
@@ -1182,7 +1191,7 @@ export default function ProfileScreen({
       if (clearUserFromCache) {
         clearUserFromCache(user.uid);
         logger.debug(
-          '[ProfileScreen] Cleared user snippet cache for updated profile image'
+          '[ProfileScreen] Cleared user snippet cache for updated profile image',
         );
       }
 
@@ -1194,7 +1203,7 @@ export default function ProfileScreen({
       console.error('[ProfileScreen] Error message:', err?.message);
       Alert.alert(
         'Upload failed',
-        'Failed to update profile image. Please try again.'
+        'Failed to update profile image. Please try again.',
       );
     }
   }, [user, setUser]);
@@ -1224,7 +1233,7 @@ export default function ProfileScreen({
       {
         details: `Report from ProfileScreen event actions for event ${selectedEvent.id}`,
         context: { eventId: selectedEvent.id },
-      }
+      },
     )
       .then(() => Alert.alert('Report', 'Thanks for the report.'))
       .catch(() => Alert.alert('Report', 'Failed to submit report.'))
@@ -1372,7 +1381,7 @@ export default function ProfileScreen({
       if (eventData.isDeleted === true) {
         Alert.alert(
           'Event archived',
-          'This event has been archived and is no longer interactive.'
+          'This event has been archived and is no longer interactive.',
         );
         return;
       }
@@ -1394,7 +1403,7 @@ export default function ProfileScreen({
       if (!isMember) {
         Alert.alert(
           'No Access',
-          'You must be the host or an attendee to view this chat.'
+          'You must be the host or an attendee to view this chat.',
         );
         return;
       }
@@ -1499,12 +1508,12 @@ export default function ProfileScreen({
                     : [
                         'Edit Profile',
                         'Manage Interests',
-                        // Description: Show Account Type button only in dev builds (feature flag)
-                        ...(user?.type === 'business'
+                        // Show switch when user already has a business profile; otherwise fall back to Account Type (dev-only)
+                        ...(hasBusinessProfile
                           ? ['Switch to Business']
                           : __DEV__
-                          ? ['Account Type']
-                          : []),
+                            ? ['Account Type']
+                            : []),
                         'Logout',
                         'Privacy and Info',
                       ]
@@ -1548,7 +1557,7 @@ export default function ProfileScreen({
                         closeSidebar();
                         setTimeout(
                           () => handleMenuOptionClick('Get Verified'),
-                          200
+                          200,
                         );
                       }}
                     >
@@ -1594,9 +1603,9 @@ export default function ProfileScreen({
                     <Switch
                       value={themeMode === 'dark'}
                       onValueChange={toggleTheme}
-                      trackColor={{ false: '#CBD5E1', true: '#3B82F6' }}
-                      thumbColor={themeMode === 'dark' ? '#FFFFFF' : '#F1F5F9'}
-                      ios_backgroundColor='#CBD5E1'
+                      trackColor={{ false: '#E5E7EB', true: '#34C759' }}
+                      thumbColor='#FFFFFF'
+                      ios_backgroundColor='#E5E7EB'
                     />
                   </View>
 
@@ -1619,7 +1628,7 @@ export default function ProfileScreen({
                         closeSidebar();
                         setTimeout(
                           () => handleMenuOptionClick('Delete Account'),
-                          200
+                          200,
                         );
                       }}
                     >
@@ -1694,11 +1703,7 @@ export default function ProfileScreen({
                 accessibilityLabel='Share profile'
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                <Ionicons
-                  name='share-social-outline'
-                  size={26}
-                  color={theme.colors.neutral100}
-                />
+                <Ionicons name='share-social-outline' size={26} color='#fff' />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleNotificationsPress}
@@ -1709,7 +1714,7 @@ export default function ProfileScreen({
                   <MaterialCommunityIcons
                     name='bell-outline'
                     size={28}
-                    color={theme.colors.neutral100}
+                    color='#fff'
                   />
                   {unreadCount > 0 && (
                     <View
@@ -1924,7 +1929,7 @@ export default function ProfileScreen({
                   }
                   onDeleted={(postId) =>
                     setInterestPosts((prev) =>
-                      prev.filter((post) => post.id !== postId)
+                      prev.filter((post) => post.id !== postId),
                     )
                   }
                 />
@@ -1941,8 +1946,8 @@ export default function ProfileScreen({
                 ? 'Hosted'
                 : 'Attended'
               : user?.createdEvents?.includes(event.id)
-              ? 'Hosting'
-              : 'Attending';
+                ? 'Hosting'
+                : 'Attending';
 
             return (
               <PostCard

@@ -4,7 +4,7 @@
 // - Best-effort: never throws
 // - Uses React Native Firebase for native mobile analytics
 
-import { functions, auth } from '../services/firebase/config';
+import { functions, auth } from '../services/firebase';
 import logger from './logger';
 import {
   event as analyticsEvent,

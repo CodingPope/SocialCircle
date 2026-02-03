@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db } from '../../../services/firebase/config';
+import { db } from '../../../services/firebase';
 
 // Description: Store for business accounts, sponsored events, and analytics
 export const useBusinessStore = create((set) => ({

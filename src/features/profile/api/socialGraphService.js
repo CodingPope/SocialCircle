@@ -5,7 +5,7 @@ import {
   sendNotification,
   reportContent,
   functions,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import logger from '../../../lib/logger';
 
 const RETRY_DELAYS_MS = [0, 250, 1000];

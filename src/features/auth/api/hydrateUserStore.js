@@ -1,5 +1,5 @@
 // Description: Hydrate Zustand user store from Firestore on app launch
-import { db } from '../../../services/firebase/config';
+import { db } from '../../../services/firebase';
 import { useUserStore } from '../../profile';
 import { getNextOnboardingStep } from '../utils/onboardingRouter';
 

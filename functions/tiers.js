@@ -7,15 +7,17 @@ const USER_TIERS = Object.freeze({
 });
 
 const BUSINESS_TIERS = Object.freeze({
-  TIER1: 'tier1',
-  TIER2: 'tier2',
-  TIER3: 'tier3',
+  TIER_1_FREE: 'TIER_1_FREE',
+  TIER_2_GROWTH: 'TIER_2_GROWTH',
+  TIER_3_LANDMARK: 'TIER_3_LANDMARK',
+  TIER_4_ENTERPRISE: 'TIER_4_ENTERPRISE',
 });
 
 const BUSINESS_TIER_LABELS = Object.freeze({
-  [BUSINESS_TIERS.TIER1]: 'base',
-  [BUSINESS_TIERS.TIER2]: 'growth',
-  [BUSINESS_TIERS.TIER3]: 'landmark',
+  [BUSINESS_TIERS.TIER_1_FREE]: 'Free',
+  [BUSINESS_TIERS.TIER_2_GROWTH]: 'Growth',
+  [BUSINESS_TIERS.TIER_3_LANDMARK]: 'Landmark',
+  [BUSINESS_TIERS.TIER_4_ENTERPRISE]: 'Enterprise',
 });
 
 const USER_TIER_RANK = Object.freeze({
@@ -25,13 +27,16 @@ const USER_TIER_RANK = Object.freeze({
 });
 
 const BUSINESS_TIER_RANK = Object.freeze({
-  [BUSINESS_TIERS.TIER1]: 1,
-  [BUSINESS_TIERS.TIER2]: 2,
-  [BUSINESS_TIERS.TIER3]: 3,
+  [BUSINESS_TIERS.TIER_1_FREE]: 1,
+  [BUSINESS_TIERS.TIER_2_GROWTH]: 2,
+  [BUSINESS_TIERS.TIER_3_LANDMARK]: 3,
+  [BUSINESS_TIERS.TIER_4_ENTERPRISE]: 4,
 });
 
 function normalizeUserTier(value) {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = String(value || '')
+    .trim()
+    .toLowerCase();
   if (!raw) return null;
   if (raw === USER_TIERS.BASIC || raw === 'free') return USER_TIERS.BASIC;
   if (raw === USER_TIERS.PAID || raw === 'premium' || raw === 'pro')
@@ -41,14 +46,30 @@ function normalizeUserTier(value) {
 }
 
 function normalizeBusinessTier(value) {
-  const raw = String(value || '').trim().toLowerCase();
+  const raw = String(value || '').trim();
   if (!raw) return null;
-  if (raw === BUSINESS_TIERS.TIER1 || raw === '1' || raw === 'base')
-    return BUSINESS_TIERS.TIER1;
-  if (raw === BUSINESS_TIERS.TIER2 || raw === '2' || raw === 'growth')
-    return BUSINESS_TIERS.TIER2;
-  if (raw === BUSINESS_TIERS.TIER3 || raw === '3' || raw === 'landmark')
-    return BUSINESS_TIERS.TIER3;
+  // Accept exact matches
+  if (raw === BUSINESS_TIERS.TIER_1_FREE) return BUSINESS_TIERS.TIER_1_FREE;
+  if (raw === BUSINESS_TIERS.TIER_2_GROWTH) return BUSINESS_TIERS.TIER_2_GROWTH;
+  if (raw === BUSINESS_TIERS.TIER_3_LANDMARK)
+    return BUSINESS_TIERS.TIER_3_LANDMARK;
+  if (raw === BUSINESS_TIERS.TIER_4_ENTERPRISE)
+    return BUSINESS_TIERS.TIER_4_ENTERPRISE;
+  // Accept legacy/alternate formats
+  const lower = raw.toLowerCase();
+  if (
+    lower === 'tier1' ||
+    lower === '1' ||
+    lower === 'free' ||
+    lower === 'base'
+  )
+    return BUSINESS_TIERS.TIER_1_FREE;
+  if (lower === 'tier2' || lower === '2' || lower === 'growth')
+    return BUSINESS_TIERS.TIER_2_GROWTH;
+  if (lower === 'tier3' || lower === '3' || lower === 'landmark')
+    return BUSINESS_TIERS.TIER_3_LANDMARK;
+  if (lower === 'tier4' || lower === '4' || lower === 'enterprise')
+    return BUSINESS_TIERS.TIER_4_ENTERPRISE;
   return null;
 }
 
@@ -65,9 +86,9 @@ function deriveUserTier(user = {}) {
 
 function deriveBusinessTier(business = {}) {
   const explicit = normalizeBusinessTier(
-    business.businessTier || business.tier || business.plan
+    business.tier || business.businessTier || business.plan,
   );
-  return explicit || BUSINESS_TIERS.TIER1;
+  return explicit || BUSINESS_TIERS.TIER_1_FREE;
 }
 
 function hasUserTier(user, requiredTier) {
@@ -78,11 +99,80 @@ function hasUserTier(user, requiredTier) {
 
 function hasBusinessTier(business, requiredTier) {
   const actual = deriveBusinessTier(business);
-  const required = normalizeBusinessTier(requiredTier) || BUSINESS_TIERS.TIER1;
+  const required =
+    normalizeBusinessTier(requiredTier) || BUSINESS_TIERS.TIER_1_FREE;
   return (
-    (BUSINESS_TIER_RANK[actual] || 0) >=
-    (BUSINESS_TIER_RANK[required] || 0)
+    (BUSINESS_TIER_RANK[actual] || 0) >= (BUSINESS_TIER_RANK[required] || 0)
   );
+}
+
+/**
+ * Get business capability limits based on tier
+ * Matches client-side businessCapabilities.js
+ */
+function getBusinessCapabilities(tier) {
+  const normalized = normalizeBusinessTier(tier) || BUSINESS_TIERS.TIER_1_FREE;
+
+  switch (normalized) {
+    case BUSINESS_TIERS.TIER_1_FREE:
+      return {
+        monthlyEventLimit: 2,
+        monthlyPerkLimit: 0,
+        maxActiveEvents: 1,
+        maxActivePerks: 0,
+        canCreatePerk: false,
+        interestSlots: 2,
+        categorySlots: 0,
+        maxTargetRadiusMiles: 3,
+        analyticsLevel: 'basic',
+        interestsMustBelongToSelectedCategories: false,
+      };
+
+    case BUSINESS_TIERS.TIER_2_GROWTH:
+      return {
+        monthlyEventLimit: 5,
+        monthlyPerkLimit: 5,
+        maxActiveEvents: 3,
+        maxActivePerks: 2,
+        canCreatePerk: true,
+        interestSlots: 10,
+        categorySlots: 1,
+        maxTargetRadiusMiles: 8,
+        analyticsLevel: 'full',
+        interestsMustBelongToSelectedCategories: false,
+      };
+
+    case BUSINESS_TIERS.TIER_3_LANDMARK:
+      return {
+        monthlyEventLimit: Infinity,
+        monthlyPerkLimit: Infinity,
+        maxActiveEvents: 10,
+        maxActivePerks: 10,
+        canCreatePerk: true,
+        interestSlots: Infinity,
+        categorySlots: 3,
+        maxTargetRadiusMiles: 25,
+        analyticsLevel: 'advanced',
+        interestsMustBelongToSelectedCategories: true,
+      };
+
+    case BUSINESS_TIERS.TIER_4_ENTERPRISE:
+      return {
+        monthlyEventLimit: Infinity,
+        monthlyPerkLimit: Infinity,
+        maxActiveEvents: Infinity,
+        maxActivePerks: Infinity,
+        canCreatePerk: true,
+        interestSlots: Infinity,
+        categorySlots: Infinity,
+        maxTargetRadiusMiles: 100,
+        analyticsLevel: 'advanced',
+        interestsMustBelongToSelectedCategories: true,
+      };
+
+    default:
+      return getBusinessCapabilities(BUSINESS_TIERS.TIER_1_FREE);
+  }
 }
 
 module.exports = {
@@ -97,4 +187,5 @@ module.exports = {
   deriveBusinessTier,
   hasUserTier,
   hasBusinessTier,
+  getBusinessCapabilities,
 };

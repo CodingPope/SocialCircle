@@ -40,7 +40,7 @@ const InitialSplash = ({ visible }) => {
           if (finished) {
             runOnJS(setShouldRender)(false);
           }
-        }
+        },
       );
       return;
     }
@@ -59,31 +59,31 @@ const InitialSplash = ({ visible }) => {
         withTiming(0.97, {
           duration: 1600,
           easing: Easing.inOut(Easing.ease),
-        })
+        }),
       ),
       -1,
-      true
+      true,
     );
     haloOpacity.value = withRepeat(
       withSequence(
         withTiming(0.45, { duration: 1600 }),
-        withTiming(0.15, { duration: 1600 })
+        withTiming(0.15, { duration: 1600 }),
       ),
       -1,
-      true
+      true,
     );
     haloScale.value = withRepeat(
       withSequence(
         withTiming(1.2, { duration: 1600 }),
-        withTiming(1, { duration: 1600 })
+        withTiming(1, { duration: 1600 }),
       ),
       -1,
-      true
+      true,
     );
     shimmerProgress.value = withRepeat(
       withTiming(1, { duration: 4600, easing: Easing.linear }),
       -1,
-      false
+      false,
     );
   }, [visible, opacity, haloOpacity, haloScale, logoScale, shimmerProgress]);
 

@@ -6,7 +6,7 @@ import {
   db,
   serverTimestamp,
   functions as firebaseFunctions,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import { useUserStore } from '../../profile';
 import { EAS_PROJECT_ID } from '@env';
 import logger from '../../../lib/logger';

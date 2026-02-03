@@ -1,4 +1,4 @@
-import { db, serverTimestamp, Timestamp } from '../../../services/firebase/config';
+import { db, serverTimestamp, Timestamp } from '../../../services/firebase';
 
 function coerceTimestamp(value) {
   if (!value) return null;

@@ -14,22 +14,20 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Linking,
   ScrollView,
   Animated,
   Easing,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, {
+  Marker,
+  PROVIDER_GOOGLE,
+  PROVIDER_DEFAULT,
+} from 'react-native-maps';
 import * as Location from 'expo-location';
-import { db } from '../../../services/firebase/config';
-import {
-  collection,
-  query,
-  onSnapshot,
-  where,
-  doc,
-  getDoc,
-} from '../../../services/firebase/firestoreCompat';
+import { db } from '../../../services/firebase';
+import { doc, getDoc } from '../../../services/firebase/firestoreCompat';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
 import CreateEventScreen from './CreateEventScreen';
@@ -43,6 +41,13 @@ import { Ionicons } from '@expo/vector-icons';
 import BlipMarker from './map/BlipMarker';
 import BlipPreview from './map/BlipPreview';
 import { CategoryMarker } from './map/CategoryMarker';
+
+// Extracted components (available for progressive migration)
+// import MapTutorialOverlay from './map/MapTutorialOverlay';
+// import MapQuickDateFilters from './map/MapQuickDateFilters';
+// import CreateEventFAB from './map/CreateEventFAB';
+// import MapSearchBar from './map/MapSearchBar';
+
 import { Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -55,7 +60,6 @@ import {
 } from '../stores/discoveryLocationStore';
 import joinEvent from '../api/joinEventService';
 import { trackCardClick, trackOpenEvent } from '../../../lib/analytics';
-import { filterBlockedEvents } from '../utils/blockUtils';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import { darkMapStyle, lightMapStyle } from '../constants/mapStyles';
@@ -64,6 +68,7 @@ import {
   ensureForegroundPermission,
 } from '../utils/locationResolver';
 import { eventPassesGenderGate } from '../utils/genderUtils';
+import useDiscoveryFeed from '../hooks/useDiscoveryFeed';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const PREVIEW_WIDTH = Math.min(284, SCREEN_W - 16); // tighter footprint
@@ -99,9 +104,9 @@ const clampRadiusToDiscoveryBounds = (value) =>
       typeof value === 'number' && !Number.isNaN(value)
         ? value
         : DEFAULT_DISCOVERY_RADIUS_METERS,
-      MIN_DISCOVERY_RADIUS_METERS
+      MIN_DISCOVERY_RADIUS_METERS,
     ),
-    MAX_DISCOVERY_RADIUS_METERS
+    MAX_DISCOVERY_RADIUS_METERS,
   );
 
 const deriveRadiusFromRegion = (region) => {
@@ -121,7 +126,7 @@ const deriveRadiusFromRegion = (region) => {
 
 const buildRegionFromContext = (
   coords,
-  radiusMeters = DEFAULT_DISCOVERY_RADIUS_METERS
+  radiusMeters = DEFAULT_DISCOVERY_RADIUS_METERS,
 ) => {
   if (!coords) return null;
   const latDelta =
@@ -129,7 +134,7 @@ const buildRegionFromContext = (
     METERS_PER_DEGREE_LAT;
   const cosLat = Math.max(
     Math.cos((coords.latitude * Math.PI) / 180),
-    MIN_COS_LAT
+    MIN_COS_LAT,
   );
   const lngDelta = latDelta / cosLat;
   return {
@@ -155,7 +160,7 @@ export default function MapScreen() {
       customStyle: themeMode === 'dark' ? darkMapStyle : lightMapStyle,
       userInterfaceStyle: themeMode === 'dark' ? 'dark' : 'light',
     }),
-    [themeMode]
+    [themeMode],
   );
 
   const renderCustomDotMarker = useCallback(
@@ -166,7 +171,7 @@ export default function MapScreen() {
         {label ? <Text style={styles.dotLabel}>{label}</Text> : null}
       </View>
     ),
-    [styles]
+    [styles],
   );
 
   const tutorialKeys = useMemo(() => {
@@ -187,19 +192,18 @@ export default function MapScreen() {
 
   const userInterests = Array.isArray(user?.interests) ? user.interests : [];
 
-  const blockKey = useMemo(() => {
-    const blocked = Array.isArray(user?.blocked)
-      ? [...user.blocked].sort().join(',')
-      : '';
-    const blockedBy = Array.isArray(user?.blockedBy)
-      ? [...user.blockedBy].sort().join(',')
-      : '';
-    return `${blocked}|${blockedBy}`;
-  }, [user?.blocked, user?.blockedBy]);
-
-  const [events, setEvents] = useState([]);
-  const [optimisticEvents, setOptimisticEvents] = useState([]); // Description: Track optimistically created events
-  const [filteredEvents, setFilteredEvents] = useState([]);
+  const {
+    events,
+    filteredEvents,
+    optimisticEvents,
+    setOptimisticEvents,
+    selectedFilters,
+    setSelectedFilters,
+    initialLoading,
+    setInitialLoading,
+    fetchEventsInRegion,
+    applyFilters,
+  } = useDiscoveryFeed(user);
   const [newEventLocation, setNewEventLocation] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [region, setRegion] = useState(null);
@@ -240,29 +244,20 @@ export default function MapScreen() {
   const lastInteractionRef = useRef(Date.now());
   const skipNextRegionSyncRef = useRef(false);
   const setGpsLocation = useDiscoveryLocationStore(
-    (state) => state.setGpsLocation
+    (state) => state.setGpsLocation,
   );
   const setMapOverride = useDiscoveryLocationStore(
-    (state) => state.setMapOverride
+    (state) => state.setMapOverride,
   );
   const clearOverride = useDiscoveryLocationStore(
-    (state) => state.clearOverride
+    (state) => state.clearOverride,
   );
 
   const [isLocating, setIsLocating] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
 
   const [isSearchFocused, setIsSearchFocused] = useState(false); // ✅ TRACKS DROPDOWN STATE
 
-  const [selectedFilters, setSelectedFilters] = useState({
-    dateRange: null,
-    quickDatePreset: null,
-    interests: [],
-    genderOnly: null,
-  });
   const hasInitializedInterestsRef = useRef(false);
-
-  const unsubscribeRef = useRef(null);
 
   const markInteraction = useCallback(() => {
     lastInteractionRef.current = Date.now();
@@ -293,8 +288,8 @@ export default function MapScreen() {
         const nextTutorial = !progress.create
           ? 'create'
           : !progress.filter
-          ? 'filter'
-          : null;
+            ? 'filter'
+            : null;
         setActiveTutorial(null);
         setPendingTutorial(nextTutorial);
         setTutorialLayouts({ create: null, filter: null });
@@ -368,7 +363,7 @@ export default function MapScreen() {
     let subscription;
     if (typeof Dimensions?.addEventListener === 'function') {
       subscription = Dimensions.addEventListener('change', () =>
-        measureTutorialTarget(activeTutorial)
+        measureTutorialTarget(activeTutorial),
       );
     }
 
@@ -432,7 +427,7 @@ export default function MapScreen() {
       setPendingTutorial((prev) => prev ?? (queueFilter ? 'filter' : null));
       if (storageKey) {
         AsyncStorage.setItem(storageKey, 'true').catch((err) =>
-          console.warn('Map tutorial write failed:', err?.message || err)
+          console.warn('Map tutorial write failed:', err?.message || err),
         );
       }
     };
@@ -493,14 +488,14 @@ export default function MapScreen() {
     const fallback = {
       top: Math.max(
         Math.min(windowSize.height * 0.4, windowSize.height - 220),
-        16
+        16,
       ),
       left: Math.max(
         Math.min(
           (windowSize.width - tooltipWidth) / 2,
-          windowSize.width - tooltipWidth - 16
+          windowSize.width - tooltipWidth - 16,
         ),
-        16
+        16,
       ),
       width: tooltipWidth,
     };
@@ -513,23 +508,23 @@ export default function MapScreen() {
       const left = Math.max(
         Math.min(
           layout.x + layout.width - tooltipWidth,
-          windowSize.width - tooltipWidth - 16
+          windowSize.width - tooltipWidth - 16,
         ),
-        16
+        16,
       );
       return { top, left, width: tooltipWidth };
     }
 
     const top = Math.min(
       layout.y + layout.height + 18,
-      windowSize.height - 200
+      windowSize.height - 200,
     );
     const left = Math.max(
       Math.min(
         layout.x + layout.width - tooltipWidth,
-        windowSize.width - tooltipWidth - 16
+        windowSize.width - tooltipWidth - 16,
       ),
-      16
+      16,
     );
     return { top, left, width: tooltipWidth };
   }, [activeTutorial, tutorialLayouts]);
@@ -563,7 +558,7 @@ export default function MapScreen() {
         if (!snap.exists) {
           Alert.alert(
             'Event unavailable',
-            'This event may no longer be available.'
+            'This event may no longer be available.',
           );
           return;
         }
@@ -584,17 +579,17 @@ export default function MapScreen() {
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             },
-            400
+            400,
           );
         }
       } catch (err) {
         console.warn(
           '[MapScreen] Failed to open event from deep link',
-          err?.message || err
+          err?.message || err,
         );
       }
     },
-    [db]
+    [db],
   );
 
   useEffect(() => {
@@ -647,8 +642,13 @@ export default function MapScreen() {
         }
 
         const storedOverride = useDiscoveryLocationStore.getState().override;
+        // Description: Check if user.location has valid coordinates (not null values)
+        const userLocation =
+          user?.location?.latitude != null && user?.location?.longitude != null
+            ? user.location
+            : null;
         fallbackCoords =
-          gpsCoords || storedOverride?.coords || user?.location || null;
+          gpsCoords || storedOverride?.coords || userLocation || null;
 
         // If no location available, use downtown Denver as default (initial launch city)
         if (!fallbackCoords) {
@@ -661,7 +661,7 @@ export default function MapScreen() {
         const overrideRegion = storedOverride?.coords
           ? buildRegionFromContext(
               storedOverride.coords,
-              storedOverride.radiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS
+              storedOverride.radiusMeters || DEFAULT_DISCOVERY_RADIUS_METERS,
             )
           : null;
         const initialRegion = overrideRegion || {
@@ -692,31 +692,6 @@ export default function MapScreen() {
       }
     })();
   }, []);
-
-  useEffect(() => {
-    // Description: Clean up optimistic events that now exist in Firestore
-    const firestoreIds = new Set(events.map((e) => e.id));
-    setOptimisticEvents((prev) =>
-      prev.filter((opt) => !firestoreIds.has(opt.id) || opt._optimistic)
-    );
-  }, [events]);
-
-  useEffect(() => {
-    applyFilters(selectedFilters);
-  }, [applyFilters, selectedFilters]);
-
-  useEffect(() => {
-    setEvents((prev) => {
-      const filtered = filterBlockedEvents(prev, user);
-      if (
-        filtered.length === prev.length &&
-        filtered.every((event, idx) => event.id === prev[idx]?.id)
-      ) {
-        return prev;
-      }
-      return filtered;
-    });
-  }, [blockKey]);
 
   const extractTimestamp = (value) => {
     if (!value) return null;
@@ -770,182 +745,7 @@ export default function MapScreen() {
     return base.getTime();
   };
 
-  const applyFilters = useCallback(
-    (filters = {}) => {
-      // Description: Merge optimistic events with Firestore events (optimistic events take precedence)
-      const allEvents = [...events];
-      optimisticEvents.forEach((optEvent) => {
-        const existingIndex = allEvents.findIndex((e) => e.id === optEvent.id);
-        if (existingIndex >= 0) {
-          allEvents[existingIndex] = optEvent; // Replace with updated version
-        } else {
-          allEvents.push(optEvent); // Add new optimistic event
-        }
-      });
-
-      if (!Array.isArray(allEvents) || !allEvents.length) {
-        setFilteredEvents([]);
-        return;
-      }
-
-      const { dateRange, date, interests, genderOnly } = filters;
-      const now = Date.now();
-
-      const sourceEvents = filterBlockedEvents(allEvents, user);
-
-      let filtered = sourceEvents.filter((event) => {
-        if (!eventPassesGenderGate(event, user)) return false;
-        const eventEnd = getEventEndMs(event);
-        return eventEnd && eventEnd + 60 * 60 * 1000 > now;
-      });
-
-      if (dateRange?.start || dateRange?.end) {
-        const startMs = boundaryMsForIsoDate(
-          dateRange.start || dateRange.end,
-          'start'
-        );
-        const endMs = boundaryMsForIsoDate(
-          dateRange.end || dateRange.start,
-          'end'
-        );
-        filtered = filtered.filter((event) => {
-          const eventStart = getEventStartMs(event) ?? getEventEndMs(event);
-          if (!eventStart) return false;
-          if (startMs && eventStart < startMs) return false;
-          if (endMs && eventStart > endMs) return false;
-          return true;
-        });
-      } else if (date) {
-        filtered = filtered.filter((event) => {
-          const startMs = getEventStartMs(event);
-          if (!startMs) return false;
-          const eventDateStr = new Date(startMs).toISOString().split('T')[0];
-          return eventDateStr === date;
-        });
-      }
-
-      if (Array.isArray(interests) && interests.length > 0) {
-        const interestSet = new Set(
-          interests
-            .map((i) =>
-              (typeof i === 'string' ? i : i?.name || i?.id || '')
-                .toString()
-                .trim()
-                .toLowerCase()
-            )
-            .filter(Boolean)
-        );
-        filtered = filtered.filter((event) => {
-          const evInterest = (
-            typeof event.interest === 'string'
-              ? event.interest
-              : event.interest?.name || event.category || ''
-          )
-            .toString()
-            .trim()
-            .toLowerCase();
-          if (!evInterest) return false;
-          return interestSet.has(evInterest);
-        });
-      }
-
-      if (genderOnly) {
-        filtered = filtered.filter((event) => event.privacy === genderOnly);
-      }
-
-      setFilteredEvents(filtered);
-    },
-    [events, optimisticEvents, user]
-  );
-
-  const fetchEventsInRegion = async (region, isInitial = false) => {
-    if (!region) return;
-    const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
-
-    const multiplier = 1.5;
-    const latMin = latitude - (latitudeDelta * multiplier) / 2;
-    const latMax = latitude + (latitudeDelta * multiplier) / 2;
-    const lngMin = longitude - (longitudeDelta * multiplier) / 2;
-    const lngMax = longitude + (longitudeDelta * multiplier) / 2;
-
-    if (unsubscribeRef.current) unsubscribeRef.current();
-    const q = query(
-      collection(db, 'events'),
-      where('location.latitude', '>=', latMin),
-      where('location.latitude', '<=', latMax),
-      where('location.longitude', '>=', lngMin),
-      where('location.longitude', '<=', lngMax),
-      // Server-side: exclude soft-deleted events
-      where('isDeleted', '==', false)
-    );
-
-    return new Promise((resolve) => {
-      unsubscribeRef.current = onSnapshot(
-        q,
-        (snap) => {
-          const nowMs = Date.now();
-          const regionEvents = snap.docs
-            .map((doc) => ({ id: doc.id, ...doc.data() }))
-            // exclude soft-deleted
-            .filter((e) => e.isDeleted !== true)
-            // exclude expired (date + 1h)
-            .filter((event) => {
-              let eventTime = null;
-              if (event.endAt) {
-                if (event.endAt.toDate)
-                  eventTime = event.endAt.toDate().getTime();
-                else if (event.endAt.seconds)
-                  eventTime = event.endAt.seconds * 1000;
-              } else if (event.date) {
-                if (event.date.toDate)
-                  eventTime = event.date.toDate().getTime();
-                else if (event.date.seconds)
-                  eventTime = event.date.seconds * 1000;
-                else if (event.date instanceof Date)
-                  eventTime = event.date.getTime();
-              }
-              return eventTime && eventTime + 60 * 60 * 1000 > nowMs;
-            });
-          const visibleRegionEvents = filterBlockedEvents(regionEvents, user);
-          setEvents(visibleRegionEvents);
-          applyFilters(selectedFilters);
-
-          if (isInitial) {
-            setInitialLoading(false);
-          }
-          resolve();
-        },
-        (error) => {
-          if (error?.code === 'permission-denied') {
-            setEvents([]);
-            try {
-              unsubscribeRef.current && unsubscribeRef.current();
-            } catch {}
-            // also register global once for logout cleanup
-            try {
-              if (!global.unsubscribeAllListeners)
-                global.unsubscribeAllListeners = [];
-              if (unsubscribeRef.current)
-                global.unsubscribeAllListeners.push(unsubscribeRef.current);
-            } catch {}
-            if (isInitial) setInitialLoading(false);
-            resolve();
-            return;
-          }
-          console.error('Map events listener error:', error);
-          if (isInitial) setInitialLoading(false);
-          resolve();
-        }
-      );
-      // Track globally for general case
-      try {
-        if (!global.unsubscribeAllListeners)
-          global.unsubscribeAllListeners = [];
-        if (unsubscribeRef.current)
-          global.unsubscribeAllListeners.push(unsubscribeRef.current);
-      } catch {}
-    });
-  };
+  // Note: applyFilters is provided by useDiscoveryFeed hook
 
   const handleRegionChangeComplete = (newRegion) => {
     markInteraction();
@@ -1094,8 +894,8 @@ export default function MapScreen() {
           const attendeeCount = Array.isArray(ev?.attendees)
             ? ev.attendees.length
             : typeof ev?.attendeesCount === 'number'
-            ? ev.attendeesCount
-            : 0;
+              ? ev.attendeesCount
+              : 0;
           const badgeOffsetX = attendeeCount > 0 ? BADGE_ANCHOR_OFFSET : 0;
           const badgeOffsetY = attendeeCount > 0 ? BADGE_VERTICAL_OFFSET : 0;
           const anchorX = pt.x - badgeOffsetX;
@@ -1130,7 +930,7 @@ export default function MapScreen() {
           const top = clamp(
             idealTop + PREVIEW_VERTICAL_GAP,
             minTop,
-            SCREEN_H - PREVIEW_HEIGHT - 100
+            SCREEN_H - PREVIEW_HEIGHT - 100,
           );
           const pointerXClamped = clamp(pointerX, 6, PREVIEW_WIDTH - 6);
 
@@ -1149,7 +949,10 @@ export default function MapScreen() {
           anchors.push({ x: anchorX, y: anchorY });
           const miles = milesBetween(
             { latitude, longitude },
-            { latitude: ev.location.latitude, longitude: ev.location.longitude }
+            {
+              latitude: ev.location.latitude,
+              longitude: ev.location.longitude,
+            },
           );
           const distanceText =
             typeof miles === 'number' ? `${miles.toFixed(1)} mi` : '';
@@ -1264,7 +1067,7 @@ export default function MapScreen() {
         };
       }
     },
-    [user, navigation]
+    [user, navigation],
   );
 
   const handleMapLongPress = async (e) => {
@@ -1272,7 +1075,7 @@ export default function MapScreen() {
     const coordinate = e.nativeEvent.coordinate;
     try {
       const res = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${coordinate.latitude},${coordinate.longitude}&key=${GOOGLE_MAPS_API_KEY}`
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${coordinate.latitude},${coordinate.longitude}&key=${GOOGLE_MAPS_API_KEY}`,
       );
       const json = await res.json();
       const address = json.results?.[0]?.formatted_address || 'Unknown address';
@@ -1325,7 +1128,7 @@ export default function MapScreen() {
         setSelectedEvent(event);
       }
     },
-    [ensureSnippets]
+    [ensureSnippets],
   );
 
   const markerColors = useMemo(
@@ -1345,7 +1148,7 @@ export default function MapScreen() {
             visited: '#FF7F50',
             default: '#E74C3C',
           },
-    [theme.isDark]
+    [theme.isDark],
   );
 
   const getMarkerColor = useCallback(
@@ -1356,7 +1159,7 @@ export default function MapScreen() {
       if (event.isVisited) return markerColors.visited;
       return markerColors.default;
     },
-    [markerColors]
+    [markerColors],
   );
 
   const syncDiscoveryLocationFromRegion = useCallback(
@@ -1372,7 +1175,7 @@ export default function MapScreen() {
         source,
       });
     },
-    [setMapOverride]
+    [setMapOverride],
   );
 
   const handlePlaceSelect = (data, details) => {
@@ -1391,7 +1194,7 @@ export default function MapScreen() {
       syncDiscoveryLocationFromRegion(
         newRegion,
         'search',
-        data?.description || details?.formatted_address || null
+        data?.description || details?.formatted_address || null,
       );
       if (Platform.OS === 'android') setIsSearchFocused(false); // ✅ close overlay
     }
@@ -1407,6 +1210,25 @@ export default function MapScreen() {
     markInteraction();
     setIsLocating(true);
     try {
+      const granted = await ensureForegroundPermission();
+      if (!granted) {
+        Alert.alert(
+          'Location Needed',
+          'Turn on location in Settings to center the map near you.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Open Settings',
+              onPress: () =>
+                Platform.OS === 'ios'
+                  ? Linking.openURL('app-settings:')
+                  : Linking.openSettings?.(),
+            },
+          ],
+        );
+        return;
+      }
+
       const location = await Location.getCurrentPositionAsync({});
       const userRegion = {
         latitude: location.coords.latitude,
@@ -1421,8 +1243,9 @@ export default function MapScreen() {
       clearOverride();
     } catch {
       Alert.alert('Error', 'Unable to get your location.');
+    } finally {
+      setIsLocating(false);
     }
-    setIsLocating(false);
   };
 
   const formatDateForFilter = (dateObj) => {
@@ -1487,7 +1310,7 @@ export default function MapScreen() {
               (typeof item === 'string' ? item : item?.name || item?.id || '')
                 .toString()
                 .trim()
-                .toLowerCase()
+                .toLowerCase(),
             )
             .filter(Boolean)
             .sort()
@@ -1715,6 +1538,9 @@ export default function MapScreen() {
         <MapView
           ref={mapRef}
           style={styles.map}
+          provider={
+            Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT
+          }
           region={region}
           onRegionChange={handleRegionChange}
           onRegionChangeComplete={handleRegionChangeComplete}
@@ -1880,7 +1706,7 @@ export default function MapScreen() {
             if (!event) {
               // Remove failed optimistic event
               setOptimisticEvents((prev) =>
-                prev.filter((e) => e.id !== tempId)
+                prev.filter((e) => e.id !== tempId),
               );
               applyFilters(selectedFilters);
               return;

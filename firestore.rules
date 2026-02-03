@@ -42,7 +42,11 @@ service cloud.firestore {
         )) &&
         (!data.keys().hasAny(['requests']) || (data.requests is list && data.requests.size() == 0)) &&
         (!data.keys().hasAny(['waitlist']) || (data.waitlist is list && data.waitlist.size() == 0)) &&
-        (!data.keys().hasAny(['isDeleted']) || data.isDeleted != true);
+        (!data.keys().hasAny(['isDeleted']) || data.isDeleted != true) &&
+        // If businessId is a non-null string, hostType must be 'BUSINESS'; allow null/missing businessId for regular users
+        (!data.keys().hasAny(['businessId']) || data.businessId == null || (
+          data.businessId is string && data.keys().hasAny(['hostType']) && data.hostType == 'BUSINESS'
+        ));
     }
 
     function eventOwnerUnchanged() {
@@ -50,7 +54,12 @@ service cloud.firestore {
     }
     function isAttendee(e) { return signedIn() && (request.auth.uid in (e.data.attendees == null ? [] : e.data.attendees)); }
     function isValidDeviceToken(t) {
-      return t == null || (t is string && t != '' && t.matches('^ExponentPushToken.*'));
+      // Allow null, missing, empty string, or valid ExponentPushToken
+      return t == null || t == '' || (t is string && t.matches('^ExponentPushToken.*'));
+    }
+    function deviceTokenValid(data) {
+      // If deviceToken key is not present, it's valid (allows updates that don't touch token)
+      return !data.keys().hasAny(['deviceToken']) || isValidDeviceToken(data.deviceToken);
     }
     function allowUserSubcollection(uid, subPath) {
       return isOwner(uid) &&
@@ -172,7 +181,9 @@ service cloud.firestore {
         ]);
 
       // Owners can update their profile, but not restricted fields
-      allow update: if isOwner(uid) && isValidDeviceToken(request.resource.data.deviceToken) &&
+      // Note: deviceTokenValid checks the incoming data, not requiring existing token to be valid
+      allow update: if isOwner(uid) &&
+        deviceTokenValid(request.resource.data) &&
         !userRestrictedKeysChanged() &&
         blockedByUnchanged();
 
@@ -197,7 +208,13 @@ service cloud.firestore {
 
     match /events/{eventId} {
       allow read: if signedIn();
-      allow create: if validEventCreate();
+      // Business events are server-created only; block client if hostType == 'BUSINESS'
+      // Note: If hostType is not present or is null, allow creation (regular user event)
+      allow create: if validEventCreate() && (
+        !request.resource.data.keys().hasAny(['hostType']) ||
+        request.resource.data.hostType == null ||
+        request.resource.data.hostType != 'BUSINESS'
+      );
 
       // Host-initiated updates
       allow update: if isEventHost(resource) && eventOwnerUnchanged();
@@ -317,11 +334,23 @@ service cloud.firestore {
         allow write: if false; // managed via Admin SDK/Cloud Functions only
       }
 
+      // Child: serviceAreas (for SERVICE_AREA type businesses)
+      match /serviceAreas/{areaId} {
+        allow read: if true;
+        allow write: if false; // managed via Admin SDK/Cloud Functions only
+      }
+
       // Child: offers (future)
       match /offers/{offerId} {
         allow read: if true;
         allow write: if false; // managed via Admin SDK/Cloud Functions only
       }
+    }
+
+    // Perks: server-managed, tier-gated creation
+    match /perks/{perkId} {
+      allow read: if true; // Public discovery
+      allow write: if false; // managed via Admin SDK/Cloud Functions only
     }
 
     // Business tiers: computed, server-only writes

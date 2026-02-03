@@ -36,7 +36,7 @@ import {
   softDeleteComment,
   toMillis,
 } from '../api/interestPostService';
-import { reportContent } from '../../../services/firebase/config';
+import { reportContent } from '../../../services/firebase';
 import { useUserStore } from '../../profile/stores/userStore';
 import smileDefault from '../../../../assets/smileDefault.png';
 import { event as trackEvent } from '../../../services/analyticsService';

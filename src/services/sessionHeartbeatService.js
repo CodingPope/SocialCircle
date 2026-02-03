@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { serverTimestamp } from '../services/firebase/config';
+import { serverTimestamp } from '../services/firebase';
 import { mergeUserFields } from '../features/profile/api/userService';
 import { event as analyticsEvent } from './analyticsService';
 import { trackSessionStart } from '../lib/analytics';

@@ -1,7 +1,8 @@
-// src/services/firebase/config.js
+// src/services/firebase.js
 // Description: React Native Firebase configuration using native modules
 
-// React Native Firebase native modules
+// Description: Initialize Firebase app first
+import '@react-native-firebase/app';
 import nativeAuth from '@react-native-firebase/auth';
 import firestore from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
@@ -9,38 +10,20 @@ import storage from '@react-native-firebase/storage';
 import appCheck from '@react-native-firebase/app-check';
 import logger from '../../lib/logger';
 import { Alert, Platform } from 'react-native';
+import {
+  env,
+  APP_CHECK_DISABLED,
+  isDevBuild,
+} from './config/env';
+import initAppCheck from './config/appCheck';
+
+const {
+  USE_FIREBASE_EMULATORS,
+  FIREBASE_EMULATOR_HOST,
+  FORCE_FIREBASE_APPCHECK_DEBUG,
+} = env;
 
 logger.debug('[Firebase] Initializing configuration');
-
-// Description: Safely import environment variables with fallback
-let USE_FIREBASE_EMULATORS = '0';
-let FIREBASE_EMULATOR_HOST = '';
-let FORCE_FIREBASE_APPCHECK_DEBUG = '0';
-let DISABLE_FIREBASE_APPCHECK =
-  typeof __DEV__ !== 'undefined' && __DEV__ ? '1' : '0';
-try {
-  const envVars = require('@env');
-  if (envVars && envVars.USE_FIREBASE_EMULATORS) {
-    USE_FIREBASE_EMULATORS = envVars.USE_FIREBASE_EMULATORS;
-  }
-  if (envVars && envVars.FIREBASE_EMULATOR_HOST) {
-    FIREBASE_EMULATOR_HOST = envVars.FIREBASE_EMULATOR_HOST;
-  }
-  if (envVars && envVars.FORCE_FIREBASE_APPCHECK_DEBUG) {
-    FORCE_FIREBASE_APPCHECK_DEBUG = envVars.FORCE_FIREBASE_APPCHECK_DEBUG;
-  }
-  if (envVars && envVars.DISABLE_FIREBASE_APPCHECK) {
-    DISABLE_FIREBASE_APPCHECK = envVars.DISABLE_FIREBASE_APPCHECK;
-  }
-  logger.debug('[Firebase] Environment variables loaded');
-} catch (error) {
-  // @env module not available in production builds, use default
-  logger.debug(
-    '[Firebase] Environment variables not available, using defaults'
-  );
-}
-
-const isDevBuild = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
 
 let authInstance = null;
 
@@ -53,7 +36,7 @@ const initializeAuthSingleton = () => {
   if (typeof nativeAuth !== 'function') {
     console.error('[Firebase Auth] Native module not linked');
     logger.error(
-      '[Firebase Auth] Native module not linked. @react-native-firebase/auth is required.'
+      '[Firebase Auth] Native module not linked. @react-native-firebase/auth is required.',
     );
     return null;
   }
@@ -63,11 +46,11 @@ const initializeAuthSingleton = () => {
   } catch (error) {
     logger.error(
       '[Firebase Auth] Failed to initialize:',
-      error?.message || 'Unknown error'
+      error?.message || 'Unknown error',
     );
     logger.error(
       '[Firebase Auth] Failed to initialize default instance:',
-      error?.message || error
+      error?.message || error,
     );
     authInstance = null;
   }
@@ -85,7 +68,7 @@ const resolveAuthInstance = (...args) => {
     } catch (error) {
       logger.warn(
         '[Firebase Auth] auth() call failed, using singleton:',
-        error?.message || error
+        error?.message || error,
       );
     }
   }
@@ -94,7 +77,7 @@ const resolveAuthInstance = (...args) => {
   if (fallback) return fallback;
 
   throw new Error(
-    '[Firebase Auth] Native module is unavailable. Did you install @react-native-firebase/auth and rebuild the app?'
+    '[Firebase Auth] Native module is unavailable. Did you install @react-native-firebase/auth and rebuild the app?',
   );
 };
 
@@ -183,7 +166,7 @@ const getCurrentFirebaseUser = () => {
     // Description: Fallback to authInstance (singleton)
     if (authInstance?.currentUser) {
       logger.debug(
-        `[Firebase] getCurrentFirebaseUser: found user via authInstance ${authInstance.currentUser.uid}`
+        `[Firebase] getCurrentFirebaseUser: found user via authInstance ${authInstance.currentUser.uid}`,
       );
       return authInstance.currentUser;
     }
@@ -251,7 +234,7 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
     }
 
     logger.debug(
-      `[Firebase] Token retrieved successfully for ${name} (length: ${idToken.length})`
+      `[Firebase] Token retrieved successfully for ${name} (length: ${idToken.length})`,
     );
 
     // Description: Decode JWT to inspect claims (for debugging)
@@ -263,20 +246,20 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
           logger.debug(
             `[Firebase] Token payload - aud: ${payload.aud}, user_id: ${
               payload.user_id
-            }, exp: ${new Date(payload.exp * 1000).toISOString()}`
+            }, exp: ${new Date(payload.exp * 1000).toISOString()}`,
           );
         }
       } catch (decodeErr) {
         logger.warn(
           '[Firebase] Could not decode token for inspection:',
-          decodeErr
+          decodeErr,
         );
       }
     }
   } catch (tokenError) {
     logger.warn(
       `[Firebase] Failed to refresh ID token before retrying callable ${name}:`,
-      tokenError?.message || tokenError
+      tokenError?.message || tokenError,
     );
     throw new Error('UNAUTHENTICATED: Authentication token refresh failed');
   }
@@ -291,7 +274,7 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
     } catch (tokenErr) {
       logger.warn(
         `[Firebase] Failed to get App Check token for ${name}:`,
-        tokenErr?.message || tokenErr
+        tokenErr?.message || tokenErr,
       );
     }
   }
@@ -319,7 +302,7 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
 
     const rawText = await response.text();
     logger.debug(
-      `[Firebase] Response status: ${response.status}, body length: ${rawText.length}`
+      `[Firebase] Response status: ${response.status}, body length: ${rawText.length}`,
     );
 
     let parsed = {};
@@ -329,12 +312,12 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
       } catch (parseError) {
         logger.warn(
           `[Firebase] Callable ${name} retry returned non-JSON payload`,
-          parseError?.message || parseError
+          parseError?.message || parseError,
         );
         // Don't expose HTML error pages - throw original error instead
         if (rawText.includes('<html>') || rawText.includes('<!DOCTYPE')) {
           throw new Error(
-            `HTTP ${response.status}: ${response.statusText || 'Server error'}`
+            `HTTP ${response.status}: ${response.statusText || 'Server error'}`,
           );
         }
         parsed = { result: rawText };
@@ -351,7 +334,7 @@ const callCallableWithManualFetch = async (name, payload, originalError) => {
   } catch (fetchError) {
     logger.warn(
       `[Firebase] Callable retry failed for ${name}:`,
-      fetchError?.message || fetchError
+      fetchError?.message || fetchError,
     );
     throw fetchError;
   }
@@ -365,14 +348,14 @@ const callCallable = async (name, payload) => {
     // If no user immediately, wait a bit in case auth is still initializing
     if (!user) {
       logger.debug(
-        `[Firebase] No immediate user for ${name}, waiting for auth...`
+        `[Firebase] No immediate user for ${name}, waiting for auth...`,
       );
       user = await waitForAuthUser(5000);
     }
 
     if (!user) {
       logger.warn(
-        `[Firebase] No user found for callable ${name} after waiting`
+        `[Firebase] No user found for callable ${name} after waiting`,
       );
       throw new Error('UNAUTHENTICATED: Please sign in to continue');
     }
@@ -388,7 +371,7 @@ const callCallable = async (name, payload) => {
     } catch (tokenError) {
       logger.warn(
         `[Firebase] Failed to refresh ID token before ${name}:`,
-        tokenError?.message || tokenError
+        tokenError?.message || tokenError,
       );
     }
 
@@ -399,7 +382,7 @@ const callCallable = async (name, payload) => {
       } catch (tokenError) {
         logger.warn(
           `[Firebase] Failed to prefetch App Check token before ${name}:`,
-          tokenError?.message || tokenError
+          tokenError?.message || tokenError,
         );
       }
     }
@@ -418,7 +401,7 @@ const callCallable = async (name, payload) => {
     logger.error(
       `[Firebase] Callable ${name} error:`,
       error?.code,
-      error?.message || error
+      error?.message || error,
     );
 
     // Description: If UNAUTHENTICATED, it might be a token issue - try manual retry
@@ -428,7 +411,7 @@ const callCallable = async (name, payload) => {
 
     // Description: Retry with manual fetch and explicit token
     logger.debug(
-      `[Firebase] Retrying ${name} with manual fetch and fresh token...`
+      `[Firebase] Retrying ${name} with manual fetch and fresh token...`,
     );
     return callCallableWithManualFetch(name, payload, error);
   }
@@ -447,7 +430,7 @@ if (__DEV__) {
     if (instanceForDev?.settings) {
       instanceForDev.settings.appVerificationDisabledForTesting = true;
       logger.info(
-        '🔧 [Firebase Auth] App verification disabled for development'
+        '🔧 [Firebase Auth] App verification disabled for development',
       );
     }
   } catch (error) {
@@ -459,153 +442,16 @@ if (__DEV__) {
 // Uses debug provider in dev, DeviceCheck (iOS) / Play Integrity (Android) in production
 // Reference: https://rnfirebase.io/app-check/usage
 let lastAlertedAppCheckToken = null;
-const APP_CHECK_DISABLED = DISABLE_FIREBASE_APPCHECK === '1';
-
-const logAppCheckDebugToken = (source, token) => {
-  if (!token) {
-    logger.warn(`[Firebase App Check] ${source} returned an empty token`);
-    return;
-  }
-
-  const lines = [
-    '🔑 ═══════════════════════════════════════════════════════════',
-    `🔑 APP CHECK DEBUG TOKEN (${source})`,
-    `🔑 ${token}`,
-    '🔑 ═══════════════════════════════════════════════════════════',
-    '🔑 Register this token at:',
-    '🔑 https://console.firebase.google.com/project/social-scene1/appcheck/apps',
-    '🔑 ═══════════════════════════════════════════════════════════',
-  ];
-
-  lines.forEach((line) => console.log(line));
-  logger.info(`[Firebase App Check] Debug token (${source}): ${token}`);
-
-  try {
-    if (lastAlertedAppCheckToken !== token && Alert?.alert) {
-      lastAlertedAppCheckToken = token;
-      Alert.alert('Firebase App Check Debug Token', `(${source})\n${token}`, [
-        {
-          text: 'Close',
-          style: 'cancel',
-        },
-      ]);
-    }
-  } catch (alertError) {
-    console.log(
-      '[Firebase App Check] Unable to show token alert:',
-      alertError?.message || alertError
-    );
-  }
-};
-
-const shouldUseDebugAppCheck =
-  isDevBuild ||
-  FORCE_FIREBASE_APPCHECK_DEBUG === '1' ||
-  USE_FIREBASE_EMULATORS === '1';
-
-const scheduleDebugTokenRequest = (reason, delayMs = 0) => {
-  setTimeout(() => {
-    try {
-      console.log(
-        `🔐 [Firebase App Check] Requesting debug token (${reason})...`
-      );
-      const request = appCheck().getToken(true);
-      if (!request?.then) {
-        console.log(
-          '🔑 [Firebase App Check] getToken returned non-promise value:',
-          request
-        );
-        logAppCheckDebugToken(`getToken(${reason})`, request?.token || request);
-        return;
-      }
-      request
-        .then((result) => {
-          console.log(
-            `🔐 [Firebase App Check] getToken resolved (${reason}):`,
-            result
-          );
-          logAppCheckDebugToken(`getToken(${reason})`, result?.token);
-        })
-        .catch((err) => {
-          console.log(`🔑 Error getting App Check token (${reason}):`, err);
-        });
-    } catch (err) {
-      console.log(`🔑 Exception requesting App Check token (${reason}):`, err);
-    }
-  }, delayMs);
-};
-
-if (APP_CHECK_DISABLED) {
-  logger.info(
-    '[Firebase App Check] Disabled via DISABLE_FIREBASE_APPCHECK=1 (skipping initialization)'
-  );
-} else if (shouldUseDebugAppCheck) {
-  try {
-    const debugModeSource = isDevBuild ? 'dev build' : 'forced override';
-    console.log(
-      `🔐 [Firebase App Check] Debug provider enabled (${debugModeSource})`
-    );
-    const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
-    rnfbProvider.configure({
-      android: {
-        provider: 'debug',
-        debugToken: process.env.FIREBASE_APPCHECK_DEBUG_TOKEN_ANDROID || 'auto',
-      },
-      apple: {
-        provider: 'debug',
-        debugToken: process.env.FIREBASE_APPCHECK_DEBUG_TOKEN_IOS || 'auto',
-      },
-    });
-    appCheck().initializeAppCheck({
-      provider: rnfbProvider,
-      isTokenAutoRefreshEnabled: true,
-    });
-    logger.info(
-      '🔐 [Firebase App Check] Initialized with debug provider (DEV)'
-    );
-
-    // Description: Force print the debug token for registration in Firebase Console
-    scheduleDebugTokenRequest('initial');
-    scheduleDebugTokenRequest('retry-2s', 2000);
-    scheduleDebugTokenRequest('retry-10s', 10000);
-    appCheck().onTokenChanged((tokenResult) => {
-      console.log('🔐 [Firebase App Check] onTokenChanged fired:', tokenResult);
-      if (tokenResult?.token) {
-        logAppCheckDebugToken('onTokenChanged', tokenResult.token);
-      }
-    });
-  } catch (error) {
-    logger.warn(
-      '[Firebase App Check] Failed to initialize debug provider:',
-      error
-    );
-  }
-} else {
-  try {
-    console.log('🔐 [Firebase App Check] Using native providers (prod mode)');
-    const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
-    rnfbProvider.configure({
-      android: {
-        provider: 'playIntegrity',
-      },
-      apple: {
-        provider: 'deviceCheck',
-      },
-    });
-    appCheck().initializeAppCheck({
-      provider: rnfbProvider,
-      isTokenAutoRefreshEnabled: true,
-    });
-    logger.info(
-      '🔐 [Firebase App Check] Initialized with native providers (PROD)'
-    );
-  } catch (error) {
-    logger.error(
-      '[Firebase App Check] Failed to initialize in production:',
-      error
-    );
-  }
-}
+// Initialize App Check via helper
+initAppCheck({
+  appCheck,
+  logger,
+  Alert,
+  APP_CHECK_DISABLED,
+  isDevBuild,
+  USE_FIREBASE_EMULATORS,
+  FORCE_FIREBASE_APPCHECK_DEBUG,
+});
 
 // Description: Enable Firestore offline persistence (required for React Native)
 // This must be called before any Firestore operations
@@ -643,7 +489,7 @@ export const getTimestampNow = () => {
     if (!loggedTimestampFallback) {
       logger.warn(
         '[Firebase] Timestamp.now unavailable, falling back to fromDate:',
-        error?.message || error
+        error?.message || error,
       );
       loggedTimestampFallback = true;
     }
@@ -661,7 +507,7 @@ export const getTimestampNow = () => {
   const now = Date.now();
   if (!loggedTimestampFallback) {
     logger.warn(
-      '[Firebase] Timestamp helpers missing, constructing plain timestamp'
+      '[Firebase] Timestamp helpers missing, constructing plain timestamp',
     );
     loggedTimestampFallback = true;
   }
@@ -729,7 +575,7 @@ export const uploadProfileImage = async (uid, imageFile) => {
   } catch (error) {
     logger.error(
       '[uploadProfileImage] Upload failed:',
-      error?.message || error
+      error?.message || error,
     );
     throw error;
   }
@@ -906,7 +752,7 @@ export const deleteEvent = async (eventId, userId) => {
   // Guard: ensure caller is signed in so callable receives auth context
   if (!auth().currentUser) {
     const err = new Error(
-      'User not authenticated. Please sign in and try again.'
+      'User not authenticated. Please sign in and try again.',
     );
     err.code = 'client/unauthenticated';
     throw err;
@@ -927,7 +773,7 @@ export const deleteEvent = async (eventId, userId) => {
       error.message?.toLowerCase?.().includes('unauthenticated')
     ) {
       const e = new Error(
-        'Delete failed: not authenticated. Please re-login and try again.'
+        'Delete failed: not authenticated. Please re-login and try again.',
       );
       e.code = 'client/unauthenticated';
       throw e;
@@ -943,7 +789,7 @@ export const reportContent = async (
   targetId,
   type,
   reason,
-  options = {}
+  options = {},
 ) => {
   try {
     // reporterId is ignored on server; use it only for local analytics if needed
@@ -978,7 +824,7 @@ export async function getUserEventsByIds(eventIds) {
       .where(firestore.FieldPath.documentId(), 'in', chunk)
       .get();
     allResults = allResults.concat(
-      snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
     );
   }
   // Exclude soft-deleted events client-side to avoid requiring a composite index

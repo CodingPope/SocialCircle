@@ -10,7 +10,7 @@ import {
   trackJoinEventSafe,
 } from '../../../services/analyticsService';
 import { trackRsvpYes, trackJoinEvent } from '../../../lib/analytics';
-import { callFirebaseFunction } from '../../../services/firebase/config';
+import { callFirebaseFunction } from '../../../services/firebase';
 import { canJoinEvent } from '../../../utils/tosHelper';
 
 // Safe no-op

@@ -1,160 +1,48 @@
----
-applyTo: '**'
----
+# Social Circle — Copilot Instructions (Repo-wide)
 
-# 🧠 Social Circle – Copilot Coding Instruction
+Primary reference: follow `/AGENTS.md` for workflow, commands, and definition of done.
 
-You're helping me build **Social Circle** — a mobile app designed for adults (ages 21–40+) to make friends and meet in person through short-term events. This is not a dating app. It's casual, interest-based, and time-limited. Think “Snap Map meets Meetup” — fast, map-first, and highly local. DO NOT CREATE UNNECESSARY MD FILES.
+## Non-negotiables
 
----
+- Mobile-only (iOS/Android). No browser globals (`window`, `document`, `localStorage`).
+- Do not add new dependencies or new build steps unless explicitly requested.
+- Do not create new `.md` files unless explicitly requested.
 
-## 🎯 App Mission
+## Stack (source of truth: package.json)
 
-- Enable people to create and join **in-person social events** within 3–7 days
-- Use a **map-first UI** for discovery and spontaneity
-- Prioritize **trust**, **real connection**, and **low social friction**
+- Expo (SDK 53), React Native
+- State: Zustand (and existing Context where already used)
+- Navigation: React Navigation
+- Backend: Firebase (Firestore/Auth/Storage)
+- Firebase on mobile MUST use `@react-native-firebase/*` modules.
 
----
+## Firebase rules
 
-## ⚙️ Tech Stack
+- In app runtime (`src/**`): use `@react-native-firebase/firestore`, `auth`, `storage`, etc.
+- Never use `firebase-admin` in mobile code.
+- Never introduce Firebase Web SDK syntax (`firebase/app`, `firebase/firestore`, `getFirestore`, etc.) into mobile code.
+- In Cloud Functions only (`functions/**`): use `firebase-admin` + `firebase-functions`.
 
-| Area       | Tool/Service                                   |
-| ---------- | ---------------------------------------------- |
-| Platform   | **iOS & Android ONLY** (React Native - no web) |
-| Frontend   | React Native (Expo)                            |
-| State Mgmt | Zustand or Context API                         |
-| Backend    | Firebase (Firestore)                           |
-| Auth       | Firebase Auth                                  |
-| Firebase   | @react-native-firebase (native modules)        |
-| Maps       | Google Maps API                                |
-| Storage    | Firebase Storage (images)                      |
-| Optional   | Cloud Functions, Mixpanel, Stripe              |
+## Navigation safety
 
-**IMPORTANT**: This is a **mobile-only app**. DO NOT use web SDK syntax or browser-specific APIs. Always use React Native Firebase native modules (@react-native-firebase/\*).
+- Never invent route names.
+- Confirm the screen exists in the active navigator before navigating.
+- If adding a screen, wire it into the correct navigator(s) and verify at least one real navigation path.
 
----
+## Performance guardrails (maps + feeds)
 
-## 📱 Main Screens
+- Use `FlatList` for feeds/lists; avoid giant `ScrollView`s.
+- Avoid nesting VirtualizedLists in ScrollViews.
+- Avoid expensive work in render; reduce unnecessary re-renders.
+- Be conservative with real-time listeners; always unsubscribe on unmount.
 
-### 🗺 Map (Home)
+## Data correctness
 
-- Press-and-hold to create event
-- Tap pin to view details
-- Pins colored by category or type (friends, trending, sponsored)
+- Treat Firestore data as untrusted: handle missing fields, nulls, deleted docs, and permission errors.
+- Prefer small diffs but complete behavior; don’t stop at “it compiles” if flows break.
 
-### 🔍 Discover Feed
+## Output expectations
 
-- Interest-based, trending, and friend-attended events
-- Scrollable cards with RSVP/Join buttons
-
-### 👥 My Circle
-
-- Events you're hosting or attending
-- Possibly a segmented view: Hosting | Attending | Past
-- Option for calendar integration
-
-### 👤 Profile
-
-- Bio, interests, profile picture, rating, badges
-- Event history (with highlights/photos)
-- Friends list (MVP version = simple)
-
-### 🔔 Notifications
-
-- RSVP alerts, chat messages, friend requests, new event suggestions
-
----
-
-## 🛠 Key Functional Requirements
-
-- **Firestore schema**:
-  - `users`, `events`, `chats`, `messages`, `categories`, `businesses`
-- **Event flow**:
-  - Join = add to attendees
-  - If event is full → show “Join Waitlist”
-  - Group chat created on first RSVP
-- **Events disappear from map** after their `endTime`
-- **Chats archive** after X days of inactivity or manual close
-- **Interests used to filter map + feed**
-
----
-
-## 🔐 Trust & Safety Features
-
-- Users rate hosts and events (1–5 stars)
-- Reporting system for events or people
-- Host controls: kick, block, close RSVPs
-- Profile verification system (basic for MVP: verified email or phone)
-
----
-
-## 💼 Business Logic (Modular / Phase 2+)
-
-- Business accounts = `user.type = "business"`
-- Must be verified + pay for visibility
-- Businesses can:
-  - Host sponsored events
-  - Pin their venue on the map
-  - Get analytics (views, RSVPs, interest data)
-- Tiered plans: Free (limited), Premium (highlighted, always-on pins)
-
----
-
-## 💡 Copilot Guidance
-
-**When writing code, always**:
-
-- Use **React Native Firebase (@react-native-firebase/\*)** native modules - NEVER web SDK
-- Suggest scalable Firestore structures (avoid tight coupling)
-- Modularize UI components (especially event cards, modals, pins, chats)
-- Use best React Native practices (accessibility, responsive design)
-- Optimize for fast user flows (3 taps or less from discovery to RSVP)
-- Prepare for future features (like filters, clustering, user roles)
-- Use comments like this:
-
-  ```js
-  // Description: [what this block does]
-  ```
-
-**Avoid**:
-
-- **Web SDK syntax** (firebase/app, firebase/firestore, etc.) - this is mobile-only
-- **Browser-specific APIs** (window, document, localStorage, etc.)
-- Hardcoding unless explicitly mocking or stubbing
-- Long, nested components – extract into reusables
-- Making assumptions about Firestore data without checking null/edge cases
-- UI-blocking logic on user flows (keep it responsive)
-
-**Firebase Best Practices**:
-
-- Always use native modules: `import firestore from '@react-native-firebase/firestore'`
-- Never use: `import { getFirestore } from 'firebase/firestore'` (web SDK)
-- Functions region is configured via deployment, not SDK calls
-- Use `functions().httpsCallable(name)` - region is auto-configured
-- App Check uses DeviceCheck (iOS) and Play Integrity (Android) - no web providers
-
-**Exception - Cloud Functions (server-side only)**:
-
-- Cloud Functions (`functions/` directory) use the **Admin SDK**, not React Native Firebase
-- Correct: `const admin = require('firebase-admin');`
-- Correct: `const db = admin.firestore();`
-- Never use web SDK or React Native Firebase in Cloud Functions
-
----
-
-## 🧪 Example Task Prompt to Use with Copilot
-
-> “Build an RSVP button component. When clicked, it should check if the event is full (based on `capacity` and `attendees` array). If not full, add the current user to `attendees` and navigate to the group chat. If full, show a toast saying 'Join Waitlist' and call a `joinWaitlist` function. Use Firestore for data updates and avoid unnecessary reads.”
-
----
-
-## ✅ Goal Reminder
-
-Social Circle is:
-
-- **Spontaneous**
-- **Friendly**
-- **Map-first**
-- **Focused on real-life socializing**
-
-Let’s build it clean, fast, and scalable.
+- Provide the exact code changes.
+- Briefly summarize what changed and what you verified (commands run and key flows checked).
+- Note any follow-ups or risks.

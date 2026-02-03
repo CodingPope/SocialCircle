@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, Button, Alert } from 'react-native';
-import { reportContent } from '../../../services/firebase/config';
+import { reportContent } from '../../../services/firebase';
 import { trackReportContent } from '../../../lib/analytics';
 
 export default function ProfileHeader({ currentUser, user, setMenuVisible }) {

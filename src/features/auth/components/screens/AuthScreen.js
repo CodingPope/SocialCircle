@@ -9,7 +9,7 @@ import {
   StyleSheet,
   Image,
 } from 'react-native';
-import { auth, db } from '../../../../services/firebase/config';
+import { auth, db } from '../../../../services/firebase';
 import {
   doc,
   setDoc,
@@ -462,6 +462,7 @@ export default function AuthScreen({ navigation, route }) {
             firstName: appleProfile.firstName || '',
             lastName: appleProfile.lastName || '',
             appleRelayEmail: appleProfile.appleRelayEmail,
+            appleAuthorizationCode: credential.authorizationCode || null,
             deviceToken: token || null,
             pushOptIn: !!token,
           });
@@ -530,14 +531,22 @@ export default function AuthScreen({ navigation, route }) {
         }
       }
     } catch (err) {
-      // expo-apple-authentication throws with code 'ERR_CANCELED' when user cancels
-      if (err && err.code === 'ERR_CANCELED') {
-        // user cancelled, don't alert
-      } else {
+      // expo-apple-authentication cancellation variants
+      const cancelCodes = [
+        'ERR_CANCELED',
+        'ERR_REQUEST_CANCELED',
+        'ERR_USER_CANCEL',
+        'ERR_APPLE_SIGNIN_CANCEL',
+      ];
+      const isCanceled =
+        (err && cancelCodes.includes(err.code)) ||
+        String(err?.message || '').toLowerCase().includes('cancel');
+      if (!isCanceled) {
         logAuthError(err, 'apple-signin', {});
         const { title, message } = getAuthErrorMessage(err, 'login');
         Alert.alert(title, message);
       }
+      // If canceled, swallow silently
     } finally {
       setLoading(false);
     }

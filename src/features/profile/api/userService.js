@@ -1,5 +1,5 @@
 // Description: Check for soft-deleted user by email and offer reactivation
-import { db, serverTimestamp } from '../../../services/firebase/config';
+import { db, serverTimestamp } from '../../../services/firebase';
 import { geohashForLocation } from 'geofire-common';
 import { track as trackClient } from '../../../lib/analytics';
 import { DEFAULT_BADGE } from '../utils/badgeConfig';
@@ -32,7 +32,7 @@ export async function findSoftDeletedUserByEmail(email) {
  * Reactivates a soft-deleted user account by resetting isDeleted and deletedAt, and optionally updating fields.
  * Also re-enables the Auth user if disabled (via a callable cloud function).
  */
-import { functions as firebaseFunctions } from '../../../services/firebase/config';
+import { functions as firebaseFunctions } from '../../../services/firebase';
 
 export async function reactivateUser(userId, updates = {}) {
   const userRef = db.collection('users').doc(userId);

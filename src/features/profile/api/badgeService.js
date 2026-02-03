@@ -1,6 +1,6 @@
 // Description: Badge management service for awarding, removing, and managing user badges
 
-import { db, arrayUnion, arrayRemove } from '../../../services/firebase/config';
+import { db, arrayUnion, arrayRemove } from '../../../services/firebase';
 import {
   getBadgeConfig,
   badgeExists,

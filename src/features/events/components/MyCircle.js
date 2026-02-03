@@ -29,7 +29,7 @@ import {
   orderBy,
   limit,
 } from '../../../services/firebase/firestoreCompat';
-import { db } from '../../../services/firebase/config';
+import { db } from '../../../services/firebase';
 import logger from '../../../lib/logger';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';

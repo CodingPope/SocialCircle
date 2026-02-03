@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { auth } from '../../../../services/firebase/config';
+import { auth } from '../../../../services/firebase';
 import logger from '../../../../lib/logger';
 
 export default function BusinessCircleScreen() {

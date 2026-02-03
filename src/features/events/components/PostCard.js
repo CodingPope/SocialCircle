@@ -27,7 +27,7 @@ import {
   reportContent,
   db,
   updateUserData,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { Video } from 'expo-video';
 import joinEvent from '../api/joinEventService';

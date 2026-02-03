@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { db } from '../../../../../services/firebase/config';
+import { db } from '../../../../../services/firebase';
 import { useUserStore } from '../../../../profile';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import {

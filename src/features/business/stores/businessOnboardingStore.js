@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { useSessionRole } from '../../profile/stores/sessionRoleStore';
-import { createOrUpdateBusiness } from '../../../services/firebase/config';
+import { createOrUpdateBusiness } from '../../../services/firebase';
 
 export const BUSINESS_ONBOARDING_STAGES = Object.freeze({
   INTRO: 'intro',

@@ -100,21 +100,17 @@ Track analytics_consent event
 ### 4. Edge Cases Handled
 
 1. **ATT Already Granted** (via Settings before app asked):
-
    - Auto-persist `analyticsOptIn: true`
 
 2. **ATT Already Denied/Restricted**:
-
    - Auto-persist `analyticsOptIn: false`
 
 3. **Android / Non-iOS Platforms**:
-
    - ATT hook returns `'unavailable'`
    - No native prompt shown
    - Falls back to existing behavior
 
 4. **Expo Go / Missing Module**:
-
    - Hook detects missing module
    - Returns `'unavailable'` status
    - No crashes or errors
@@ -144,7 +140,6 @@ Track analytics_consent event
 #### Device Testing:
 
 1. **Fresh Install Test**:
-
    - Delete app from device
    - Rebuild and install
    - Log in with new account
@@ -154,7 +149,6 @@ Track analytics_consent event
    - Check analytics events are logged
 
 2. **Deny Test**:
-
    - Fresh install again
    - Log in
    - Select "Ask App Not to Track"

@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   db,
   callFirebaseFunction,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 
 // Description: Zustand store for events, RSVP, waitlist, and event creation
 export const useEventStore = create(

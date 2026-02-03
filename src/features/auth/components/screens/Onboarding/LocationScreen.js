@@ -20,7 +20,7 @@ import {
 } from '../../../../../services/onboardingAnalyticsService';
 import { geohashForLocation } from 'geofire-common';
 import { mergeUserFields } from '../../../../profile/api/userService';
-import { serverTimestamp } from '../../../../../services/firebase/config';
+import { serverTimestamp } from '../../../../../services/firebase';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import Button from '../../../../../components/ui/Button';
 import { useTheme } from '../../../../../theme';
@@ -98,17 +98,10 @@ const createStyles = (theme) =>
       flex: 1,
       marginHorizontal: theme.spacing.sm / 2,
     },
-    skipButton: {
-      marginTop: theme.spacing.md,
-    },
   });
 
 export default function LocationScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
-  const [manualVisible, setManualVisible] = useState(false);
-  const [manualCity, setManualCity] = useState('');
-  const [manualZip, setManualZip] = useState('');
-  const [manualSaving, setManualSaving] = useState(false);
   const user = useUserStore((state) => state.user);
   const setUser = useUserStore((state) => state.setUser);
   const theme = useTheme();
@@ -147,7 +140,7 @@ export default function LocationScreen({ navigation }) {
       payload.location = coords;
       payload.coarseGeohash5 = computeCoarseHash5(
         coords.latitude,
-        coords.longitude
+        coords.longitude,
       );
     }
     if (city) payload.city = city;
@@ -176,8 +169,16 @@ export default function LocationScreen({ navigation }) {
       // Request location permission
       let { status } = await requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        // Permission denied -> show manual city/ZIP picker
-        setManualVisible(true);
+        // Permission denied -> log and allow skip
+        await logOnboardingStepComplete('location', {
+          method: 'gps_prompt',
+          granted: false,
+        });
+        Alert.alert(
+          'Location Permission Denied',
+          'You can enable location access later in Settings to discover local events.',
+        );
+        setLoading(false);
         return;
       }
       // Get current location
@@ -194,121 +195,25 @@ export default function LocationScreen({ navigation }) {
       // Description: Location is the last onboarding step - mark complete
       await completeOnboarding();
     } catch (err) {
-      // If GPS fails for any reason, allow manual fallback
+      // If GPS fails, log error and allow user to skip
       console.warn(
         '[Location] getCurrentPosition failed:',
-        err?.message || err
+        err?.message || err,
       );
-      setManualVisible(true);
-    } finally {
+      await logOnboardingStepComplete('location', {
+        method: 'gps_prompt',
+        granted: false,
+        error: err?.message,
+      });
+      Alert.alert(
+        'Location Error',
+        'Could not get your current location. You can enable it later in Settings.',
+      );
       setLoading(false);
     }
   };
 
   // Description: Skip location entirely and proceed to next screen (Apple Guideline 5.1.5 compliance)
-  const handleSkip = async () => {
-    try {
-      // Save that user was prompted but chose to skip
-      await mergeUserFields(user.uid, {
-        locationPromptedAt: serverTimestamp(),
-        deviceToken: user?.deviceToken ?? null,
-        pushOptIn: user?.pushOptIn ?? false,
-      });
-      setUser({
-        ...user,
-        locationPromptedAt: new Date(),
-      });
-      await logOnboardingStepComplete('location', {
-        method: 'skipped',
-        granted: false,
-      });
-      // Description: Location is the last onboarding step - mark complete
-      await completeOnboarding();
-    } catch (err) {
-      console.warn('[Location] Skip failed:', err);
-      // Still proceed even if save fails
-      await completeOnboarding();
-    }
-  };
-
-  const saveManual = async () => {
-    if (!manualCity && !manualZip) {
-      Alert.alert('Missing info', 'Please enter a city or ZIP code.');
-      return;
-    }
-    setManualSaving(true);
-    try {
-      const apiKey =
-        typeof GOOGLE_MAPS_API_KEY !== 'undefined' ? GOOGLE_MAPS_API_KEY : '';
-      const address = [manualCity, manualZip].filter(Boolean).join(' ');
-      if (!apiKey) throw new Error('Missing Google Maps API key');
-      const resp = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-          address
-        )}&key=${apiKey}`
-      );
-      const data = await resp.json();
-      if (data.status !== 'OK' || !data.results?.length) {
-        throw new Error(
-          'Could not resolve that location. Try a different city or ZIP.'
-        );
-      }
-      const result = data.results[0];
-      const loc = result.geometry?.location;
-      if (!loc || typeof loc.lat !== 'number' || typeof loc.lng !== 'number') {
-        throw new Error('Invalid geocoding response');
-      }
-
-      const cityComp =
-        (result.address_components || []).find((c) =>
-          c.types?.includes('locality')
-        ) ||
-        (result.address_components || []).find((c) =>
-          c.types?.includes('postal_town')
-        ) ||
-        (result.address_components || []).find((c) =>
-          c.types?.includes('administrative_area_level_2')
-        );
-      const zipComp = (result.address_components || []).find((c) =>
-        c.types?.includes('postal_code')
-      );
-      const resolvedCity = cityComp?.long_name || manualCity || null;
-      const resolvedZip = zipComp?.long_name || manualZip || null;
-
-      await saveLocation({
-        coords: { latitude: loc.lat, longitude: loc.lng, from: 'manual' },
-        city: resolvedCity || undefined,
-      });
-      await logOnboardingStepComplete('location', {
-        method: 'manual_entry',
-        granted: true,
-      });
-
-      // Optionally store the postal code as well
-      if (resolvedZip) {
-        try {
-          await mergeUserFields(user.uid, {
-            postalCode: resolvedZip,
-            deviceToken: user?.deviceToken ?? null,
-            pushOptIn: user?.pushOptIn ?? false,
-          });
-          setUser({ ...useUserStore.getState().user, postalCode: resolvedZip });
-        } catch {}
-      }
-
-      setManualVisible(false);
-      // Description: Location is the last onboarding step - mark complete
-      await completeOnboarding();
-    } catch (e) {
-      Alert.alert(
-        'Location Error',
-        e?.message || 'Failed to resolve city/ZIP.'
-      );
-    } finally {
-      setManualSaving(false);
-    }
-  };
-
   return (
     <AnimatedGradientBackground style={styles.container} variant='onboarding'>
       <View style={styles.overlay}>
@@ -324,70 +229,10 @@ export default function LocationScreen({ navigation }) {
           ) : (
             <>
               <Button title='Share My Location' onPress={handleGetLocation} />
-              <View style={styles.skipButton}>
-                <Button
-                  title='Skip for Now'
-                  variant='secondary'
-                  onPress={handleSkip}
-                />
-              </View>
             </>
           )}
         </View>
       </View>
-
-      {/* Manual city/ZIP fallback */}
-      <Modal
-        visible={manualVisible}
-        transparent
-        animationType='slide'
-        onRequestClose={() => setManualVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Enter Your City or ZIP</Text>
-            <TextInput
-              placeholder='City (e.g., Chicago)'
-              value={manualCity}
-              onChangeText={setManualCity}
-              style={styles.input}
-              autoCapitalize='words'
-              returnKeyType='next'
-              placeholderTextColor={theme.colors.neutral600}
-              keyboardAppearance={keyboardAppearance}
-            />
-            <TextInput
-              placeholder='ZIP (optional)'
-              value={manualZip}
-              onChangeText={setManualZip}
-              style={styles.input}
-              keyboardType='number-pad'
-              returnKeyType='done'
-              placeholderTextColor={theme.colors.neutral600}
-              keyboardAppearance={keyboardAppearance}
-            />
-            {manualSaving ? (
-              <ActivityIndicator size='small' color={theme.colors.primary} />
-            ) : (
-              <View style={styles.modalButtons}>
-                <View style={styles.modalButtonSpacing}>
-                  <Button
-                    title='Skip'
-                    variant='secondary'
-                    onPress={() => {
-                      setManualVisible(false);
-                      handleSkip();
-                    }}
-                  />
-                </View>
-                <View style={styles.modalButtonSpacing}>
-                  <Button title='Save' onPress={saveManual} />
-                </View>
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
     </AnimatedGradientBackground>
   );
 }

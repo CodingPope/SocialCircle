@@ -1,4 +1,4 @@
-import { functions } from '../../../services/firebase/config';
+import { functions } from '../../../services/firebase';
 
 export async function blockUser(targetUid) {
   if (!targetUid) throw new Error('Missing targetUid');

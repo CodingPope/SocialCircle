@@ -1,6 +1,6 @@
 // Description: Zustand store for notifications (subscribe, mark as read, soft delete)
 import { create } from 'zustand';
-import { db, serverTimestamp } from '../../../services/firebase/config';
+import { db, serverTimestamp } from '../../../services/firebase';
 import logger from '../../../lib/logger';
 
 export const useNotificationStore = create((set, get) => ({

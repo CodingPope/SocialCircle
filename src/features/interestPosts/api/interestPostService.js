@@ -23,7 +23,7 @@ import {
   db,
   storage,
   getTimestampNow,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import {
   interpretStorageError,
   logStorageDiagnostic,

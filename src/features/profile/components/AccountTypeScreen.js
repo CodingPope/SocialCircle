@@ -19,7 +19,7 @@ import logger from '../../../lib/logger';
 import { useTheme } from '../../../theme';
 import { useSessionRole } from '../stores/sessionRoleStore';
 import { useBizOnboarding } from '../../business/stores/businessOnboardingStore';
-import { switchToPersonalAccount } from '../../../services/firebase/config';
+import { switchToPersonalAccount } from '../../../services/firebase';
 
 const BENEFITS = [
   {

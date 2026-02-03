@@ -6,9 +6,9 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 // Mock ttlCache module - must use factory function that returns the mock
-jest.mock('../../src/features/events/utils/ttlCache', () => {
+jest.mock('../../src/lib/ttlCache', () => {
   const mockGetWithTTL = jest.fn(
-    async (_key, fetcher, _ttl) => await fetcher()
+    async (_key, fetcher, _ttl) => await fetcher(),
   );
   return {
     getWithTTL: mockGetWithTTL,
@@ -39,7 +39,7 @@ jest.mock('geofire-common', () => ({
 }));
 
 import { fetchHotEvents } from '../../src/services/discoveryQueries';
-import { __mockGetWithTTL as mockGetWithTTL } from '../../src/features/events/utils/ttlCache';
+import { __mockGetWithTTL as mockGetWithTTL } from '../../src/lib/ttlCache';
 
 describe('discovery TTL cache layer', () => {
   beforeEach(() => {
@@ -50,7 +50,7 @@ describe('discovery TTL cache layer', () => {
     const res = await fetchHotEvents(
       ['Music'],
       { latitude: 0, longitude: 0 },
-      1000
+      1000,
     );
     expect(Array.isArray(res)).toBe(true);
     expect(mockGetWithTTL).toHaveBeenCalled();

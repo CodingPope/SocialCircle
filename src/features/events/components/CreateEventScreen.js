@@ -39,9 +39,9 @@ import {
   storage,
   auth,
   authInstance,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import { useUserStore } from '../../profile/stores/userStore';
-import { updateEventCount } from '../../../services/firebase/config';
+import { updateEventCount } from '../../../services/firebase';
 import { GOOGLE_MAPS_API_KEY } from '@env';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import InterestSelector from '../../profile/components/InterestSelector'; // Import the reusable InterestSelector
@@ -103,7 +103,7 @@ const shouldEnforceEventLimit = (profile) => {
 const fetchActiveCreatedEventCount = async (uid) => {
   const nowMs = Date.now();
   const cutoff = Timestamp.fromDate(
-    new Date(nowMs - ACTIVE_EVENT_CREATED_LOOKBACK_MS)
+    new Date(nowMs - ACTIVE_EVENT_CREATED_LOOKBACK_MS),
   );
   const baseRef = collection(db, 'events');
   let snap;
@@ -113,7 +113,7 @@ const fetchActiveCreatedEventCount = async (uid) => {
       baseRef,
       where('ownerId', '==', uid),
       where('createdAt', '>=', cutoff),
-      orderBy('createdAt', 'desc')
+      orderBy('createdAt', 'desc'),
     );
     snap = await getDocs(q);
   } catch (err) {
@@ -205,7 +205,7 @@ export default function CreateEventScreen({
     () => ({
       buttonColor: theme.colors.primary,
     }),
-    [theme]
+    [theme],
   );
 
   // Debug: print Firebase runtime info to help diagnose permission errors
@@ -227,7 +227,7 @@ export default function CreateEventScreen({
   const [description, setDescription] = useState('');
   // Default date: 30 minutes in the future, rounded up to the configured minute slot
   const [date, setDate] = useState(() =>
-    roundUpToMinuteIncrement(new Date(Date.now() + MIN_MILLIS))
+    roundUpToMinuteIncrement(new Date(Date.now() + MIN_MILLIS)),
   );
   const [manualAddress, setManualAddress] = useState('');
   const [manualLocation, setManualLocation] = useState(null);
@@ -283,8 +283,8 @@ export default function CreateEventScreen({
     try {
       const res = await fetch(
         `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-          manualAddress
-        )}&key=${GOOGLE_MAPS_API_KEY}`
+          manualAddress,
+        )}&key=${GOOGLE_MAPS_API_KEY}`,
       );
       const json = await res.json();
       if (json.status === 'OK') {
@@ -305,13 +305,13 @@ export default function CreateEventScreen({
       if (!perm.granted) {
         Alert.alert(
           'Permission Required',
-          'Photo library access is needed to upload an event image. Please enable it in Settings.'
+          'Photo library access is needed to upload an event image. Please enable it in Settings.',
         );
         return;
       }
       const compressed = await pickAndCompressImage(
         { aspect: [4, 3] },
-        'EVENT'
+        'EVENT',
       );
 
       if (compressed?.uri) {
@@ -322,7 +322,7 @@ export default function CreateEventScreen({
       console.error('Image pick error:', e);
       Alert.alert(
         'Image Selection Failed',
-        e.message || 'Could not select image. Please try again.'
+        e.message || 'Could not select image. Please try again.',
       );
     }
   };
@@ -349,7 +349,7 @@ export default function CreateEventScreen({
       console.warn('Auth UID mismatch', currentAuthUser.uid, user?.uid);
       return Alert.alert(
         'Authentication error',
-        'Signed-in user mismatch. Please re-login.'
+        'Signed-in user mismatch. Please re-login.',
       );
     }
 
@@ -376,7 +376,7 @@ export default function CreateEventScreen({
     ) {
       return Alert.alert(
         'Privacy mismatch',
-        'You can only create gender-restricted events matching your sex.'
+        'You can only create gender-restricted events matching your sex.',
       );
     }
 
@@ -386,14 +386,14 @@ export default function CreateEventScreen({
         if (activeCount >= MAX_ACTIVE_EVENTS_REGULAR) {
           return Alert.alert(
             'Event limit reached',
-            `Regular accounts can have up to ${MAX_ACTIVE_EVENTS_REGULAR} active events at a time. Finish or delete one of your events to create another.`
+            `Regular accounts can have up to ${MAX_ACTIVE_EVENTS_REGULAR} active events at a time. Finish or delete one of your events to create another.`,
           );
         }
       } catch (limitErr) {
         console.warn('[CreateEvent] Event limit check failed:', limitErr);
         return Alert.alert(
           'Unable to create event',
-          'We could not verify your active events. Please try again.'
+          'We could not verify your active events. Please try again.',
         );
       }
     }
@@ -421,8 +421,7 @@ export default function CreateEventScreen({
       geohash,
       address: manualAddress,
       city: extractedCity,
-      businessId: null,
-      locationId: null,
+      // Note: businessId and locationId omitted for regular user events (not null) to satisfy Firestore rules
       date: Timestamp.fromDate(date),
       createdAt: Timestamp.now(),
       ageRange,
@@ -482,7 +481,7 @@ export default function CreateEventScreen({
       try {
         onOptimisticCreate?.(
           { ...optimisticEvent, id: docRef.id, _optimistic: false },
-          tempId
+          tempId,
         );
       } catch {}
 
@@ -506,7 +505,7 @@ export default function CreateEventScreen({
       if (!ready) {
         console.warn(
           'DBG event doc not readable yet or ownerId mismatch for',
-          docRef.id
+          docRef.id,
         );
       }
 
@@ -523,13 +522,13 @@ export default function CreateEventScreen({
           if (blob?.size && blob.size > MAX_EVENT_IMAGE_BYTES) {
             Alert.alert(
               'Image too large',
-              'Your event was created, but the selected photo exceeds the 10MB limit.'
+              'Your event was created, but the selected photo exceeds the 10MB limit.',
             );
           } else {
             // Retry upload a few times to avoid transient rule/propagation issues
             const tryUpload = async () => {
               const storageRef = storage.ref(
-                `event-images/${docRef.id}/${Date.now()}.jpg`
+                `event-images/${docRef.id}/${Date.now()}.jpg`,
               );
               await storageRef.putFile(imageUri, { contentType });
               return await storageRef.getDownloadURL();
@@ -552,7 +551,7 @@ export default function CreateEventScreen({
             if (!downloadUrl && lastErr?.code === 'storage/unauthorized') {
               try {
                 const altRef = storage.ref(
-                  `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`
+                  `profileImages/${user.uid}/${docRef.id}-${Date.now()}.jpg`,
                 );
                 await altRef.putFile(imageUri, { contentType });
                 downloadUrl = await altRef.getDownloadURL();
@@ -620,7 +619,7 @@ export default function CreateEventScreen({
         } catch (userUpdateErr) {
           console.warn(
             'Non-critical: failed to tag createdEvents on user',
-            userUpdateErr
+            userUpdateErr,
           );
         }
         try {
@@ -639,7 +638,7 @@ export default function CreateEventScreen({
       Alert.alert(
         'Event creation failed',
         'Could not create your event. Please try again.',
-        [{ text: 'OK' }]
+        [{ text: 'OK' }],
       );
     } finally {
       setUploading(false);
@@ -663,7 +662,7 @@ export default function CreateEventScreen({
         } else {
           // If Firestore returns empty, fall back to bundled categories
           const fallback = (categoriesData || []).flatMap((c) =>
-            (c.interests || []).map((i) => ({ label: i.name, value: i.name }))
+            (c.interests || []).map((i) => ({ label: i.name, value: i.name })),
           );
           setInterestOptions(fallback);
         }
@@ -671,7 +670,7 @@ export default function CreateEventScreen({
         console.warn('Error fetching interests (firestore):', err);
         // Use bundled categories as a silent fallback to avoid spamming the user
         const fallback = (categoriesData || []).flatMap((c) =>
-          (c.interests || []).map((i) => ({ label: i.name, value: i.name }))
+          (c.interests || []).map((i) => ({ label: i.name, value: i.name })),
         );
         if (fallback && fallback.length) {
           setInterestOptions(fallback);

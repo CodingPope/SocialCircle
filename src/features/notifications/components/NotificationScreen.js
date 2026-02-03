@@ -27,7 +27,7 @@ import smileDefault from '../../../../assets/smileDefault.png';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { useUserSnippetStore } from '../../profile/stores/userSnippetStore';
-import { db, functions } from '../../../services/firebase/config';
+import { db, functions } from '../../../services/firebase';
 import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import displayNameFromUser from '../utils/displayName';

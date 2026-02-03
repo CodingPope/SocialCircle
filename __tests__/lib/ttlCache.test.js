@@ -4,6 +4,7 @@ import {
   setWithTTL,
   getIfFresh,
   invalidate,
+  purgeExpired,
 } from '../../src/lib/ttlCache';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -49,5 +50,17 @@ describe('ttlCache', () => {
     const v1 = await getWithTTL('k2', fetcher, 1000);
     expect(v1).toEqual({ x: 1 });
     expect(AsyncStorage.setItem).toHaveBeenCalled();
+  });
+
+  it('purgeExpired removes stale keys', async () => {
+    const now = Date.now();
+    AsyncStorage.getItem
+      .mockResolvedValueOnce(JSON.stringify({ value: 1, ts: now - 5000 }))
+      .mockResolvedValueOnce(JSON.stringify({ value: 2, ts: now }));
+
+    await purgeExpired(['a', 'b'], 1000);
+
+    expect(AsyncStorage.removeItem).toHaveBeenCalledTimes(1);
+    expect(AsyncStorage.removeItem).toHaveBeenCalledWith('ttl:a');
   });
 });

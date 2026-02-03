@@ -13,7 +13,7 @@ import {
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
-import { Timestamp } from '../../../../../services/firebase/config';
+import { Timestamp } from '../../../../../services/firebase';
 import { useUserStore } from '../../../../profile';
 import { mergeUserFields } from '../../../../profile/api/userService';
 import { logOnboardingStepComplete } from '../../../../../services/onboardingAnalyticsService';
@@ -79,6 +79,7 @@ export default function NameDobScreen({ navigation }) {
   // Description: Pre-populate firstName and lastName if provided by Apple Sign-In or social login
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName] = useState(user?.lastName || '');
+  const hasPrefilledNames = !!(user?.firstName && user?.lastName);
   // State for name validation errors
   const [nameError, setNameError] = useState('');
   const [dob, setDob] = useState(new Date());
@@ -113,16 +114,20 @@ export default function NameDobScreen({ navigation }) {
 
   // Description: Validates name fields for length and allowed characters
   const validateNames = () => {
+    if (hasPrefilledNames) {
+      setNameError('');
+      return true; // Apple provided name; do not force user to re-enter
+    }
     const nameRegex = /^[A-Za-z\-' ]{2,30}$/;
     if (!nameRegex.test(firstName)) {
       setNameError(
-        'First name must be 2-30 letters, and only letters, hyphens, apostrophes, or spaces.'
+        'First name must be 2-30 letters, and only letters, hyphens, apostrophes, or spaces.',
       );
       return false;
     }
     if (!nameRegex.test(lastName)) {
       setNameError(
-        'Last name must be 2-30 letters, and only letters, hyphens, apostrophes, or spaces.'
+        'Last name must be 2-30 letters, and only letters, hyphens, apostrophes, or spaces.',
       );
       return false;
     }
@@ -198,16 +203,22 @@ export default function NameDobScreen({ navigation }) {
           <Text style={styles.header}>Tell us about you</Text>
           {/* Description: First name input with maxLength and validation */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, hasPrefilledNames ? { opacity: 0.6 } : null]}
             placeholder='First name'
             placeholderTextColor={
               theme.isDark ? theme.colors.neutral600 : theme.colors.neutral600
             }
             value={firstName}
-            onChangeText={(text) => {
-              setFirstName(text);
-              if (nameError) validateNames();
-            }}
+            editable={!hasPrefilledNames}
+            selectTextOnFocus={!hasPrefilledNames}
+            onChangeText={
+              hasPrefilledNames
+                ? undefined
+                : (text) => {
+                    setFirstName(text);
+                    if (nameError) validateNames();
+                  }
+            }
             maxLength={30}
             autoCapitalize='words'
             textContentType='givenName'
@@ -215,16 +226,22 @@ export default function NameDobScreen({ navigation }) {
           />
           {/* Description: Last name input with maxLength and validation */}
           <TextInput
-            style={styles.input}
+            style={[styles.input, hasPrefilledNames ? { opacity: 0.6 } : null]}
             placeholder='Last name'
             placeholderTextColor={
               theme.isDark ? theme.colors.neutral600 : theme.colors.neutral600
             }
             value={lastName}
-            onChangeText={(text) => {
-              setLastName(text);
-              if (nameError) validateNames();
-            }}
+            editable={!hasPrefilledNames}
+            selectTextOnFocus={!hasPrefilledNames}
+            onChangeText={
+              hasPrefilledNames
+                ? undefined
+                : (text) => {
+                    setLastName(text);
+                    if (nameError) validateNames();
+                  }
+            }
             maxLength={30}
             autoCapitalize='words'
             textContentType='familyName'

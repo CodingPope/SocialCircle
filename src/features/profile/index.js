@@ -12,8 +12,12 @@ export { default as PrivacySettingsScreen } from './components/PrivacySettingsSc
 export { default as ProfileHeader } from './components/ProfileHeader';
 export { default as ProfileHeaderInfo } from './components/ProfileHeaderInfo';
 export { default as ProfileStatsRow } from './components/ProfileStatsRow';
+export { default as ProfileStatsCard } from './components/ProfileStatsCard';
+export { default as ProfileSidebar } from './components/ProfileSidebar';
+export { default as ProfileTutorialOverlay } from './components/ProfileTutorialOverlay';
 export { default as RatingStars } from './components/RatingStars';
 export { default as ToggleSwitchComponent } from './components/ToggleSwitchComponent';
+export { default as VerificationModal } from './components/VerificationModal';
 
 export { useUserStore } from './stores/userStore';
 export { useBusinessStore } from './stores/businessStore';

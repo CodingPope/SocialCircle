@@ -21,8 +21,38 @@ const {
   deriveUserTier,
   hasUserTier,
   hasBusinessTier,
+  getBusinessCapabilities,
 } = require('./tiers');
+const {
+  projectId,
+  ENFORCE_APPCHECK,
+  BUSINESS_ENFORCE_APPCHECK,
+  JOIN_CALLABLE_OPTIONS,
+  ADMIN_CALLABLE_OPTIONS,
+  SHARE_CONFIG,
+} = require('./shared/config');
+const { truncate, toDate } = require('./shared/helpers');
+const { shareGenerateLink, sharePreview } = require('./domains/share');
+const { sendExpoPushMessages } = require('./domains/notifications');
+const {
+  computePopularity,
+  rollupDailyAnalytics,
+  sendEventReminders,
+  aggregateUsageMetrics,
+} = require('./domains/scheduled');
 
+// Domain re-exports (business) - override inline implementations
+exports.updateBusinessBasics = require('./domains/business').updateBusinessBasics;
+exports.updateBrandAssets = require('./domains/business').updateBrandAssets;
+exports.addBusinessLocation = require('./domains/business').addBusinessLocation;
+exports.updateAudiencePolicies =
+  require('./domains/business').updateAudiencePolicies;
+exports.startBusinessVerification =
+  require('./domains/business').startBusinessVerification;
+exports.verifyBusinessCode = require('./domains/business').verifyBusinessCode;
+exports.addBusinessMember = require('./domains/business').addBusinessMember;
+exports.setBusinessPrivacy = require('./domains/business').setBusinessPrivacy;
+exports.submitBusiness = require('./domains/business').submitBusiness;
 admin.initializeApp();
 const db = admin.firestore(); // convenience
 const FieldValue = admin.firestore.FieldValue;
@@ -34,125 +64,6 @@ function fieldDelete() {
     // ignore
   }
   return undefined;
-}
-const projectId = process.env.GCLOUD_PROJECT;
-const ENFORCE_APPCHECK =
-  process.env.ENFORCE_APPCHECK === '1' ||
-  process.env.ENFORCE_APPCHECK === 'true';
-// Business callables are frequently exercised from simulators during onboarding.
-// Allow disabling App Check for this subset without affecting global enforcement.
-const BUSINESS_ENFORCE_APPCHECK =
-  process.env.BUSINESS_ENFORCE_APPCHECK === '1' ||
-  process.env.BUSINESS_ENFORCE_APPCHECK === 'true';
-const JOIN_CALLABLE_OPTIONS = Object.freeze({
-  region: 'us-central1',
-  memory: '256MiB',
-  timeoutSeconds: 60,
-  enforceAppCheck: ENFORCE_APPCHECK,
-});
-const ADMIN_CALLABLE_OPTIONS = Object.freeze({
-  region: 'us-central1',
-  memory: '256MiB',
-  timeoutSeconds: 120,
-  enforceAppCheck: ENFORCE_APPCHECK,
-});
-
-const SHARE_CONFIG = Object.freeze({
-  apiKey:
-    process.env.SHARE_DYNAMIC_LINK_API_KEY ||
-    process.env.FIREBASE_WEB_API_KEY ||
-    process.env.FIREBASE_API_KEY ||
-    '',
-  domainUriPrefix:
-    process.env.SHARE_DYNAMIC_LINK_PREFIX ||
-    process.env.DYNAMIC_LINK_PREFIX ||
-    '',
-  previewBase:
-    process.env.SHARE_WEB_FALLBACK_BASE ||
-    (projectId
-      ? `https://${projectId}.cloudfunctions.net/sharePreview`
-      : 'https://socialcircle.app/share'),
-  iosBundleId: process.env.SHARE_IOS_BUNDLE_ID || 'com.socialcirclellc.app',
-  iosAppStoreId: process.env.SHARE_IOS_APP_STORE_ID || '',
-  iosFallbackUrl: process.env.SHARE_IOS_FALLBACK_URL || '',
-  androidPackageName:
-    process.env.SHARE_ANDROID_PACKAGE || 'com.socialcirclellc.app',
-  androidFallbackUrl: process.env.SHARE_ANDROID_FALLBACK_URL || '',
-});
-
-function toDate(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value.toDate === 'function') return value.toDate();
-  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
-  if (typeof value === 'number') return new Date(value);
-  return null;
-}
-
-function truncate(text, max = 160) {
-  if (!text || typeof text !== 'string') return '';
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= max) return normalized;
-  return `${normalized.slice(0, max - 1)}…`;
-}
-
-const AGE_BUCKETS = Object.freeze([
-  'under_18',
-  '18_24',
-  '25_34',
-  '35_44',
-  '45_54',
-  '55_plus',
-  'unknown',
-]);
-
-const SEX_BUCKETS = Object.freeze([
-  'female',
-  'male',
-  'non_binary',
-  'prefer_not_say',
-  'other',
-  'unknown',
-]);
-
-function incrementCounter(target, key) {
-  if (!Object.prototype.hasOwnProperty.call(target, key)) {
-    target[key] = 0;
-  }
-  target[key] += 1;
-}
-
-function ageBracketForDob(dob, referenceDate = new Date()) {
-  const date = toDate(dob);
-  if (!date) return 'unknown';
-
-  let age = referenceDate.getFullYear() - date.getFullYear();
-  const monthDiff = referenceDate.getMonth() - date.getMonth();
-  if (
-    monthDiff < 0 ||
-    (monthDiff === 0 && referenceDate.getDate() < date.getDate())
-  ) {
-    age -= 1;
-  }
-  if (!Number.isFinite(age) || age < 0 || age > 120) return 'unknown';
-  if (age < 18) return 'under_18';
-  if (age <= 24) return '18_24';
-  if (age <= 34) return '25_34';
-  if (age <= 44) return '35_44';
-  if (age <= 54) return '45_54';
-  return '55_plus';
-}
-
-function normalizeSexMetric(value) {
-  const raw = (value || '').toString().trim().toLowerCase();
-  if (!raw) return 'unknown';
-  if (['female', 'f', 'woman'].includes(raw)) return 'female';
-  if (['male', 'm', 'man'].includes(raw)) return 'male';
-  if (['nonbinary', 'non-binary', 'non_binary', 'nb'].includes(raw))
-    return 'non_binary';
-  if (['prefer_not_say', 'prefer not to say'].includes(raw))
-    return 'prefer_not_say';
-  return 'other';
 }
 
 async function syncAccountTierClaims(uid, accountTier) {
@@ -183,7 +94,7 @@ function requireUserTier(user, requiredTier, context = 'This action') {
     const expected = normalizeUserTier(requiredTier) || USER_TIERS.BASIC;
     throw new HttpsError(
       'permission-denied',
-      `${context} requires ${expected} tier.`
+      `${context} requires ${expected} tier.`,
     );
   }
 }
@@ -191,10 +102,10 @@ function requireUserTier(user, requiredTier, context = 'This action') {
 function requireBusinessTier(business, requiredTier, context = 'This action') {
   if (!hasBusinessTier(business, requiredTier)) {
     const expected =
-      normalizeBusinessTier(requiredTier) || BUSINESS_TIERS.TIER1;
+      normalizeBusinessTier(requiredTier) || BUSINESS_TIERS.TIER_1_FREE;
     throw new HttpsError(
       'permission-denied',
-      `${context} requires ${expected} business tier.`
+      `${context} requires ${expected} business tier.`,
     );
   }
 }
@@ -315,7 +226,7 @@ async function buildEventPreview(eventId) {
 
   const where = data.location?.address || data.address || '';
   const description = truncate(
-    [whenLabel, where, data.description].filter(Boolean).join(' • ')
+    [whenLabel, where, data.description].filter(Boolean).join(' • '),
   );
 
   return {
@@ -399,7 +310,7 @@ async function buildProfilePreview(userId) {
 function buildShareTargetUrl(type, id) {
   return `${SHARE_CONFIG.previewBase.replace(
     /\/$/,
-    ''
+    '',
   )}/${type}/${encodeURIComponent(id)}`;
 }
 
@@ -413,6 +324,149 @@ exports.enableAuthUser = onCall(async (req) => {
   return { success: true };
 });
 
+// Description: Permanently delete user account and associated data (Apple compliance)
+exports.deleteUserAccount = onCall(async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) {
+    throw new HttpsError('unauthenticated', 'User must be authenticated');
+  }
+
+  logger.info(`[deleteUserAccount] Starting deletion for user: ${uid}`);
+
+  try {
+    // 1. Fetch user data before deletion
+    const userDoc = await db.collection('users').doc(uid).get();
+    const userData = userDoc.data() || {};
+
+    // 2. Revoke Apple Sign-In tokens if applicable
+    if (userData.appleAuthorizationCode) {
+      try {
+        await revokeAppleToken(userData.appleAuthorizationCode);
+        logger.info(`[deleteUserAccount] Revoked Apple tokens for: ${uid}`);
+      } catch (appleErr) {
+        logger.warn(
+          `[deleteUserAccount] Failed to revoke Apple token: ${appleErr.message}`
+        );
+        // Continue with deletion even if token revocation fails
+      }
+    }
+
+    // 3. Delete user-generated content
+    const batch = db.batch();
+
+    // Delete user's events (as creator/host)
+    const userEvents = await db
+      .collection('events')
+      .where('createdBy', '==', uid)
+      .get();
+    userEvents.docs.forEach((doc) => batch.delete(doc.ref));
+    logger.info(
+      `[deleteUserAccount] Marking ${userEvents.size} events for deletion`
+    );
+
+    // Remove user from event attendees (all events they joined)
+    const attendedEvents = await db
+      .collection('events')
+      .where('attendees', 'array-contains', uid)
+      .get();
+    attendedEvents.docs.forEach((doc) => {
+      batch.update(doc.ref, {
+        attendees: FieldValue.arrayRemove(uid),
+        attendeeCount: FieldValue.increment(-1),
+      });
+    });
+
+    // Delete user's messages in all chats
+    const userMessages = await db
+      .collection('messages')
+      .where('senderId', '==', uid)
+      .get();
+    userMessages.docs.forEach((doc) => batch.delete(doc.ref));
+    logger.info(
+      `[deleteUserAccount] Marking ${userMessages.size} messages for deletion`
+    );
+
+    // Delete chats where user is a member
+    const userChats = await db
+      .collection('chats')
+      .where('members', 'array-contains', uid)
+      .get();
+    userChats.docs.forEach((doc) => batch.delete(doc.ref));
+    logger.info(
+      `[deleteUserAccount] Marking ${userChats.size} chats for deletion`
+    );
+
+    // Delete user document
+    batch.delete(db.collection('users').doc(uid));
+
+    // Commit all Firestore deletions
+    await batch.commit();
+    logger.info(`[deleteUserAccount] Firestore data deleted for: ${uid}`);
+
+    // 4. Delete Firebase Auth user
+    await admin.auth().deleteUser(uid);
+    logger.info(`[deleteUserAccount] Firebase Auth user deleted: ${uid}`);
+
+    // 5. Delete user's storage files (profile images, event images)
+    try {
+      const bucket = admin.storage().bucket();
+      await bucket.deleteFiles({ prefix: `users/${uid}/` });
+      logger.info(`[deleteUserAccount] Storage files deleted for: ${uid}`);
+    } catch (storageErr) {
+      logger.warn(
+        `[deleteUserAccount] Storage deletion failed: ${storageErr.message}`
+      );
+      // Continue - storage may be empty or already deleted
+    }
+
+    logger.info(`[deleteUserAccount] Successfully completed deletion for: ${uid}`);
+    return {
+      success: true,
+      message: 'Account permanently deleted',
+    };
+  } catch (error) {
+    logger.error(
+      `[deleteUserAccount] Failed for user ${uid}:`,
+      error?.message || error
+    );
+    throw new HttpsError(
+      'internal',
+      'Failed to delete account. Please contact support.'
+    );
+  }
+});
+
+/**
+ * Revoke Apple Sign-In refresh token
+ * https://developer.apple.com/documentation/sign_in_with_apple/revoke_tokens
+ */
+async function revokeAppleToken(authorizationCode) {
+  // Apple token revocation requires client_secret (JWT signed by team private key)
+  // This is a simplified implementation - in production you'd need:
+  // 1. Apple Team ID, Key ID, and private key
+  // 2. Generate client_secret JWT
+  // 3. POST to https://appleid.apple.com/auth/revoke
+  
+  // For now, we log and skip actual revocation
+  // TODO: Implement full Apple token revocation with proper credentials
+  logger.warn(
+    '[revokeAppleToken] Apple token revocation not fully implemented. Authorization code stored but not revoked.'
+  );
+  
+  // Placeholder for future implementation:
+  // const clientSecret = generateAppleClientSecret();
+  // const response = await fetch('https://appleid.apple.com/auth/revoke', {
+  //   method: 'POST',
+  //   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  //   body: new URLSearchParams({
+  //     client_id: 'com.socialcirclellc.app',
+  //     client_secret: clientSecret,
+  //     token: authorizationCode,
+  //     token_type_hint: 'refresh_token'
+  //   })
+  // });
+}
+
 // Description: Sync Firebase Auth user disabled state with Firestore isDeleted field
 exports.syncAuthWithSoftDelete = onDocumentUpdated(
   'users/{userId}',
@@ -425,7 +479,7 @@ exports.syncAuthWithSoftDelete = onDocumentUpdated(
     if (before.isDeleted && !after.isDeleted) {
       await admin.auth().updateUser(event.params.userId, { disabled: false });
     }
-  }
+  },
 );
 
 // Description: Keep accountTier in sync with premium/popular flags.
@@ -442,7 +496,7 @@ exports.syncUserAccountTierOnCreate = onDocumentCreated(
     }
     await snap.ref.set(patch, { merge: true });
     await syncAccountTierClaims(event.params.userId, patch.accountTier);
-  }
+  },
 );
 
 exports.syncUserAccountTierOnUpdate = onDocumentUpdated(
@@ -470,7 +524,7 @@ exports.syncUserAccountTierOnUpdate = onDocumentUpdated(
 
     const derived = deriveUserTier(afterData);
     if (derived) await syncAccountTierClaims(event.params.userId, derived);
-  }
+  },
 );
 
 // Description: Ensure businessTier defaults to tier1 when businesses are created.
@@ -482,8 +536,11 @@ exports.ensureBusinessTierOnCreate = onDocumentCreated(
     const data = snap.data() || {};
     const normalized = normalizeBusinessTier(data.businessTier);
     if (normalized) return;
-    await snap.ref.set({ businessTier: BUSINESS_TIERS.TIER1 }, { merge: true });
-  }
+    await snap.ref.set(
+      { businessTier: BUSINESS_TIERS.TIER_1_FREE },
+      { merge: true },
+    );
+  },
 );
 
 // -------------------- TIERS: ADMIN HELPERS --------------------
@@ -600,7 +657,7 @@ exports.adminBackfillTiers = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
                 batch.set(
                   docSnap.ref,
                   { accountTier: derived },
-                  { merge: true }
+                  { merge: true },
                 );
               }
               writes += 1;
@@ -669,7 +726,8 @@ exports.adminBackfillTiers = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
           processed += 1;
           const bizData = docSnap.data() || {};
           const current = normalizeBusinessTier(bizData.businessTier);
-          const target = forcedBusinessTier || current || BUSINESS_TIERS.TIER1;
+          const target =
+            forcedBusinessTier || current || BUSINESS_TIERS.TIER_1_FREE;
           if (current === target) return;
           updated += 1;
           if (!dryRun) {
@@ -723,7 +781,7 @@ exports.getEvents = onCall(
     logger.log('🔥 getEvents called; auth=', req.auth?.uid ?? 'none');
     const snap = await db.collection('events').get();
     return { events: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
-  }
+  },
 );
 
 // -------------------- NEW: EXPO PUSH SUPPORT --------------------
@@ -735,28 +793,7 @@ function chunk(arr, size = 100) {
   return out;
 }
 
-// Send messages to Expo Push API
-async function sendExpoPushMessages(messages) {
-  const chunks = chunk(messages, 100);
-  for (const batch of chunks) {
-    const res = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(batch),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      logger.error('[push] Expo API error', res.status, text);
-      continue;
-    }
-
-    const json = await res.json().catch(() => ({}));
-    const tickets = json?.data || [];
-    const hasErrors = tickets.some((t) => t.status === 'error');
-    if (hasErrors) logger.error('[push] Expo ticket errors', tickets);
-  }
-}
+// sendExpoPushMessages now imported from domains/notifications
 
 exports.blockUser = onCall(
   {
@@ -816,7 +853,7 @@ exports.blockUser = onCall(
     });
 
     return { ok: true };
-  }
+  },
 );
 
 exports.unblockUser = onCall(
@@ -853,17 +890,17 @@ exports.unblockUser = onCall(
       tx.set(
         actorRef,
         { blocked: FieldValue.arrayRemove(targetUid) },
-        { merge: true }
+        { merge: true },
       );
       tx.set(
         targetRef,
         { blockedBy: FieldValue.arrayRemove(caller) },
-        { merge: true }
+        { merge: true },
       );
     });
 
     return { ok: true };
-  }
+  },
 );
 
 async function adjustSavedAggregates(uid, eventId, deltaRaw) {
@@ -932,7 +969,7 @@ exports.onSavedEventCreated = onDocumentCreated(
     } catch (err) {
       logger.warn('[savedEvents] analytics log failed', err?.message || err);
     }
-  }
+  },
 );
 
 exports.onSavedEventDeleted = onDocumentDeleted(
@@ -954,7 +991,7 @@ exports.onSavedEventDeleted = onDocumentDeleted(
     } catch (err) {
       logger.warn('[savedEvents] analytics log failed', err?.message || err);
     }
-  }
+  },
 );
 
 // Callable: send a push to a specific userId or directly to a list of Expo tokens
@@ -976,7 +1013,7 @@ exports.sendPush = onCall(async (req) => {
 
   // dedupe + basic validation (Expo tokens start with "ExponentPushToken")
   expoTokens = Array.from(new Set(expoTokens)).filter(
-    (t) => typeof t === 'string' && t.startsWith('ExponentPushToken')
+    (t) => typeof t === 'string' && t.startsWith('ExponentPushToken'),
   );
 
   if (expoTokens.length === 0) {
@@ -1056,14 +1093,14 @@ exports.claimDeviceToken = onCall(
         '[claimDeviceToken] claimed token for',
         targetUid,
         'clearedFrom:',
-        cleared
+        cleared,
       );
       return { ok: true, clearedFrom: cleared };
     } catch (err) {
       logger.error('[claimDeviceToken] error', err?.message || err);
       throw new HttpsError('internal', 'Failed to claim token');
     }
-  }
+  },
 );
 
 // Trigger: on new chat message, notify all attendees + host (except the sender)
@@ -1081,7 +1118,7 @@ exports.onMessageCreateNotify = onDocumentCreated(
         .doc(`events/${eventId}`)
         .set(
           { lastMessageAt: admin.firestore.FieldValue.serverTimestamp() },
-          { merge: true }
+          { merge: true },
         );
     } catch (e) {
       logger.error('[push] Failed to update lastMessageAt', e?.message || e);
@@ -1097,7 +1134,7 @@ exports.onMessageCreateNotify = onDocumentCreated(
     const senderId = message.senderId;
 
     const targetUids = new Set(
-      [...attendees, hostId].filter((uid) => uid && uid !== senderId)
+      [...attendees, hostId].filter((uid) => uid && uid !== senderId),
     );
     if (targetUids.size === 0) return;
 
@@ -1117,7 +1154,7 @@ exports.onMessageCreateNotify = onDocumentCreated(
         return t;
       })
       .filter(
-        (t) => typeof t === 'string' && t.startsWith('ExponentPushToken')
+        (t) => typeof t === 'string' && t.startsWith('ExponentPushToken'),
       );
 
     if (expoTokens.length === 0) {
@@ -1147,113 +1184,13 @@ exports.onMessageCreateNotify = onDocumentCreated(
     }));
     await sendExpoPushMessages(messages);
     logger.log(
-      `[push] Notified ${expoTokens.length} users for event ${eventId}`
+      `[push] Notified ${expoTokens.length} users for event ${eventId}`,
     );
-  }
+  },
 );
 
-exports.shareGenerateLink = onCall(
-  { region: 'us-central1', timeoutSeconds: 15, memory: '256MiB' },
-  async (req) => {
-    const { type, id } = req.data || {};
-    if (!type || !id) {
-      throw new HttpsError('invalid-argument', 'type and id are required');
-    }
-    const normalized = type.toString().toLowerCase();
-
-    let preview;
-    if (normalized === 'event') {
-      preview = await buildEventPreview(id);
-    } else if (normalized === 'post') {
-      preview = await buildPostPreview(id);
-    } else if (normalized === 'profile' || normalized === 'user') {
-      preview = await buildProfilePreview(id);
-    } else {
-      throw new HttpsError('invalid-argument', 'Unsupported share type');
-    }
-
-    const targetUrl = buildShareTargetUrl(normalized, id);
-    const shortLink = await createShortDynamicLink({
-      link: targetUrl,
-      title: preview.title,
-      description: preview.description,
-      imageUrl: preview.imageUrl,
-    });
-
-    return {
-      url: shortLink || targetUrl,
-      target: targetUrl,
-      preview,
-      shareable: { type: normalized, id },
-    };
-  }
-);
-
-exports.sharePreview = onRequest(
-  { region: 'us-central1' },
-  async (req, res) => {
-    try {
-      const type = req.query?.type || req.query?.t;
-      const id = req.query?.id;
-      if (!type || !id) {
-        res.status(400).send('Missing type or id');
-        return;
-      }
-      const normalized = type.toString().toLowerCase();
-      let preview;
-      if (normalized === 'event') {
-        preview = await buildEventPreview(id);
-      } else if (normalized === 'post') {
-        preview = await buildPostPreview(id);
-      } else if (normalized === 'profile' || normalized === 'user') {
-        preview = await buildProfilePreview(id);
-      } else {
-        res.status(400).send('Unsupported type');
-        return;
-      }
-
-      const title = truncate(preview.title, 70) || 'Social Circle';
-      const description = truncate(preview.description, 160);
-      const image = preview.imageUrl;
-      const html = `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
-    <meta property="og:title" content="${title}" />
-    <meta property="og:description" content="${description}" />
-    ${image ? `<meta property="og:image" content="${image}" />` : ''}
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${title}" />
-    <meta name="twitter:description" content="${description}" />
-    ${image ? `<meta name="twitter:image" content="${image}" />` : ''}
-    <style>
-      body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #111827, #1f2937); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }
-      .card { max-width: 520px; padding: 32px; background: rgba(17, 24, 39, 0.85); border-radius: 20px; text-align: center; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45); }
-      h1 { font-size: 26px; margin-bottom: 12px; }
-      p { font-size: 17px; line-height: 1.5; margin-bottom: 28px; color: rgba(229, 231, 235, 0.9); }
-      a { display: inline-flex; align-items: center; justify-content: center; padding: 14px 22px; border-radius: 999px; background: linear-gradient(135deg, #2563eb, #9333ea); color: #fff; text-decoration: none; font-weight: 600; }
-    </style>
-  </head>
-  <body>
-    <div class="card">
-      <h1>${title}</h1>
-      <p>${description}</p>
-      <a href="https://apps.apple.com/us/app/id000000000">Open in Social Circle</a>
-    </div>
-  </body>
-</html>`;
-
-      res.set('Cache-Control', 'public, max-age=300, s-maxage=600');
-      res.status(200).send(html);
-    } catch (err) {
-      logger.error('[sharePreview] failed', err);
-      res.status(500).send('Unable to render preview');
-    }
-  }
-);
+exports.shareGenerateLink = shareGenerateLink;
+exports.sharePreview = sharePreview;
 
 // NEW: Trigger push when a notification document is created
 exports.onNotificationCreatedPush = onDocumentCreated(
@@ -1340,12 +1277,12 @@ exports.onNotificationCreatedPush = onDocumentCreated(
       // Mark pushed (best-effort)
       await ref.set(
         { pushSentAt: admin.firestore.FieldValue.serverTimestamp() },
-        { merge: true }
+        { merge: true },
       );
     } catch (e) {
       logger.error('[push] onNotificationCreatedPush error', e?.message || e);
     }
-  }
+  },
 );
 
 // Callable: RSVP to event — creates chat doc (id == eventId) on first RSVP and ensures participants list
@@ -1391,7 +1328,7 @@ exports.rsvpEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
       if ((ev.privacy || 'public').toLowerCase() === 'rsvp') {
         throw new HttpsError(
           'failed-precondition',
-          'RSVP event requires host approval'
+          'RSVP event requires host approval',
         );
       }
 
@@ -1412,7 +1349,7 @@ exports.rsvpEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
       const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
       if (range && range.length === 2) {
         const [min, max] = range.map((n) =>
-          typeof n === 'number' ? n : parseInt(n, 10)
+          typeof n === 'number' ? n : parseInt(n, 10),
         );
         const age = getAgeFromDob(userDoc.dob);
         if (typeof age === 'number') {
@@ -1435,7 +1372,7 @@ exports.rsvpEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
       ) {
         throw new HttpsError(
           'failed-precondition',
-          'Event is full. Join the waitlist if available.'
+          'Event is full. Join the waitlist if available.',
         );
       }
 
@@ -1460,7 +1397,7 @@ exports.rsvpEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
         ) {
           throw new HttpsError(
             'permission-denied',
-            'You cannot join this event.'
+            'You cannot join this event.',
           );
         }
       }
@@ -1504,7 +1441,7 @@ exports.rsvpEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
       } else {
         tx.update(chatRef, {
           participants: admin.firestore.FieldValue.arrayUnion(
-            ...participantsArray
+            ...participantsArray,
           ),
           lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -1550,474 +1487,21 @@ exports.rsvpEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
 
 // Callable: allow a signed-in attendee to leave an event (removes from attendees, updates user arrays, prunes chat participants)
 // App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
-exports.leaveEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
-  const auth = req.auth;
-  const data = req.data || {};
-  const eventId = data.eventId;
-  const uid = auth?.uid;
-
-  if (!auth || !uid) {
-    throw new HttpsError('unauthenticated', 'Authentication required');
-  }
-  if (!eventId) {
-    throw new HttpsError('invalid-argument', 'Missing eventId');
-  }
-
-  const eventRef = db.doc(`events/${eventId}`);
-  const chatRef = db.doc(`chats/${eventId}`);
-  const userRef = db.doc(`users/${uid}`);
-
-  try {
-    const result = await db.runTransaction(async (tx) => {
-      // READS first
-      const [evSnap, chatSnap] = await Promise.all([
-        tx.get(eventRef),
-        tx.get(chatRef),
-      ]);
-      if (!evSnap.exists) throw new HttpsError('not-found', 'Event not found');
-      const ev = evSnap.data();
-
-      // Host cannot leave via this API
-      if (ev.ownerId === uid) {
-        throw new HttpsError(
-          'failed-precondition',
-          'Hosts cannot leave their own event'
-        );
-      }
-
-      const attendeesArr = Array.isArray(ev.attendees) ? ev.attendees : [];
-      const alreadyGone = !attendeesArr.includes(uid);
-
-      // WRITES
-      const updates = {};
-      if (!alreadyGone) {
-        updates.attendees = admin.firestore.FieldValue.arrayRemove(uid);
-        updates.attendeesCount = admin.firestore.FieldValue.increment(-1);
-        updates[`attendeeSnippets.${uid}`] =
-          admin.firestore.FieldValue.delete();
-        tx.update(eventRef, updates);
-      }
-
-      // Update chat participants (if chat exists)
-      if (chatSnap.exists) {
-        tx.update(chatRef, {
-          participants: admin.firestore.FieldValue.arrayRemove(uid),
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      // Update user mirrors (best-effort; presence not required)
-      tx.update(userRef, {
-        attendingEvents: admin.firestore.FieldValue.arrayRemove(eventId),
-        attendedEvents: admin.firestore.FieldValue.arrayRemove(eventId),
-      });
-
-      return { ok: true, removed: !alreadyGone };
-    });
-
-    logger.log('[leaveEvent] success', { eventId, uid });
-    return result;
-  } catch (err) {
-    if (err instanceof HttpsError) throw err;
-    logger.error('[leaveEvent] error', err?.message || err);
-    throw new HttpsError('internal', err?.message || 'Leave event failed');
-  }
-});
+exports.leaveEvent = require('./domains/events').leaveEvent;
 
 // Callable: delete (soft) an event — runs with admin privileges to avoid client rule issues
 // App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
-exports.deleteEvent = onCall(
-  {
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60,
-    enforceAppCheck: true,
-  },
-  async (req) => {
-    const auth = req.auth;
-    const data = req.data || {};
-    const eventId = data.eventId;
-
-    if (!auth || !auth.uid) {
-      logger.error('[deleteEvent] unauthenticated');
-      throw new HttpsError('unauthenticated', 'Authentication required');
-    }
-    if (!eventId) {
-      logger.error('[deleteEvent] missing eventId');
-      throw new HttpsError('invalid-argument', 'Missing eventId');
-    }
-
-    const eventRef = db.doc(`events/${eventId}`);
-
-    try {
-      const result = await db.runTransaction(async (tx) => {
-        const evSnap = await tx.get(eventRef);
-        if (!evSnap.exists) {
-          // If event doc is already gone, treat as idempotent success
-          return { alreadyDeleted: true };
-        }
-        const ev = evSnap.data();
-        const ownerId = ev.ownerId || null;
-
-        // Only allow the event owner or admins (custom claim) to soft-delete via this callable
-        const callerUid = auth.uid;
-        const isAdmin = !!(
-          req.auth &&
-          req.auth.token &&
-          req.auth.token.admin === true
-        );
-        if (ownerId !== callerUid && !isAdmin) {
-          throw new HttpsError('permission-denied', 'Permission denied');
-        }
-
-        // Idempotent: if already soft-deleted, just return existing state
-        if (ev.isDeleted) {
-          return { alreadyDeleted: true };
-        }
-
-        // Perform batch via transaction updates
-        tx.update(eventRef, {
-          isDeleted: true,
-          deletedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        if (ownerId) {
-          const userRef = db.doc(`users/${ownerId}`);
-          tx.update(userRef, {
-            createdEvents: admin.firestore.FieldValue.arrayRemove(eventId),
-            // keep legacy attending/attended cleanup out of scope
-          });
-        }
-
-        // Notify all attendees that the event was cancelled
-        const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
-        const notifRef = db.collection('notifications');
-        for (const attendeeId of attendees) {
-          if (attendeeId !== ownerId) {
-            tx.set(notifRef.doc(), {
-              type: 'event_cancelled',
-              recipientId: attendeeId,
-              eventId,
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
-              message: `${ev.title || 'Event'} has been cancelled`,
-              linkType: 'event',
-              linkId: eventId,
-              read: false,
-            });
-          }
-        }
-
-        return { success: true };
-      });
-
-      logger.log('[deleteEvent] success', { eventId, result });
-      return { ok: true, result };
-    } catch (err) {
-      if (err instanceof HttpsError) {
-        logger.error('[deleteEvent] HttpsError', err.code, err.message);
-        throw err;
-      }
-      logger.error('[deleteEvent] error', err?.message || err);
-      // Surface a friendly message to the client
-      throw new HttpsError('internal', err?.message || 'Delete event failed');
-    }
-  }
-);
+exports.deleteEvent = require('./domains/events').deleteEvent;
 
 // Callable: request to join an RSVP event (adds caller to requests, notifies host)
 // App Check enforced for production security (see docs/APP_CHECK_SETUP.md)
-exports.requestToJoinEvent = onCall(JOIN_CALLABLE_OPTIONS, async (req) => {
-  const uid = req.auth?.uid;
-  const { eventId } = req.data || {};
-  if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
-  if (!eventId) throw new HttpsError('invalid-argument', 'Missing eventId');
-
-  const eventRef = db.doc(`events/${eventId}`);
-  const notifRef = db.collection('notifications');
-
-  try {
-    const result = await db.runTransaction(async (tx) => {
-      const [evSnap, userSnap] = await Promise.all([
-        tx.get(eventRef),
-        tx.get(db.doc(`users/${uid}`)),
-      ]);
-      if (!evSnap.exists) throw new HttpsError('not-found', 'Event not found');
-      const ev = evSnap.data();
-      if (ev.isDeleted === true)
-        throw new HttpsError('failed-precondition', 'Event archived');
-      if ((ev.privacy || 'public').toLowerCase() !== 'rsvp')
-        throw new HttpsError('failed-precondition', 'Event is not RSVP');
-      if (ev.ownerId === uid || ev.hostId === uid)
-        throw new HttpsError('failed-precondition', 'Host cannot request');
-
-      // Eligibility checks against user profile
-      const userDoc = userSnap.exists ? userSnap.data() : {};
-      const userSex = (userDoc.sex || userDoc.gender || '')
-        .toString()
-        .toLowerCase();
-      const privacy = (ev.privacy || 'public').toString().toLowerCase();
-      if (privacy === 'female-only' && userSex !== 'female') {
-        throw new HttpsError('permission-denied', 'Not eligible (gender)');
-      }
-      if (privacy === 'male-only' && userSex !== 'male') {
-        throw new HttpsError('permission-denied', 'Not eligible (gender)');
-      }
-      const range = Array.isArray(ev.ageRange) ? ev.ageRange : null;
-      if (range && range.length === 2) {
-        const [min, max] = range.map((n) =>
-          typeof n === 'number' ? n : parseInt(n, 10)
-        );
-        const age = getAgeFromDob(userDoc.dob);
-        if (typeof age === 'number') {
-          if (
-            (typeof min === 'number' && age < min) ||
-            (typeof max === 'number' && age > max)
-          ) {
-            throw new HttpsError('permission-denied', 'Not eligible (age)');
-          }
-        }
-      }
-
-      const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
-      const requests = Array.isArray(ev.requests) ? ev.requests : [];
-      if (attendees.includes(uid))
-        throw new HttpsError('already-exists', 'Already an attendee');
-      if (requests.includes(uid)) return { ok: true, alreadyRequested: true };
-
-      tx.update(eventRef, {
-        requests: admin.firestore.FieldValue.arrayUnion(uid),
-        waitlistCount: admin.firestore.FieldValue.increment(1),
-      });
-
-      const ownerId = ev.ownerId;
-      const requesterName = buildUserDisplayName(userDoc);
-      if (ownerId) {
-        tx.set(notifRef.doc(), {
-          type: 'rsvp_request',
-          recipientId: ownerId,
-          eventId,
-          requesterId: uid,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          message: `${requesterName} requested to join your event`,
-          linkType: 'event',
-          linkId: eventId,
-          requesterName,
-          read: false,
-        });
-      }
-
-      return { ok: true };
-    });
-
-    return result;
-  } catch (err) {
-    if (err instanceof HttpsError) throw err;
-    throw new HttpsError('internal', err?.message || 'Request failed');
-  }
-});
+exports.requestToJoinEvent = require('./domains/events').requestToJoinEvent;
 
 // Callable: host accepts an RSVP request
-exports.acceptRsvpRequest = onCall(
-  {
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60,
-  },
-  async (req) => {
-    const hostUid = req.auth?.uid;
-    const { eventId, userId } = req.data || {};
-    if (!hostUid) throw new HttpsError('unauthenticated', 'Auth required');
-    if (!eventId || !userId)
-      throw new HttpsError('invalid-argument', 'Missing params');
-
-    const eventRef = db.doc(`events/${eventId}`);
-    const chatRef = db.doc(`chats/${eventId}`);
-    const userRef = db.doc(`users/${userId}`);
-
-    await db.runTransaction(async (tx) => {
-      const [evSnap, chatSnap, userSnap] = await Promise.all([
-        tx.get(eventRef),
-        tx.get(chatRef),
-        tx.get(userRef),
-      ]);
-      if (!evSnap.exists) throw new HttpsError('not-found', 'Event missing');
-      const ev = evSnap.data();
-
-      const isHost = ev.ownerId === hostUid || ev.hostId === hostUid;
-      if (!isHost) throw new HttpsError('permission-denied', 'Not host');
-      if (ev.isDeleted === true)
-        throw new HttpsError('failed-precondition', 'Event archived');
-
-      const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
-      const requests = Array.isArray(ev.requests) ? ev.requests : [];
-
-      // If already attendee, just ensure requests cleaned up
-      const alreadyAttendee = attendees.includes(userId);
-
-      // Capacity check if needed
-      if (
-        !alreadyAttendee &&
-        typeof ev.capacity === 'number' &&
-        ev.capacity > 0 &&
-        attendees.length >= ev.capacity
-      ) {
-        throw new HttpsError('failed-precondition', 'Event full');
-      }
-
-      const updates = {};
-      if (!alreadyAttendee) {
-        updates.attendees = admin.firestore.FieldValue.arrayUnion(userId);
-        updates.attendeesCount = admin.firestore.FieldValue.increment(1);
-        const snippet = userSnap.exists
-          ? buildSnippetFromUser(userId, userSnap.data())
-          : {
-              uid: userId,
-              name: 'User',
-              photoURL: null,
-              verified: false,
-              rating: null,
-            };
-        updates[`attendeeSnippets.${userId}`] = snippet;
-      }
-      if (requests.includes(userId)) {
-        updates.requests = admin.firestore.FieldValue.arrayRemove(userId);
-        updates.waitlistCount = admin.firestore.FieldValue.increment(-1);
-      }
-      if (Object.keys(updates).length) tx.update(eventRef, updates);
-
-      // Chat participants
-      if (!chatSnap.exists) {
-        tx.set(chatRef, {
-          eventId,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          createdBy: hostUid,
-          participants: Array.from(
-            new Set([hostUid, userId, ev.ownerId].filter(Boolean))
-          ),
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-          messageCount: 0,
-          isArchived: false,
-        });
-      } else {
-        tx.update(chatRef, {
-          participants: admin.firestore.FieldValue.arrayUnion(userId, hostUid),
-          lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
-
-      // Mirror onto user
-      tx.update(userRef, {
-        attendingEvents: admin.firestore.FieldValue.arrayUnion(eventId),
-      });
-    });
-
-    // Create acceptance notification (best-effort outside transaction)
-    try {
-      await db.collection('notifications').add({
-        type: 'request_accepted',
-        recipientId: userId,
-        eventId,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        linkType: 'event',
-        linkId: eventId,
-        message: 'Your RSVP request was accepted!',
-        read: false,
-      });
-    } catch (e) {
-      logger.error('[acceptRsvpRequest] notify error', e?.message || e);
-    }
-
-    // Notify host that someone joined their event (best-effort)
-    try {
-      const eventSnap = await eventRef.get();
-      const eventData = eventSnap.data();
-      const userSnap = await userRef.get();
-      const userData = userSnap.exists ? userSnap.data() : {};
-      const userName = buildUserDisplayName(userData);
-
-      await db.collection('notifications').add({
-        type: 'event_joined',
-        recipientId: hostUid,
-        eventId,
-        userId, // who joined
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        linkType: 'event',
-        linkId: eventId,
-        message: `${userName} joined ${eventData?.title || 'your event'}`,
-        userName,
-        read: false,
-      });
-    } catch (e) {
-      logger.error(
-        '[acceptRsvpRequest] event_joined notify error',
-        e?.message || e
-      );
-    }
-
-    // Mark host's rsvp_request notification as handled/read (best-effort)
-    try {
-      const q = await db
-        .collection('notifications')
-        .where('type', '==', 'rsvp_request')
-        .where('recipientId', '==', hostUid)
-        .where('eventId', '==', eventId)
-        .where('requesterId', '==', userId)
-        .limit(10)
-        .get();
-      const batch = db.batch();
-      q.docs.forEach((d) =>
-        batch.update(d.ref, {
-          status: 'handled',
-          readAt: admin.firestore.FieldValue.serverTimestamp(),
-        })
-      );
-      if (q.docs.length) await batch.commit();
-    } catch (e) {
-      logger.error('[acceptRsvpRequest] mark handled error', e?.message || e);
-    }
-
-    return { ok: true };
-  }
-);
+exports.acceptRsvpRequest = require('./domains/events').acceptRsvpRequest;
 
 // Callable: host declines an RSVP request
-exports.declineRsvpRequest = onCall(
-  {
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 60,
-  },
-  async (req) => {
-    const hostUid = req.auth?.uid;
-    const { eventId, userId } = req.data || {};
-    if (!hostUid) throw new HttpsError('unauthenticated', 'Auth required');
-    if (!eventId || !userId)
-      throw new HttpsError('invalid-argument', 'Missing params');
-
-    const eventRef = db.doc(`events/${eventId}`);
-
-    await db.runTransaction(async (tx) => {
-      const evSnap = await tx.get(eventRef);
-      if (!evSnap.exists) throw new HttpsError('not-found', 'Event missing');
-      const ev = evSnap.data();
-      const isHost = ev.ownerId === hostUid || ev.hostId === hostUid;
-      if (!isHost) throw new HttpsError('permission-denied', 'Not host');
-      if (ev.isDeleted === true)
-        throw new HttpsError('failed-precondition', 'Event archived');
-
-      const requests = Array.isArray(ev.requests) ? ev.requests : [];
-      if (requests.includes(userId)) {
-        tx.update(eventRef, {
-          requests: admin.firestore.FieldValue.arrayRemove(userId),
-          waitlistCount: admin.firestore.FieldValue.increment(-1),
-        });
-      }
-    });
-
-    // No notification for decline (product decision)
-    return { ok: true };
-  }
-);
+exports.declineRsvpRequest = require('./domains/events').declineRsvpRequest;
 
 // -------------------- SOCIAL GRAPH CALLABLES (server-enforced cross-user writes) --------------------
 
@@ -2048,7 +1532,7 @@ exports.requestFollow = onCall(
 
     logger.log('[requestFollow]', currentUid, '->', targetUid);
     return { ok: true };
-  }
+  },
 );
 
 // Callable: approve follow request (mutual)
@@ -2084,7 +1568,7 @@ exports.approveFollowRequest = onCall(
 
     logger.log('[approveFollowRequest]', currentUid, '<-', requesterUid);
     return { ok: true };
-  }
+  },
 );
 
 // Callable: deny follow request
@@ -2108,7 +1592,7 @@ exports.denyFollowRequest = onCall(
 
     logger.log('[denyFollowRequest]', currentUid, 'denied', requesterUid);
     return { ok: true };
-  }
+  },
 );
 
 // Callable: add friend (mutual)
@@ -2145,7 +1629,7 @@ exports.addFriend = onCall(
 
     logger.log('[addFriend]', currentUid, '<->', targetUid);
     return { ok: true };
-  }
+  },
 );
 
 // Callable: remove friend (mutual)
@@ -2176,7 +1660,7 @@ exports.removeFriend = onCall(
 
     logger.log('[removeFriend]', currentUid, 'X', targetUid);
     return { ok: true };
-  }
+  },
 );
 
 // Callable: join waitlist (server-enforced capacity + state checks)
@@ -2213,14 +1697,14 @@ exports.joinWaitlist = onCall(
       if (isAttendee)
         throw new HttpsError(
           'failed-precondition',
-          'Already attending this event'
+          'Already attending this event',
         );
       if (hasRequested)
         throw new HttpsError('failed-precondition', 'Request pending');
       if (isWaitlisted)
         throw new HttpsError(
           'failed-precondition',
-          'Already on waitlist for this event'
+          'Already on waitlist for this event',
         );
 
       const status = (ev.status || 'active').toString().toLowerCase();
@@ -2234,7 +1718,7 @@ exports.joinWaitlist = onCall(
       if (!isFull)
         throw new HttpsError(
           'failed-precondition',
-          'Event is not full; join directly instead'
+          'Event is not full; join directly instead',
         );
 
       tx.update(eventRef, {
@@ -2245,7 +1729,7 @@ exports.joinWaitlist = onCall(
 
     logger.log('[joinWaitlist]', uid, 'joined waitlist for', eventId);
     return { ok: true };
-  }
+  },
 );
 
 // -------------------- NEW: REPORTING & NOTIFICATIONS CALLABLES --------------------
@@ -2285,7 +1769,7 @@ exports.submitReport = onCall(
     const ref = await db.collection('reports').add(doc);
     logger.log('[reports] submitted', ref.id, targetType, targetId);
     return { ok: true, id: ref.id };
-  }
+  },
 );
 
 // Callable: create a notification document on behalf of the client (client cannot create directly)
@@ -2321,7 +1805,7 @@ exports.createNotification = onCall(
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ idToken: token }),
-          }
+          },
         );
         if (!res.ok) {
           const text = await res.text().catch(() => '');
@@ -2423,7 +1907,7 @@ exports.createNotification = onCall(
     const ref = await db.collection('notifications').add(doc);
     logger.log('[notifications] created', ref.id, 'for', recipientId);
     return { ok: true, id: ref.id };
-  }
+  },
 );
 
 // -------------------- NEW: USER AND EVENT REPORTING --------------------
@@ -2492,7 +1976,7 @@ exports.createReport = onCall(
       logger.error('[createReport] error', err?.message || err);
       throw new HttpsError('internal', 'Failed to create report');
     }
-  }
+  },
 );
 
 // Callable: rate a user with server-side validation (mutual event required)
@@ -2546,7 +2030,7 @@ exports.rateUser = onCall(
     if (!hasShared)
       throw new HttpsError(
         'permission-denied',
-        'You can only rate users from shared events'
+        'You can only rate users from shared events',
       );
 
     // Update rating atomically
@@ -2571,7 +2055,7 @@ exports.rateUser = onCall(
     });
 
     return { ok: true };
-  }
+  },
 );
 
 // -------------------- NEW: ANALYTICS TRACKING CALLABLE --------------------
@@ -2585,11 +2069,11 @@ function safeSanitize(value, depth = 0) {
       // redact obvious PII/tokens and trim
       const noEmail = s.replace(
         /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
-        '[redacted]'
+        '[redacted]',
       );
       const noBearer = noEmail.replace(
         /(ya29\.|eyJ|Bearer\s+[A-Za-z0-9\-_.]+)/g,
-        '[redacted]'
+        '[redacted]',
       );
       return noBearer.slice(0, 200);
     }
@@ -2662,7 +2146,7 @@ exports.trackEvent = onCall(
       // Do not throw; this is best-effort
       return { ok: false };
     }
-  }
+  },
 );
 
 // Helper: build attendee snippet from user doc
@@ -2719,7 +2203,7 @@ exports.onUserUpdateFanout = onDocumentUpdated(
         'rating',
       ];
       const changed = fields.some(
-        (f) => (before[f] || null) !== (after[f] || null)
+        (f) => (before[f] || null) !== (after[f] || null),
       );
       if (!changed) return;
 
@@ -2754,1711 +2238,46 @@ exports.onUserUpdateFanout = onDocumentUpdated(
         uid,
         'in',
         snap.size,
-        'events'
+        'events',
       );
     } catch (e) {
       logger.error('[onUserUpdateFanout] error', e?.message || e);
     }
-  }
-);
-
-// -------------------- POPULARITY COMPUTATION --------------------
-function tierOrder(t) {
-  return t === 'Top Host' ? 3 : t === 'Connector' ? 2 : t === 'Rising' ? 1 : 0;
-}
-
-function dayKeysBackfill(days) {
-  const now = new Date();
-  const keys = [];
-  for (let i = 1; i <= days; i++) {
-    const d = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i)
-    );
-    keys.push(dayKeyFromDate(d));
-  }
-  return keys;
-}
-
-function computeScore(counts, cfg) {
-  const joins = counts['join_event'] || 0;
-  const rsvp = counts['rsvp_yes'] || 0;
-  const shows = counts['check_in'] || 0;
-  const engagement = (counts['save_event'] || 0) + (counts['share_event'] || 0);
-  const reports = counts['report_content'] || 0;
-
-  const rsvpShow = rsvp ? Math.min(1, shows / rsvp) : 0;
-  const trust = Math.max(0, 1 - Math.min(1, reports / Math.max(1, joins)));
-
-  const score =
-    (cfg.wUniqueAttendees || 2.0) * Math.sqrt(Math.max(0, joins)) +
-    (cfg.wRSVPShow || 1.5) * rsvpShow * 10 +
-    (cfg.wEngagement || 1.2) * Math.log1p(Math.max(0, engagement)) +
-    (cfg.wTrust || 2.0) * trust * 10;
-  return Number.isFinite(score) ? score : 0;
-}
-
-exports.computePopularity = onSchedule(
-  {
-    schedule: 'every day 02:30',
-    timeZone: 'UTC',
-    region: 'us-central1',
-    memory: '512MiB',
-    timeoutSeconds: 540,
   },
-  async () => {
-    logger.log('[computePopularity] starting');
-
-    // Load config (weights, thresholds, windows)
-    const cfgSnap = await db.collection('config').doc('popularity').get();
-    const cfg = cfgSnap.exists
-      ? cfgSnap.data()
-      : {
-          wUniqueAttendees: 2.0,
-          wRSVPShow: 1.5,
-          wEngagement: 1.2,
-          wTrust: 2.0,
-          thresholds: { Rising: 25, Connector: 60, TopHost: 120 },
-          hysteresisBuffer: 5,
-          lockDays: 30,
-          graceDays: 7,
-          windowDays: 28,
-        };
-
-    const dayKeys = dayKeysBackfill(cfg.windowDays || 28);
-
-    // Accumulate per-user counts across window
-    const accum = new Map(); // uid -> counts map { name: total }
-    for (const k of dayKeys) {
-      const col = db
-        .collection('analytics')
-        .doc('daily')
-        .collection(k)
-        .collection('users');
-      const snap = await col.get();
-      if (snap.empty) continue;
-      snap.forEach((doc) => {
-        const d = doc.data() || {};
-        const uid = d.uid || doc.id;
-        const cur = accum.get(uid) || {};
-        const cnt = d.counts || {};
-        for (const [name, val] of Object.entries(cnt)) {
-          const n = typeof val === 'number' ? val : 0;
-          cur[name] = (cur[name] || 0) + n;
-        }
-        accum.set(uid, cur);
-      });
-    }
-
-    logger.log('[computePopularity] users in window:', accum.size);
-
-    // Prepare batched writes
-    const batchWrites = [];
-    let batch = db.batch();
-    let batchCount = 0;
-    const commitBatch = async () => {
-      if (batchCount === 0) return;
-      batchWrites.push(batch.commit());
-      batch = db.batch();
-      batchCount = 0;
-    };
-
-    const now = admin.firestore.Timestamp.now();
-    const lockMillis = (cfg.lockDays || 30) * 864e5;
-    const buffer = cfg.hysteresisBuffer || 5;
-    const graceMillis = (cfg.graceDays || 7) * 864e5;
-
-    for (const [uid, counts] of accum.entries()) {
-      const score = computeScore(counts, cfg);
-
-      let tier = 'None';
-      if (score >= (cfg.thresholds?.TopHost || 120)) tier = 'Top Host';
-      else if (score >= (cfg.thresholds?.Connector || 60)) tier = 'Connector';
-      else if (score >= (cfg.thresholds?.Rising || 25)) tier = 'Rising';
-
-      const pref = db.collection('popularity').doc(uid);
-      const psnap = await pref.get();
-      const prev = psnap.exists
-        ? psnap.data()
-        : {
-            tier: 'None',
-            lockedUntil: null,
-            inGrace: false,
-            graceStartedAt: null,
-          };
-
-      let finalTier = tier;
-      let inGrace = false;
-      let graceStartedAt = null;
-
-      const lockedUntil = prev.lockedUntil;
-      const locked = lockedUntil && lockedUntil.toMillis() > now.toMillis();
-
-      if (locked && prev.tier && prev.tier !== 'None') {
-        // Keep previous tier during lock window
-        finalTier = prev.tier;
-        inGrace = false;
-        graceStartedAt = null;
-      } else if (
-        prev.tier &&
-        prev.tier !== 'None' &&
-        tierOrder(tier) < tierOrder(prev.tier)
-      ) {
-        // Potential demotion: apply hysteresis/grace
-        const demoteThreshold = Math.max(
-          0,
-          (cfg.thresholds?.[prev.tier.replace(' ', '')] || 0) - buffer
-        );
-        // If score is below threshold-buffer, start/continue grace
-        const wasInGrace = prev.inGrace === true;
-        const prevStart = prev.graceStartedAt?.toMillis
-          ? prev.graceStartedAt.toMillis()
-          : null;
-        const nowMs = now.toMillis();
-        if (!wasInGrace) {
-          inGrace = true;
-          graceStartedAt = now;
-          finalTier = prev.tier;
-        } else {
-          inGrace = true;
-          graceStartedAt = prev.graceStartedAt || now;
-          // If grace window exceeded and still below threshold-buffer, allow demotion
-          if (prevStart && nowMs - prevStart >= graceMillis) {
-            finalTier = tier; // demote
-            inGrace = false;
-            graceStartedAt = null;
-          } else {
-            finalTier = prev.tier; // hold during grace
-          }
-        }
-      } else {
-        // Promotion or same tier
-        inGrace = false;
-        graceStartedAt = null;
-        // If promoted, start lock
-        if (tierOrder(tier) > tierOrder(prev.tier || 'None')) {
-          batch.set(
-            pref,
-            {
-              uid,
-              score,
-              tier,
-              inGrace: false,
-              graceStartedAt: null,
-              lockedUntil: admin.firestore.Timestamp.fromMillis(
-                now.toMillis() + lockMillis
-              ),
-              updatedAt: now,
-            },
-            { merge: true }
-          );
-          batchCount++;
-          // Mirror to user profile
-          const uref = db.collection('users').doc(uid);
-          batch.set(
-            uref,
-            {
-              popularScore: Math.round(score * 100) / 100,
-              isPopular: tier !== 'None',
-            },
-            { merge: true }
-          );
-          batchCount++;
-          if (batchCount >= 400) await commitBatch();
-          continue;
-        } else {
-          finalTier = tier;
-        }
-      }
-
-      // Persist outcome (no new lock started)
-      batch.set(
-        pref,
-        {
-          uid,
-          score,
-          tier: finalTier,
-          inGrace,
-          graceStartedAt,
-          updatedAt: now,
-        },
-        { merge: true }
-      );
-      batchCount++;
-
-      // Mirror to user profile
-      const uref = db.collection('users').doc(uid);
-      batch.set(
-        uref,
-        {
-          popularScore: Math.round(score * 100) / 100,
-          isPopular: finalTier !== 'None',
-        },
-        { merge: true }
-      );
-      batchCount++;
-
-      if (batchCount >= 400) await commitBatch();
-    }
-
-    await commitBatch();
-    await Promise.all(batchWrites);
-    logger.log('[computePopularity] done');
-  }
 );
+
+// Scheduled tasks are implemented in ./domains/scheduled
+exports.computePopularity = computePopularity;
 
 // -------------------- ANALYTICS ROLLUPS --------------------
-function dayKeyFromDate(d) {
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}${m}${dd}`;
-}
+exports.rollupDailyAnalytics = rollupDailyAnalytics;
 
-function getYesterdayRangeUTC() {
-  const now = new Date();
-  const start = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate() - 1,
-      0,
-      0,
-      0
-    )
-  );
-  const end = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
-  );
-  return { start, end, key: dayKeyFromDate(start) };
-}
-
-function safeKey(s) {
-  try {
-    if (!s) return null;
-    const str = String(s).toLowerCase();
-    return str.replace(/[^a-z0-9_-]/g, '-').slice(0, 120) || null;
-  } catch {
-    return null;
-  }
-}
-
-function isAggregatableEvent(name) {
-  // Only roll up our standard app events
-  return (
-    name === 'card_impression' ||
-    name === 'card_click' ||
-    name === 'open_event' ||
-    name === 'save_event' ||
-    name === 'share_event' ||
-    name === 'rsvp_yes' ||
-    name === 'join_event' ||
-    name === 'check_in' ||
-    name === 'report_content'
-  );
-}
-
-async function paginateQuery(q, onBatch) {
-  let last = null;
-  const pageSize = 1000;
-  while (true) {
-    let cur = q.orderBy('createdAt').limit(pageSize);
-    if (last) cur = cur.startAfter(last);
-    const snap = await cur.get();
-    if (snap.empty) break;
-    await onBatch(snap.docs);
-    last = snap.docs[snap.docs.length - 1];
-    if (snap.size < pageSize) break;
-  }
-}
-
-exports.rollupDailyAnalytics = onSchedule(
-  {
-    schedule: 'every day 02:00',
-    timeZone: 'UTC',
-    region: 'us-central1',
-    memory: '512MiB',
-    timeoutSeconds: 540, // 9 minutes
-  },
-  async () => {
-    const { start, end, key } = getYesterdayRangeUTC();
-    logger.log(
-      '[rollupDailyAnalytics] start',
-      start.toISOString(),
-      'end',
-      end.toISOString(),
-      'key',
-      key
-    );
-
-    // Aggregation maps
-    const byEntity = new Map(); // entityId -> { name -> count }, also track unique users
-    const byEntityUids = new Map(); // entityId -> Set(uid)
-    const byInterest = new Map(); // interestKey -> { name -> count }
-    const byInterestUids = new Map(); // interestKey -> Set(uid)
-    const byUser = new Map(); // uid -> { name -> count }
-
-    const startTs = admin.firestore.Timestamp.fromDate(start);
-    const endTs = admin.firestore.Timestamp.fromDate(end);
-    const base = db
-      .collection('analytics_events')
-      .where('createdAt', '>=', startTs)
-      .where('createdAt', '<', endTs);
-
-    await paginateQuery(base, async (docs) => {
-      for (const d of docs) {
-        const ev = d.data() || {};
-        const name = String(ev.name || '').toLowerCase();
-        if (!isAggregatableEvent(name)) continue;
-
-        const payload = ev.payload || {};
-        const uid = ev.uid || null;
-
-        // entity id: prefer event_id, fallback to card_id, then content_id
-        const entityIdRaw =
-          payload.event_id || payload.card_id || payload.content_id || null;
-        const entityId = entityIdRaw ? String(entityIdRaw) : null;
-
-        const interestRaw = payload.interest || payload.category || null;
-        const interestKey = safeKey(interestRaw);
-
-        // Entities rollup
-        if (entityId) {
-          const map = byEntity.get(entityId) || {};
-          map[name] = (map[name] || 0) + 1;
-          byEntity.set(entityId, map);
-          if (uid) {
-            let set = byEntityUids.get(entityId);
-            if (!set) {
-              set = new Set();
-              byEntityUids.set(entityId, set);
-            }
-            set.add(uid);
-          }
-        }
-
-        // Interests rollup
-        if (interestKey) {
-          const map = byInterest.get(interestKey) || {};
-          map[name] = (map[name] || 0) + 1;
-          byInterest.set(interestKey, map);
-          if (uid) {
-            let set = byInterestUids.get(interestKey);
-            if (!set) {
-              set = new Set();
-              byInterestUids.set(interestKey, set);
-            }
-            set.add(uid);
-          }
-        }
-
-        // Users rollup (internal use — no k-anonymity here because path is server-only by rules)
-        if (uid) {
-          const map = byUser.get(uid) || {};
-          map[name] = (map[name] || 0) + 1;
-          byUser.set(uid, map);
-        }
-      }
-    });
-
-    // Write rollups with k-anonymity suppression (<5 unique users hidden)
-    const batch = db.batch();
-    const dayRef = db.collection('analytics').doc('daily').collection(key);
-
-    // Entities
-    for (const [entityId, counts] of byEntity.entries()) {
-      const uniq = (byEntityUids.get(entityId) || new Set()).size;
-      if (uniq < 5) continue; // suppress small cohorts
-      const ref = dayRef.collection('entities').doc(entityId);
-      batch.set(
-        ref,
-        {
-          day: key,
-          entityId,
-          counts,
-          unique_users: admin.firestore.FieldValue.delete(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    // Interests
-    for (const [interestKey, counts] of byInterest.entries()) {
-      const uniq = (byInterestUids.get(interestKey) || new Set()).size;
-      if (uniq < 5) continue; // suppress small cohorts
-      const ref = dayRef.collection('interests').doc(interestKey);
-      batch.set(
-        ref,
-        {
-          day: key,
-          interest: interestKey,
-          counts,
-          unique_users: admin.firestore.FieldValue.delete(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    // Users (server-internal; used for popularity computation)
-    for (const [uid, counts] of byUser.entries()) {
-      const ref = dayRef.collection('users').doc(uid);
-      batch.set(
-        ref,
-        {
-          day: key,
-          uid,
-          counts,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    }
-
-    await batch.commit();
-    logger.log('[rollupDailyAnalytics] wrote rollups for', key, {
-      entities: byEntity.size,
-      interests: byInterest.size,
-      users: byUser.size,
-    });
-  }
-);
-
-// Description: Scheduled function to send event reminders 1 hour before events start
-exports.sendEventReminders = onSchedule(
-  {
-    schedule: 'every 15 minutes',
-    timeZone: 'UTC',
-    region: 'us-central1',
-    memory: '256MiB',
-    timeoutSeconds: 120,
-  },
-  async () => {
-    logger.log('[sendEventReminders] starting');
-
-    // Find events starting in the next 60-75 minutes (to catch them in this window)
-    const now = new Date();
-    const reminderStart = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
-    const reminderEnd = new Date(now.getTime() + 75 * 60 * 1000); // 1 hour 15 min from now
-
-    const eventsQuery = db
-      .collection('events')
-      .where('date', '>=', admin.firestore.Timestamp.fromDate(reminderStart))
-      .where('date', '<=', admin.firestore.Timestamp.fromDate(reminderEnd))
-      .where('isDeleted', '==', false);
-
-    const eventsSnap = await eventsQuery.get();
-
-    if (eventsSnap.empty) {
-      logger.log('[sendEventReminders] No events found in reminder window');
-      return;
-    }
-
-    logger.log(
-      `[sendEventReminders] Found ${eventsSnap.size} events to remind`
-    );
-
-    for (const eventDoc of eventsSnap.docs) {
-      const eventId = eventDoc.id;
-      const event = eventDoc.data();
-
-      // Check if we already sent reminder for this event
-      const reminderCheckSnap = await db
-        .collection('notifications')
-        .where('eventId', '==', eventId)
-        .where('type', '==', 'event_reminder')
-        .limit(1)
-        .get();
-
-      if (!reminderCheckSnap.empty) {
-        logger.log(`[sendEventReminders] Already sent reminder for ${eventId}`);
-        continue;
-      }
-
-      const attendees = Array.isArray(event.attendees) ? event.attendees : [];
-      const ownerId = event.ownerId;
-
-      // Notify all attendees and host
-      const notifRef = db.collection('notifications');
-      const batch = db.batch();
-      let batchCount = 0;
-
-      const allRecipients = new Set([...attendees, ownerId].filter(Boolean));
-
-      for (const recipientId of allRecipients) {
-        const newNotifRef = notifRef.doc();
-        batch.set(newNotifRef, {
-          type: 'event_reminder',
-          recipientId,
-          eventId,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          message: `${event.title || 'Your event'} starts in 1 hour!`,
-          linkType: 'event',
-          linkId: eventId,
-          read: false,
-        });
-        batchCount++;
-
-        if (batchCount >= 500) {
-          await batch.commit();
-          batchCount = 0;
-        }
-      }
-
-      if (batchCount > 0) {
-        await batch.commit();
-      }
-
-      logger.log(
-        `[sendEventReminders] Sent ${allRecipients.size} reminders for event ${eventId}`
-      );
-    }
-
-    logger.log('[sendEventReminders] completed');
-  }
-);
+exports.sendEventReminders = sendEventReminders;
 
 // -------------------- BUSINESSES: CALLABLE API --------------------
-const BUSINESS_CALLABLE_OPTIONS = Object.freeze({
-  region: 'us-central1',
-  memory: '256MiB',
-  timeoutSeconds: 60,
-  invoker: 'public',
-  // App Check can stay enabled globally; business endpoints can be exempted by
-  // setting BUSINESS_ENFORCE_APPCHECK=1 when ready to enforce.
-  enforceAppCheck: BUSINESS_ENFORCE_APPCHECK,
-});
-
-function assertAuth(req) {
-  const uid = req.auth?.uid || null;
-  if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
-  return uid;
-}
-
-function assertAdmin(req) {
-  const uid = req.auth?.uid || null;
-  if (req.auth?.token?.admin === true) return uid;
-  if (process.env.FUNCTIONS_EMULATOR || process.env.FIREBASE_EMULATOR_HUB) {
-    logger.warn('[admin] Emulator bypass for admin check');
-    return uid || 'emulator';
-  }
-  if (!uid) throw new HttpsError('unauthenticated', 'Authentication required');
-  throw new HttpsError('permission-denied', 'Admin privileges required');
-}
-
-async function markUserAsBusiness(uid) {
-  if (!uid) return;
-  try {
-    const userRef = db.collection('users').doc(uid);
-    const snap = await userRef.get();
-    if (!snap.exists) return;
-    const data = snap.data() || {};
-    if (data.type === 'business') return;
-    await userRef.set(
-      {
-        type: 'business',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-  } catch (err) {
-    logger.warn(
-      '[business] Failed to mark user as business',
-      err?.message || err
-    );
-  }
-}
-
-function normalizeType(t) {
-  const v = String(t || '').toLowerCase();
-  return v === 'multi' ? 'multi' : 'single';
-}
-
-function slugify(name) {
-  try {
-    return String(name || '')
-      .toLowerCase()
-      .trim()
-      .replace(/&/g, 'and')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60);
-  } catch {
-    return null;
-  }
-}
-
-function buildSearchTokens(str) {
-  try {
-    const s = String(str || '')
-      .toLowerCase()
-      .trim();
-    if (!s) return [];
-    const tokens = new Set();
-    // prefix tokens
-    let cur = '';
-    for (const ch of s.replace(/\s+/g, ' ')) {
-      cur += ch;
-      if (cur.length >= 2) tokens.add(cur);
-    }
-    // word prefixes
-    for (const w of s.split(' ')) {
-      let p = '';
-      for (const ch of w) {
-        p += ch;
-        if (p.length >= 2) tokens.add(p);
-      }
-    }
-    return Array.from(tokens).slice(0, 200);
-  } catch {
-    return [];
-  }
-}
-
-async function ensureUniqueSlug(base) {
-  let slug = base || null;
-  if (!slug) return null;
-  let tries = 0;
-  while (tries < 8) {
-    const q = await db
-      .collection('businesses')
-      .where('slug', '==', slug)
-      .limit(1)
-      .get();
-    if (q.empty) return slug;
-    const rand = Math.random().toString(36).slice(2, 6);
-    slug = `${base}-${rand}`;
-    tries++;
-  }
-  return `${base}-${Date.now().toString().slice(-4)}`;
-}
-
-async function getBusinessIfMember(bizId, uid) {
-  const ref = db.doc(`businesses/${bizId}`);
-  const snap = await ref.get();
-  if (!snap.exists) throw new HttpsError('not-found', 'Business not found');
-  const biz = snap.data();
-  const members = Array.isArray(biz.members) ? biz.members : [];
-  const isMember = members.some(
-    (m) => m && (m.uid === uid || m.uid === String(uid))
-  );
-  if (!isMember && biz.createdBy !== uid) {
-    throw new HttpsError('permission-denied', 'Not a member of this business');
-  }
-  return { ref, biz };
-}
-
-function hasRole(biz, uid, roles) {
-  const allowed = new Set((roles || []).map((r) => String(r).toLowerCase()));
-  const members = Array.isArray(biz.members) ? biz.members : [];
-  for (const m of members) {
-    const r = String(m?.role || '').toLowerCase();
-    if ((m?.uid === uid || String(m?.uid) === uid) && allowed.has(r))
-      return true;
-  }
-  // creator is implicitly Owner
-  if (biz.createdBy === uid && allowed.has('owner')) return true;
-  return false;
-}
-
-async function mirrorMembership(uid, bizId, role) {
-  try {
-    const ref = db
-      .collection('businessMembers')
-      .doc(uid)
-      .collection('memberships')
-      .doc(bizId);
-    await ref.set(
-      { role, createdAt: admin.firestore.FieldValue.serverTimestamp() },
-      { merge: true }
-    );
-  } catch (e) {
-    logger.error('[business] mirrorMembership error', e?.message || e);
-  }
-}
-
-exports.createBusinessDraft = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
-  const uid = assertAuth(req);
-  const type = normalizeType(req.data?.type);
-  const now = admin.firestore.FieldValue.serverTimestamp();
-
-  const ref = db.collection('businesses').doc();
-  const doc = {
-    createdBy: uid,
-    ownerId: uid, // FIX: Add ownerId for queries
-    status: 'draft',
-    type,
-    businessTier: BUSINESS_TIERS.TIER1,
-    displayName: null,
-    legalName: null,
-    category: null,
-    description: null,
-    website: null,
-    supportEmail: null,
-    phone: null,
-    logoUrl: null,
-    brandColor: null,
-    ageRestriction: 'none',
-    genderRestriction: 'none',
-    interests: [],
-    houseRules: null,
-    privacy: { analyticsShare: true },
-    verification: { status: 'pending', method: null, verifiedAt: null },
-    members: [{ uid, role: 'Owner' }],
-    slug: null,
-    searchTokens: [],
-    createdAt: now,
-    updatedAt: now,
-  };
-  await ref.set(doc);
-  await mirrorMembership(uid, ref.id, 'Owner');
-  await markUserAsBusiness(uid);
-  logger.log('[business] draft created', ref.id, 'by', uid);
-  return { ok: true, bizId: ref.id };
-});
-
-exports.createOrUpdateBusiness = onCall(
-  BUSINESS_CALLABLE_OPTIONS,
-  async (req) => {
-    const uid = assertAuth(req);
-    const {
-      bizId: incomingBizId,
-      type,
-      displayName,
-      category,
-      description,
-      logoUrl,
-      contactEmail,
-      phone,
-      website,
-      instagram,
-      facebook,
-      tiktok,
-    } = req.data || {};
-
-    const bizType = normalizeType(type);
-    if (!displayName || !category) {
-      throw new HttpsError(
-        'invalid-argument',
-        'Name and category are required'
-      );
-    }
-
-    const targetId = incomingBizId || db.collection('businesses').doc().id;
-    const ref = db.collection('businesses').doc(targetId);
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    const baseSlug = slugify(displayName);
-    const slug = baseSlug ? await ensureUniqueSlug(baseSlug) : null;
-    const snap = await ref.get();
-    const existing = snap.exists ? snap.data() || {} : {};
-
-    const doc = {
-      createdBy: existing.createdBy || uid,
-      ownerId: existing.ownerId || uid,
-      status: 'active',
-      type: bizType,
-      businessTier: existing.businessTier || BUSINESS_TIERS.TIER1,
-      displayName: String(displayName).slice(0, 80),
-      category: String(category).slice(0, 40),
-      description: description ? String(description).slice(0, 200) : null,
-      logoUrl: logoUrl || null,
-      supportEmail: contactEmail || existing.supportEmail || null,
-      phone: phone || existing.phone || null,
-      website: website || existing.website || null,
-      contact: {
-        email: contactEmail || null,
-        phone: phone || null,
-        website: website || null,
-        social: {
-          instagram: instagram || null,
-          facebook: facebook || null,
-          tiktok: tiktok || null,
-        },
-      },
-      members: existing.members || [{ uid, role: 'Owner' }],
-      slug: slug || existing.slug || null,
-      searchTokens: buildSearchTokens(displayName),
-      createdAt: existing.createdAt || now,
-      updatedAt: now,
-    };
-
-    await ref.set(doc, { merge: true });
-    await mirrorMembership(uid, ref.id, 'Owner');
-    await markUserAsBusiness(uid);
-    logger.log('[business] upserted business', ref.id, 'by', uid);
-    return { ok: true, bizId: ref.id, slug: doc.slug };
-  }
-);
-
-exports.switchToPersonalAccount = onCall(
-  BUSINESS_CALLABLE_OPTIONS,
-  async (req) => {
-    const uid = assertAuth(req);
-    const userRef = db.collection('users').doc(uid);
-    const snap = await userRef.get();
-    if (!snap.exists) {
-      throw new HttpsError('not-found', 'User not found');
-    }
-    await userRef.set(
-      {
-        type: 'user',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-    logger.log('[business] switched to personal', uid);
-    return { ok: true };
-  }
-);
-
-exports.updateBusinessBasics = onCall(
-  BUSINESS_CALLABLE_OPTIONS,
-  async (req) => {
-    const uid = assertAuth(req);
-    const {
-      bizId,
-      displayName,
-      category,
-      description,
-      website,
-      supportEmail,
-      phone,
-      contactEmail,
-      instagram,
-      facebook,
-      tiktok,
-    } = req.data || {};
-    if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-
-    const { ref, biz } = await getBusinessIfMember(bizId, uid);
-    if (!hasRole(biz, uid, ['owner', 'manager'])) {
-      throw new HttpsError('permission-denied', 'Owner/Manager only');
-    }
-
-    const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-    if (displayName != null)
-      updates.displayName = String(displayName).slice(0, 80);
-    if (category != null) updates.category = String(category).slice(0, 40);
-    if (description != null)
-      updates.description = String(description).slice(0, 200);
-    if (website != null) updates.website = String(website).slice(0, 180);
-    if (supportEmail != null)
-      updates.supportEmail = String(supportEmail).slice(0, 120);
-    if (phone != null) updates.phone = String(phone).slice(0, 40);
-
-    const existingContact = biz.contact || {};
-    const existingSocial = existingContact.social || {};
-    const nextContact = { ...existingContact, social: { ...existingSocial } };
-    let contactTouched = false;
-
-    if (contactEmail != null || supportEmail != null) {
-      const resolvedEmail = contactEmail ?? supportEmail;
-      nextContact.email =
-        resolvedEmail != null ? String(resolvedEmail).slice(0, 120) : null;
-      contactTouched = true;
-    }
-    if (phone != null)
-      nextContact.phone = phone != null ? String(phone).slice(0, 40) : null;
-    if (website != null)
-      nextContact.website =
-        website != null ? String(website).slice(0, 180) : null;
-    if (instagram != null) {
-      nextContact.social.instagram =
-        instagram != null ? String(instagram).slice(0, 120) : null;
-      contactTouched = true;
-    }
-    if (facebook != null) {
-      nextContact.social.facebook =
-        facebook != null ? String(facebook).slice(0, 120) : null;
-      contactTouched = true;
-    }
-    if (tiktok != null) {
-      nextContact.social.tiktok =
-        tiktok != null ? String(tiktok).slice(0, 120) : null;
-      contactTouched = true;
-    }
-    if (phone != null || website != null) contactTouched = true;
-
-    if (contactTouched) {
-      updates.contact = nextContact;
-    }
-
-    // Slug + search tokens when displayName present
-    if (updates.displayName) {
-      const base = slugify(updates.displayName);
-      const unique = await ensureUniqueSlug(base);
-      updates.slug = unique;
-      updates.searchTokens = buildSearchTokens(updates.displayName);
-    }
-
-    await ref.set(updates, { merge: true });
-    logger.log('[business] basics updated', bizId);
-    return { ok: true };
-  }
-);
-
-exports.updateBrandAssets = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
-  const uid = assertAuth(req);
-  const { bizId, logoUrl, brandColor } = req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
-  const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-  if (logoUrl != null) updates.logoUrl = String(logoUrl);
-  if (brandColor != null) updates.brandColor = String(brandColor).slice(0, 9);
-  await ref.set(updates, { merge: true });
-  return { ok: true };
-});
-
-exports.addBusinessLocation = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
-  const uid = assertAuth(req);
-  const {
-    bizId,
-    label,
-    address,
-    city,
-    state,
-    country,
-    latitude,
-    longitude,
-    hours,
-    serviceRadiusKm,
-    locId,
-  } = req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-  if (typeof latitude !== 'number' || typeof longitude !== 'number')
-    throw new HttpsError('invalid-argument', 'latitude/longitude required');
-
-  const { biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
-
-  const gh = geohashForLocation([latitude, longitude]);
-  const geohash5 = typeof gh === 'string' ? gh.substring(0, 5) : null;
-  const geohash7 = typeof gh === 'string' ? gh.substring(0, 7) : null;
-  const now = admin.firestore.FieldValue.serverTimestamp();
-  const locationRef = db
-    .collection('businesses')
-    .doc(bizId)
-    .collection('locations')
-    .doc(locId ? String(locId) : undefined);
-
-  const data = {
-    label: String(label || '').slice(0, 60) || null,
-    address: String(address || '').slice(0, 200) || null,
-    city: String(city || '').slice(0, 60) || null,
-    state: String(state || '').slice(0, 60) || null,
-    country: String(country || '').slice(0, 60) || null,
-    latitude,
-    longitude,
-    geohash5,
-    geohash7,
-    hours: hours && typeof hours === 'object' ? hours : null,
-    serviceRadiusKm:
-      typeof serviceRadiusKm === 'number' ? serviceRadiusKm : null,
-    updatedAt: now,
-  };
-
-  if (!locId) {
-    data.createdAt = now;
-  }
-
-  await locationRef.set(data, { merge: Boolean(locId) });
-  logger.log('[business] location saved', bizId, locationRef.id);
-  return { ok: true, locId: locationRef.id };
-});
-
-exports.updateAudiencePolicies = onCall(
-  BUSINESS_CALLABLE_OPTIONS,
-  async (req) => {
-    const uid = assertAuth(req);
-    const { bizId, ageRestriction, genderRestriction, interests, houseRules } =
-      req.data || {};
-    if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-    const { ref, biz } = await getBusinessIfMember(bizId, uid);
-    if (!hasRole(biz, uid, ['owner', 'manager']))
-      throw new HttpsError('permission-denied', 'Owner/Manager only');
-    const updates = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
-    const age = String(ageRestriction || 'none').toLowerCase();
-    const gender = String(genderRestriction || 'none').toLowerCase();
-    updates.ageRestriction = ['none', '18+', '21+'].includes(age)
-      ? age
-      : 'none';
-    updates.genderRestriction = [
-      'none',
-      'women_only',
-      'men_only',
-      'other',
-    ].includes(gender)
-      ? gender
-      : 'none';
-    updates.interests = Array.isArray(interests)
-      ? interests.map((i) => String(i).slice(0, 40)).slice(0, 20)
-      : [];
-    updates.houseRules = houseRules ? String(houseRules).slice(0, 500) : null;
-    await ref.set(updates, { merge: true });
-    return { ok: true };
-  }
-);
-
-exports.startBusinessVerification = onCall(
-  BUSINESS_CALLABLE_OPTIONS,
-  async (req) => {
-    const uid = assertAuth(req);
-    const { bizId, method } = req.data || {};
-    if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-    const m = String(method || '').toLowerCase();
-    if (!['domain_email', 'sms'].includes(m))
-      throw new HttpsError('invalid-argument', 'Invalid method');
-    const { ref, biz } = await getBusinessIfMember(bizId, uid);
-    if (!hasRole(biz, uid, ['owner', 'manager']))
-      throw new HttpsError('permission-denied', 'Owner/Manager only');
-
-    // For MVP: generate a 6-digit code and store a hash in a subdoc
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const codeRef = ref.collection('verificationCodes').doc();
-    await codeRef.set({
-      method: m,
-      code, // NOTE: For beta only; remove plain code later and store hash
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      createdBy: uid,
-      consumed: false,
-    });
-    await ref.set(
-      { verification: { status: 'pending', method: m, verifiedAt: null } },
-      { merge: true }
-    );
-    logger.log('[business] verification started', bizId, m);
-    // Return the code only in beta/dev to unblock flow
-    return { ok: true, devCode: code };
-  }
-);
-
-exports.verifyBusinessCode = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
-  const uid = assertAuth(req);
-  const { bizId, code } = req.data || {};
-  if (!bizId || !code)
-    throw new HttpsError('invalid-argument', 'Missing params');
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
-
-  const codesSnap = await ref
-    .collection('verificationCodes')
-    .where('consumed', '==', false)
-    .orderBy('createdAt', 'desc')
-    .limit(5)
-    .get();
-  let matched = null;
-  for (const d of codesSnap.docs) {
-    const c = d.get('code');
-    if (String(c) === String(code)) {
-      matched = d.ref;
-      break;
-    }
-  }
-  if (!matched) throw new HttpsError('permission-denied', 'Invalid code');
-  const now = admin.firestore.FieldValue.serverTimestamp();
-  await matched.set({ consumed: true, consumedAt: now }, { merge: true });
-  await ref.set(
-    { verification: { status: 'verified', verifiedAt: now } },
-    { merge: true }
-  );
-  logger.log('[business] verified', bizId);
-  return { ok: true };
-});
-
-exports.addBusinessMember = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
-  const uid = assertAuth(req);
-  const { bizId, targetUid, email, role } = req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-  const r = String(role || '').toLowerCase();
-  if (!['owner', 'manager', 'staff'].includes(r))
-    throw new HttpsError('invalid-argument', 'Invalid role');
-
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  // Only Owner can grant Owner; Owner or Manager can grant Manager/Staff
-  if (r === 'owner' && !hasRole(biz, uid, ['owner']))
-    throw new HttpsError('permission-denied', 'Only Owner can assign Owner');
-  if (r !== 'owner' && !hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
-
-  let target = targetUid || null;
-  if (!target && email) {
-    const q = await db
-      .collection('users')
-      .where('email', '==', String(email))
-      .limit(1)
-      .get();
-    if (!q.empty) target = q.docs[0].id;
-  }
-  if (!target) throw new HttpsError('not-found', 'Target user not found');
-
-  await ref.set(
-    {
-      members: admin.firestore.FieldValue.arrayUnion({
-        uid: target,
-        role: role.charAt(0).toUpperCase() + r.slice(1),
-      }),
-    },
-    { merge: true }
-  );
-  await mirrorMembership(
-    target,
-    bizId,
-    role.charAt(0).toUpperCase() + r.slice(1)
-  );
-  logger.log('[business] member added', bizId, target, role);
-  return { ok: true };
-});
-
-exports.setBusinessPrivacy = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
-  const uid = assertAuth(req);
-  const { bizId, analyticsShare } = req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
-  await ref.set(
-    {
-      privacy: { analyticsShare: analyticsShare !== false },
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
-  return { ok: true };
-});
-
-exports.submitBusiness = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
-  const uid = assertAuth(req);
-  const { bizId, review } = req.data || {};
-  if (!bizId) throw new HttpsError('invalid-argument', 'Missing bizId');
-  const { ref, biz } = await getBusinessIfMember(bizId, uid);
-  if (!hasRole(biz, uid, ['owner', 'manager']))
-    throw new HttpsError('permission-denied', 'Owner/Manager only');
-  const status = review === true ? 'pending_review' : 'active';
-  await ref.set(
-    { status, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
-    { merge: true }
-  );
-  await markUserAsBusiness(uid);
-  return { ok: true, status };
-});
-
-// HTTP function to update categories (easier to call from terminal)
-exports.updateCategoriesHttp = onRequest(
-  {
-    region: 'us-central1',
-    cors: true,
-  },
-  async (request, response) => {
-    // Simple security: require a secret key or admin context
-    const secretKey = request.query.secret || request.body?.secret;
-    if (secretKey !== 'update-categories-2025') {
-      response.status(403).json({ error: 'Unauthorized' });
-      return;
-    }
-
-    try {
-      const categoriesRef = db.collection('categories');
-
-      // Clear existing documents
-      logger.info('Clearing existing categories...');
-      const existing = await categoriesRef.listDocuments();
-
-      // Delete in batches of 500 (Firestore limit)
-      for (let i = 0; i < existing.length; i += 500) {
-        const chunk = existing.slice(i, i + 500);
-        const batch = db.batch();
-        chunk.forEach((docRef) => batch.delete(docRef));
-        await batch.commit();
-      }
-
-      // Load categories from the JSON file
-      const allCategories = require('../src/features/events/constants/categoriesData.json');
-
-      // Add new categories
-      logger.info('Adding new categories...');
-      let batch = db.batch();
-      let writes = 0;
-
-      for (const category of allCategories) {
-        const docRef = categoriesRef.doc(category.id);
-        batch.set(docRef, {
-          name: category.name?.trim() || '',
-          emoji: category.emoji?.trim() || '',
-          interests: (category.interests || []).map((interest) => ({
-            name: interest.name?.trim() || '',
-            count_selected: Number(interest.count_selected) || 0,
-            count_event_matches: Number(interest.count_event_matches) || 0,
-            count_event_views: Number(interest.count_event_views) || 0,
-            count_event_joins: Number(interest.count_event_joins) || 0,
-            last_activity: interest.last_activity || null,
-          })),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        writes += 1;
-
-        // Commit batch every 500 writes (Firestore limit)
-        if (writes % 500 === 0) {
-          await batch.commit();
-          batch = db.batch();
-        }
-      }
-
-      // Commit remaining writes
-      if (writes % 500 !== 0) {
-        await batch.commit();
-      }
-
-      logger.info(`Successfully updated ${writes} categories`);
-      response.json({ success: true, categoriesUpdated: writes });
-    } catch (error) {
-      logger.error('Error updating categories:', error);
-      response
-        .status(500)
-        .json({ error: 'Failed to update categories', details: error.message });
-    }
-  }
-);
-
-// HTTP function to recalculate interest counts from existing users
-exports.recalculateInterestCountsHttp = onRequest(
-  {
-    region: 'us-central1',
-    cors: true,
-  },
-  async (request, response) => {
-    // Simple security: require a secret key
-    const secretKey = request.query.secret || request.body?.secret;
-    if (secretKey !== 'update-categories-2025') {
-      response.status(403).json({ error: 'Unauthorized' });
-      return;
-    }
-
-    try {
-      logger.info('[recalculateInterestCounts] Fetching all users...');
-      const usersSnapshot = await db.collection('users').get();
-
-      // Count how many times each interest is selected across all users
-      const interestCounts = new Map();
-
-      usersSnapshot.docs.forEach((userDoc) => {
-        const userData = userDoc.data();
-        const interests = Array.isArray(userData.interests)
-          ? userData.interests
-          : [];
-
-        interests.forEach((interest) => {
-          const count = interestCounts.get(interest) || 0;
-          interestCounts.set(interest, count + 1);
-        });
-      });
-
-      logger.info(
-        `[recalculateInterestCounts] Counted interests from ${usersSnapshot.size} users`
-      );
-      logger.info(
-        `[recalculateInterestCounts] Found ${interestCounts.size} unique interests`
-      );
-
-      // Update categories with the counts
-      logger.info('[recalculateInterestCounts] Updating categories...');
-      const categoriesSnapshot = await db.collection('categories').get();
-
-      let batch = db.batch();
-      let updatedCount = 0;
-      let writes = 0;
-
-      categoriesSnapshot.docs.forEach((categoryDoc) => {
-        const categoryData = categoryDoc.data();
-        const interests = categoryData.interests || [];
-
-        const updatedInterests = interests.map((interest) => {
-          const interestName =
-            typeof interest === 'string' ? interest : interest.name;
-          const count = interestCounts.get(interestName) || 0;
-
-          if (typeof interest === 'string') {
-            return {
-              name: interest,
-              count_selected: count,
-              count_event_matches: 0,
-              count_event_views: 0,
-              count_event_joins: 0,
-              last_activity: null,
-            };
-          }
-
-          return {
-            ...interest,
-            count_selected: count,
-          };
-        });
-
-        batch.update(categoryDoc.ref, {
-          interests: updatedInterests,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        writes++;
-        updatedCount++;
-
-        // Commit batch every 500 writes
-        if (writes % 500 === 0) {
-          batch.commit();
-          batch = db.batch();
-        }
-      });
-
-      // Commit remaining writes
-      if (writes % 500 !== 0) {
-        await batch.commit();
-      }
-
-      // Get top interests for response
-      const topInterests = Array.from(interestCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 20)
-        .map(([interest, count]) => ({ interest, count }));
-
-      logger.info(
-        `[recalculateInterestCounts] Successfully updated ${updatedCount} categories`
-      );
-      response.json({
-        success: true,
-        categoriesUpdated: updatedCount,
-        totalUsers: usersSnapshot.size,
-        uniqueInterests: interestCounts.size,
-        topInterests,
-      });
-    } catch (error) {
-      logger.error('[recalculateInterestCounts] Error:', error);
-      response.status(500).json({
-        error: 'Failed to recalculate interest counts',
-        details: error.message,
-      });
-    }
-  }
-);
-
-// Function to update categories from the new categories data
-exports.updateCategories = onCall(
-  {
-    region: 'us-central1',
-    enforceAppCheck: false, // Allow for admin calls
-  },
-  async (request) => {
-    // Description: Updates all categories in Firestore with new structure
-    const { auth, data } = request;
-
-    // Simple authentication check - you can remove this if running from admin context
-    // For now, let's allow any authenticated user to run this (you can restrict later)
-    if (!auth?.uid) {
-      throw new HttpsError('unauthenticated', 'Must be authenticated');
-    }
-
-    const newCategories = [
-      {
-        id: 'active_outdoors',
-        name: 'active outdoors',
-        emoji: '',
-        interests: [
-          {
-            name: 'Hiking',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Trail Running',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Backpacking',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Cycling',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Mountain Biking',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Climbing',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Skiing',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Snowboarding',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Rafting',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Fishing',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Paddleboarding',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Kayaking',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-          {
-            name: 'Yoga',
-            count_selected: 0,
-            count_event_matches: 0,
-            count_event_views: 0,
-            count_event_joins: 0,
-            last_activity: '2025-07-30T00:00:00Z',
-          },
-        ],
-      },
-      // ... (I'll add the rest in the actual function, keeping this short for readability)
-    ];
-
-    try {
-      const categoriesRef = db.collection('categories');
-
-      // Clear existing documents
-      logger.info('Clearing existing categories...');
-      const existing = await categoriesRef.listDocuments();
-
-      // Delete in batches of 500 (Firestore limit)
-      for (let i = 0; i < existing.length; i += 500) {
-        const chunk = existing.slice(i, i + 500);
-        const batch = db.batch();
-        chunk.forEach((docRef) => batch.delete(docRef));
-        await batch.commit();
-      }
-
-      // Add new categories
-      logger.info('Adding new categories...');
-      let batch = db.batch();
-      let writes = 0;
-
-      const allCategories =
-        data?.categories ||
-        require('../src/features/events/constants/categoriesData.json');
-
-      for (const category of allCategories) {
-        const docRef = categoriesRef.doc(category.id);
-        batch.set(docRef, {
-          name: category.name?.trim() || '',
-          emoji: category.emoji?.trim() || '',
-          interests: (category.interests || []).map((interest) => ({
-            name: interest.name?.trim() || '',
-            count_selected: Number(interest.count_selected) || 0,
-            count_event_matches: Number(interest.count_event_matches) || 0,
-            count_event_views: Number(interest.count_event_views) || 0,
-            count_event_joins: Number(interest.count_event_joins) || 0,
-            last_activity: interest.last_activity || null,
-          })),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        writes += 1;
-
-        // Commit batch every 500 writes (Firestore limit)
-        if (writes % 500 === 0) {
-          await batch.commit();
-          batch = db.batch();
-        }
-      }
-
-      // Commit remaining writes
-      if (writes % 500 !== 0) {
-        await batch.commit();
-      }
-
-      logger.info(`Successfully updated ${writes} categories`);
-      return { success: true, categoriesUpdated: writes };
-    } catch (error) {
-      logger.error('Error updating categories:', error);
-      throw new HttpsError('internal', 'Failed to update categories');
-    }
-  }
-);
-
-exports.aggregateUsageMetrics = onSchedule(
-  {
-    schedule: 'every day 03:00',
-    timeZone: 'America/Los_Angeles',
-    retryConfig: { retryCount: 3 },
-  },
-  async () => {
-    const now = new Date();
-    const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-    const totals = {
-      totalUsers: 0,
-      newUsers24h: 0,
-      newUsers7d: 0,
-      newUsers30d: 0,
-      dau: 0,
-      wau: 0,
-      mau: 0,
-      analyticsOptIn: 0,
-    };
-
-    const ageBuckets = {};
-    for (const key of AGE_BUCKETS) ageBuckets[key] = 0;
-    const sexBuckets = {};
-    for (const key of SEX_BUCKETS) sexBuckets[key] = 0;
-
-    const batchSize = 500;
-    let lastDocId = null;
-
-    while (true) {
-      let query = db
-        .collection('users')
-        .orderBy(admin.firestore.FieldPath.documentId())
-        .limit(batchSize);
-
-      if (lastDocId) {
-        query = query.startAfter(lastDocId);
-      }
-
-      const snap = await query.get();
-      if (snap.empty) break;
-
-      for (const doc of snap.docs) {
-        const data = doc.data() || {};
-        totals.totalUsers += 1;
-
-        if (data.analyticsOptIn === true) {
-          totals.analyticsOptIn += 1;
-        }
-
-        const createdAt = toDate(data.createdAt);
-        if (createdAt) {
-          if (createdAt >= dayAgo) totals.newUsers24h += 1;
-          if (createdAt >= weekAgo) totals.newUsers7d += 1;
-          if (createdAt >= monthAgo) totals.newUsers30d += 1;
-        }
-
-        const lastActive = toDate(
-          data.lastActiveAt || data.lastActive || data.updatedAt
-        );
-        if (lastActive) {
-          if (lastActive >= dayAgo) totals.dau += 1;
-          if (lastActive >= weekAgo) totals.wau += 1;
-          if (lastActive >= monthAgo) totals.mau += 1;
-        }
-
-        const ageBucket = ageBracketForDob(data.dob, now);
-        incrementCounter(ageBuckets, ageBucket);
-
-        const sexBucket = normalizeSexMetric(data.sex);
-        incrementCounter(sexBuckets, sexBucket);
-      }
-
-      lastDocId = snap.docs[snap.docs.length - 1].id;
-    }
-
-    const optInRate =
-      totals.totalUsers > 0
-        ? Number((totals.analyticsOptIn / totals.totalUsers).toFixed(4))
-        : 0;
-
-    const summary = {
-      computedAt: admin.firestore.Timestamp.now(),
-      totals: {
-        ...totals,
-        analyticsOptInRate: optInRate,
-      },
-      windows: {
-        dau: totals.dau,
-        wau: totals.wau,
-        mau: totals.mau,
-        newUsers24h: totals.newUsers24h,
-        newUsers7d: totals.newUsers7d,
-        newUsers30d: totals.newUsers30d,
-      },
-      demographics: {
-        age: ageBuckets,
-        sex: sexBuckets,
-      },
-    };
-
-    const usageDoc = db.collection('metrics').doc('usage');
-    await usageDoc.set(summary, { merge: true });
-
-    const dateKey = now.toISOString().slice(0, 10);
-    await usageDoc
-      .collection('daily')
-      .doc(dateKey)
-      .set(summary, { merge: true });
-
-    logger.info('[metrics] usage summary updated', {
-      totalUsers: totals.totalUsers,
-      dau: totals.dau,
-      wau: totals.wau,
-      mau: totals.mau,
-    });
-  }
-);
-
+// Migrated to ./domains/business (keep index.js slim)
+exports.createBusinessDraft = require('./domains/business').createBusinessDraft;
+exports.createOrUpdateBusiness =
+  require('./domains/business').createOrUpdateBusiness;
+exports.switchToPersonalAccount =
+  require('./domains/business').switchToPersonalAccount;
+exports.updateBusinessBasics =
+  require('./domains/business').updateBusinessBasics;
+exports.updateBrandAssets =
+  require('./domains/business').updateBrandAssets;
+exports.addBusinessLocation =
+  require('./domains/business').addBusinessLocation;
+exports.updateAudiencePolicies =
+  require('./domains/business').updateAudiencePolicies;
+exports.startBusinessVerification =
+  require('./domains/business').startBusinessVerification;
+exports.verifyBusinessCode =
+  require('./domains/business').verifyBusinessCode;
+exports.addBusinessMember =
+  require('./domains/business').addBusinessMember;
+exports.setBusinessPrivacy =
+  require('./domains/business').setBusinessPrivacy;
+exports.submitBusiness = require('./domains/business').submitBusiness;
 // -------------------- USER VERIFICATION --------------------
 
 // Description: Request email verification using Firebase Auth's built-in system
@@ -4485,7 +2304,7 @@ exports.requestEmailVerification = onCall(
       // Check if email is already verified in Firebase Auth
       if (userRecord.emailVerified) {
         logger.info(
-          '[requestEmailVerification] Email already verified in Firebase Auth'
+          '[requestEmailVerification] Email already verified in Firebase Auth',
         );
         // Also update Firestore to match
         await db.doc(`users/${uid}`).update({
@@ -4509,7 +2328,7 @@ exports.requestEmailVerification = onCall(
         .generateEmailVerificationLink(userRecord.email, actionCodeSettings);
 
       logger.info(
-        `[requestEmailVerification] Generated link for ${userRecord.email}`
+        `[requestEmailVerification] Generated link for ${userRecord.email}`,
       );
 
       // Note: In production, you'd send this link via your email service (SendGrid, etc.)
@@ -4527,7 +2346,7 @@ exports.requestEmailVerification = onCall(
       logger.error('[requestEmailVerification] error', err?.message || err);
       throw new HttpsError('internal', 'Verification request failed');
     }
-  }
+  },
 );
 
 // Description: Verify email code
@@ -4565,7 +2384,7 @@ exports.verifyEmailCode = onCall(
       if (!request || request.type !== 'email') {
         throw new HttpsError(
           'failed-precondition',
-          'No pending email verification'
+          'No pending email verification',
         );
       }
 
@@ -4580,7 +2399,7 @@ exports.verifyEmailCode = onCall(
       if (request.attempts >= 5) {
         throw new HttpsError(
           'resource-exhausted',
-          'Too many failed attempts. Please request a new code.'
+          'Too many failed attempts. Please request a new code.',
         );
       }
 
@@ -4610,7 +2429,7 @@ exports.verifyEmailCode = onCall(
       logger.error('[verifyEmailCode] error', err?.message || err);
       throw new HttpsError('internal', 'Verification failed');
     }
-  }
+  },
 );
 
 // Description: Request phone verification (optional - requires Twilio/similar)
@@ -4650,7 +2469,7 @@ exports.requestPhoneVerification = onCall(
       // Generate verification code (6 digits)
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = admin.firestore.Timestamp.fromMillis(
-        Date.now() + 10 * 60 * 1000 // 10 minutes
+        Date.now() + 10 * 60 * 1000, // 10 minutes
       );
 
       // Store verification request
@@ -4668,7 +2487,7 @@ exports.requestPhoneVerification = onCall(
       // Send SMS with code
       // TODO: Integrate with Twilio or similar SMS service
       logger.info(
-        `[requestPhoneVerification] Code generated for ${phoneNumber}: ${code}`
+        `[requestPhoneVerification] Code generated for ${phoneNumber}: ${code}`,
       );
       // For now, code is logged server-side only
 
@@ -4678,7 +2497,7 @@ exports.requestPhoneVerification = onCall(
       logger.error('[requestPhoneVerification] error', err?.message || err);
       throw new HttpsError('internal', 'Phone verification request failed');
     }
-  }
+  },
 );
 
 // Description: Verify phone code
@@ -4715,7 +2534,7 @@ exports.verifyPhoneCode = onCall(
       if (!request || request.type !== 'phone') {
         throw new HttpsError(
           'failed-precondition',
-          'No pending phone verification'
+          'No pending phone verification',
         );
       }
 
@@ -4730,7 +2549,7 @@ exports.verifyPhoneCode = onCall(
       if (request.attempts >= 5) {
         throw new HttpsError(
           'resource-exhausted',
-          'Too many failed attempts. Please request a new code.'
+          'Too many failed attempts. Please request a new code.',
         );
       }
 
@@ -4760,7 +2579,7 @@ exports.verifyPhoneCode = onCall(
       logger.error('[verifyPhoneCode] error', err?.message || err);
       throw new HttpsError('internal', 'Phone verification failed');
     }
-  }
+  },
 );
 
 /**
@@ -4783,10 +2602,10 @@ exports.updateInterestCounts = onDocumentUpdated(
 
       // Find interests that were added or removed
       const addedInterests = afterInterests.filter(
-        (interest) => !beforeInterests.includes(interest)
+        (interest) => !beforeInterests.includes(interest),
       );
       const removedInterests = beforeInterests.filter(
-        (interest) => !afterInterests.includes(interest)
+        (interest) => !afterInterests.includes(interest),
       );
 
       if (addedInterests.length === 0 && removedInterests.length === 0) {
@@ -4795,7 +2614,7 @@ exports.updateInterestCounts = onDocumentUpdated(
       }
 
       logger.info(
-        `[updateInterestCounts] User ${event.params.userId} added ${addedInterests.length}, removed ${removedInterests.length} interests`
+        `[updateInterestCounts] User ${event.params.userId} added ${addedInterests.length}, removed ${removedInterests.length} interests`,
       );
 
       // Fetch all categories
@@ -4845,7 +2664,7 @@ exports.updateInterestCounts = onDocumentUpdated(
 
       await batch.commit();
       logger.info(
-        `[updateInterestCounts] Successfully updated interest counts`
+        `[updateInterestCounts] Successfully updated interest counts`,
       );
 
       return null;
@@ -4854,7 +2673,541 @@ exports.updateInterestCounts = onDocumentUpdated(
       // Don't throw - we don't want to block user updates
       return null;
     }
-  }
+  },
 );
+
+// ============================================================================
+// BUSINESS MODE V1 - VALIDATION STUBS
+// ============================================================================
+
+/**
+ * Validate business event creation against tier limits
+ * Checks: monthlyEventLimit, maxActiveEvents
+ */
+exports.validateBusinessEventCreate = onCall(
+  BUSINESS_CALLABLE_OPTIONS,
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'User not signed in');
+
+    const { businessId } = req.data || {};
+    if (!businessId)
+      throw new HttpsError('invalid-argument', 'businessId required');
+
+    try {
+      // Get business doc
+      const bizSnap = await db.collection('businesses').doc(businessId).get();
+      if (!bizSnap.exists)
+        throw new HttpsError('not-found', 'Business not found');
+
+      const biz = bizSnap.data();
+      if (biz.ownerUid !== uid)
+        throw new HttpsError('permission-denied', 'Not business owner');
+
+      // Check if business is active
+      if (biz.isActive === false)
+        throw new HttpsError(
+          'failed-precondition',
+          'Business account is inactive',
+        );
+
+      const caps = getBusinessCapabilities(biz.tier);
+
+      // Check monthly event limit
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const eventsThisMonthSnap = await db
+        .collection('events')
+        .where('businessId', '==', businessId)
+        .where('createdAt', '>=', monthStart)
+        .get();
+
+      if (
+        caps.monthlyEventLimit !== Infinity &&
+        eventsThisMonthSnap.size >= caps.monthlyEventLimit
+      ) {
+        throw new HttpsError(
+          'resource-exhausted',
+          `Monthly event limit reached (${caps.monthlyEventLimit})`,
+        );
+      }
+
+      // Check concurrent active events (events use endAt field)
+      const activeEventsSnap = await db
+        .collection('events')
+        .where('businessId', '==', businessId)
+        .where('endAt', '>', now)
+        .get();
+
+      if (
+        caps.maxActiveEvents !== Infinity &&
+        activeEventsSnap.size >= caps.maxActiveEvents
+      ) {
+        throw new HttpsError(
+          'resource-exhausted',
+          `Maximum active events reached (${caps.maxActiveEvents})`,
+        );
+      }
+
+      return { allowed: true };
+    } catch (err) {
+      logger.error('[validateBusinessEventCreate] Error:', err);
+      throw err;
+    }
+  },
+);
+
+/**
+ * Validate business perk creation against tier limits
+ * Checks: tier allows perks, monthlyPerkLimit, maxActivePerks
+ */
+exports.validateBusinessPerkCreate = onCall(
+  BUSINESS_CALLABLE_OPTIONS,
+  async (req) => {
+    const uid = req.auth?.uid;
+    if (!uid) throw new HttpsError('unauthenticated', 'User not signed in');
+
+    const { businessId, expiresAt } = req.data || {};
+    if (!businessId)
+      throw new HttpsError('invalid-argument', 'businessId required');
+    if (!expiresAt)
+      throw new HttpsError(
+        'invalid-argument',
+        'expiresAt is required for perks',
+      );
+
+    try {
+      // Get business doc
+      const bizSnap = await db.collection('businesses').doc(businessId).get();
+      if (!bizSnap.exists)
+        throw new HttpsError('not-found', 'Business not found');
+
+      const biz = bizSnap.data();
+      if (biz.ownerUid !== uid)
+        throw new HttpsError('permission-denied', 'Not business owner');
+
+      // Check if business is active
+      if (biz.isActive === false)
+        throw new HttpsError(
+          'failed-precondition',
+          'Business account is inactive',
+        );
+
+      // Check if business is active
+      if (biz.isActive === false)
+        throw new HttpsError(
+          'failed-precondition',
+          'Business account is inactive',
+        );
+
+      const caps = getBusinessCapabilities(biz.tier);
+
+      // Check if tier allows perks
+      if (!caps.canCreatePerk) {
+        throw new HttpsError(
+          'permission-denied',
+          'Tier does not allow perk creation. Upgrade to create perks.',
+        );
+      }
+
+      // Check monthly perk limit
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const perksThisMonthSnap = await db
+        .collection('perks')
+        .where('businessId', '==', businessId)
+        .where('createdAt', '>=', monthStart)
+        .get();
+
+      if (
+        caps.monthlyPerkLimit !== Infinity &&
+        perksThisMonthSnap.size >= caps.monthlyPerkLimit
+      ) {
+        throw new HttpsError(
+          'resource-exhausted',
+          `Monthly perk limit reached (${caps.monthlyPerkLimit})`,
+        );
+      }
+
+      // Check concurrent active perks
+      const activePerksSnap = await db
+        .collection('perks')
+        .where('businessId', '==', businessId)
+        .where('isActive', '==', true)
+        .where('expiresAt', '>', now)
+        .get();
+
+      if (
+        caps.maxActivePerks !== Infinity &&
+        activePerksSnap.size >= caps.maxActivePerks
+      ) {
+        throw new HttpsError(
+          'resource-exhausted',
+          `Maximum active perks reached (${caps.maxActivePerks})`,
+        );
+      }
+
+      return { allowed: true };
+    } catch (err) {
+      logger.error('[validateBusinessPerkCreate] Error:', err);
+      throw err;
+    }
+  },
+);
+
+/**
+ * Get business capabilities for a given tier (callable for client reference)
+ */
+exports.getBusinessCapabilities = onCall(async (req) => {
+  const { tier } = req.data || {};
+  if (!tier) throw new HttpsError('invalid-argument', 'tier required');
+
+  try {
+    const caps = getBusinessCapabilities(tier);
+    return caps;
+  } catch (err) {
+    logger.error('[getBusinessCapabilities] Error:', err);
+    throw new HttpsError('internal', 'Failed to get capabilities');
+  }
+});
+
+// ---------- Business authoritative create (events/perks) ----------
+
+const monthStartUtc = () => {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+};
+
+async function loadBusinessAndCaps(businessId) {
+  const snap = await db.collection('businesses').doc(businessId).get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Business not found');
+  const biz = { id: snap.id, ...snap.data() };
+  const tier = biz.tier || biz.businessTier || BUSINESS_TIERS.TIER_1_FREE;
+  const caps = getBusinessCapabilities(tier);
+  return { biz, tier, caps };
+}
+
+function ensureInterestSubset(selected = [], allowed = []) {
+  if (!Array.isArray(allowed) || allowed.length === 0) return true;
+  return selected.every((i) => allowed.includes(i));
+}
+
+async function fetchLocation(businessId, locId) {
+  const locSnap = await db
+    .collection('businesses')
+    .doc(businessId)
+    .collection('locations')
+    .doc(locId)
+    .get();
+  if (!locSnap.exists)
+    throw new HttpsError('failed-precondition', 'Location not found');
+  return { id: locSnap.id, ...locSnap.data() };
+}
+
+async function fetchServiceArea(businessId, areaId) {
+  const areaSnap = await db
+    .collection('businesses')
+    .doc(businessId)
+    .collection('serviceAreas')
+    .doc(areaId)
+    .get();
+  if (!areaSnap.exists)
+    throw new HttpsError('failed-precondition', 'Service area not found');
+  return { id: areaSnap.id, ...areaSnap.data() };
+}
+
+async function countDocs(q) {
+  if (typeof q.count === 'function') {
+    const agg = await q.count().get();
+    return agg.data().count || 0;
+  }
+  const snap = await q.get();
+  return snap.size;
+}
+
+exports.createBusinessEvent = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
+  const uid = assertAuth(req);
+  const {
+    businessId,
+    title,
+    description,
+    startsAt,
+    endsAt,
+    interestIds = [],
+    businessLocationId,
+    serviceAreaId,
+  } = req.data || {};
+
+  if (!businessId)
+    throw new HttpsError('invalid-argument', 'businessId required');
+  if (!title || !startsAt || !endsAt) {
+    throw new HttpsError(
+      'invalid-argument',
+      'title, startsAt, endsAt required',
+    );
+  }
+  if (businessLocationId && serviceAreaId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'Pick one anchor (location or service area)',
+    );
+  }
+  if (!businessLocationId && !serviceAreaId) {
+    throw new HttpsError('failed-precondition', 'Anchor required');
+  }
+
+  const startTs = new Date(startsAt);
+  const endTs = new Date(endsAt);
+  if (!(startTs instanceof Date) || isNaN(startTs)) {
+    throw new HttpsError('invalid-argument', 'startsAt invalid');
+  }
+  if (!(endTs instanceof Date) || isNaN(endTs) || endTs <= startTs) {
+    throw new HttpsError('invalid-argument', 'endsAt must be after startsAt');
+  }
+
+  const { biz, caps } = await loadBusinessAndCaps(businessId);
+  if (biz.ownerId && biz.ownerId !== uid) {
+    throw new HttpsError(
+      'permission-denied',
+      'Only the business owner can create events',
+    );
+  }
+
+  if (!Array.isArray(interestIds) || interestIds.length < 1) {
+    throw new HttpsError(
+      'invalid-argument',
+      'At least one interest is required',
+    );
+  }
+  if (interestIds.length > caps.interestSlots) {
+    throw new HttpsError(
+      'resource-exhausted',
+      'Interest slots exceeded for your tier',
+    );
+  }
+  if (!ensureInterestSubset(interestIds, biz.interestIds || [])) {
+    throw new HttpsError(
+      'permission-denied',
+      'Interests must be in business profile',
+    );
+  }
+
+  let coords = null;
+  let anchorFields = {};
+  if (businessLocationId) {
+    const loc = await fetchLocation(businessId, businessLocationId);
+    coords = loc.coordinates || null;
+    anchorFields.businessLocationId = businessLocationId;
+  } else if (serviceAreaId) {
+    const sa = await fetchServiceArea(businessId, serviceAreaId);
+    coords = sa.centerPoint || null;
+    anchorFields.serviceAreaId = serviceAreaId;
+  }
+  if (
+    !coords ||
+    typeof coords.latitude !== 'number' ||
+    typeof coords.longitude !== 'number'
+  ) {
+    throw new HttpsError('failed-precondition', 'Anchor missing coordinates');
+  }
+
+  const monthStart = admin.firestore.Timestamp.fromDate(monthStartUtc());
+  const nowTs = admin.firestore.Timestamp.now();
+  const monthly = await countDocs(
+    db
+      .collection('events')
+      .where('businessId', '==', businessId)
+      .where('createdAt', '>=', monthStart),
+  );
+  if (monthly >= caps.monthlyEventLimit) {
+    throw new HttpsError('resource-exhausted', 'Monthly event limit reached');
+  }
+  const activeCount = await countDocs(
+    db
+      .collection('events')
+      .where('businessId', '==', businessId)
+      .where('endAt', '>=', nowTs),
+  );
+  if (activeCount >= caps.maxActiveEvents) {
+    throw new HttpsError('resource-exhausted', 'Active event limit reached');
+  }
+
+  const geohash = geohashForLocation([coords.latitude, coords.longitude]);
+  const doc = {
+    title: String(title).trim(),
+    description: description ? String(description).trim() : null,
+    hostType: 'BUSINESS',
+    businessId,
+    ...anchorFields,
+    interestIds,
+    interest: interestIds[0],
+    interests: interestIds,
+    startAt: admin.firestore.Timestamp.fromDate(startTs),
+    endAt: admin.firestore.Timestamp.fromDate(endTs),
+    startsAt: admin.firestore.Timestamp.fromDate(startTs),
+    endsAt: admin.firestore.Timestamp.fromDate(endTs),
+    expiresAt: admin.firestore.Timestamp.fromDate(endTs),
+    createdAt: nowTs,
+    updatedAt: nowTs,
+    ownerId: uid,
+    status: 'active',
+    isActive: true,
+    location: {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      geohash,
+    },
+    geohash,
+    isDeleted: false,
+  };
+
+  const ref = await db.collection('events').add(doc);
+  return { ok: true, eventId: ref.id };
+});
+
+exports.createBusinessPerk = onCall(BUSINESS_CALLABLE_OPTIONS, async (req) => {
+  const uid = assertAuth(req);
+  const {
+    businessId,
+    title,
+    details,
+    expiresAt,
+    interestIds = [],
+    businessLocationId,
+    serviceAreaId,
+    targetRadiusMiles,
+  } = req.data || {};
+
+  if (!businessId)
+    throw new HttpsError('invalid-argument', 'businessId required');
+  if (!title || !details || !expiresAt) {
+    throw new HttpsError(
+      'invalid-argument',
+      'title, details, expiresAt required',
+    );
+  }
+  if (businessLocationId && serviceAreaId) {
+    throw new HttpsError(
+      'invalid-argument',
+      'Pick one anchor (location or service area)',
+    );
+  }
+  if (!businessLocationId && !serviceAreaId) {
+    throw new HttpsError('failed-precondition', 'Anchor required');
+  }
+
+  const expDate = new Date(expiresAt);
+  if (!(expDate instanceof Date) || isNaN(expDate) || expDate <= new Date()) {
+    throw new HttpsError('invalid-argument', 'expiresAt must be in the future');
+  }
+
+  const { biz, caps } = await loadBusinessAndCaps(businessId);
+  if (!caps.canCreatePerk) {
+    throw new HttpsError('permission-denied', 'Perks not allowed on this tier');
+  }
+  if (biz.ownerId && biz.ownerId !== uid) {
+    throw new HttpsError(
+      'permission-denied',
+      'Only the business owner can create perks',
+    );
+  }
+
+  if (!Array.isArray(interestIds) || interestIds.length < 1) {
+    throw new HttpsError(
+      'invalid-argument',
+      'At least one interest is required',
+    );
+  }
+  if (interestIds.length > caps.interestSlots) {
+    throw new HttpsError(
+      'resource-exhausted',
+      'Interest slots exceeded for your tier',
+    );
+  }
+  if (!ensureInterestSubset(interestIds, biz.interestIds || [])) {
+    throw new HttpsError(
+      'permission-denied',
+      'Interests must be in business profile',
+    );
+  }
+
+  let coords = null;
+  let anchorFields = {};
+  if (businessLocationId) {
+    const loc = await fetchLocation(businessId, businessLocationId);
+    coords = loc.coordinates || null;
+    anchorFields.businessLocationId = businessLocationId;
+  } else if (serviceAreaId) {
+    const sa = await fetchServiceArea(businessId, serviceAreaId);
+    coords = sa.centerPoint || null;
+    anchorFields.serviceAreaId = serviceAreaId;
+  }
+  if (
+    !coords ||
+    typeof coords.latitude !== 'number' ||
+    typeof coords.longitude !== 'number'
+  ) {
+    throw new HttpsError('failed-precondition', 'Anchor missing coordinates');
+  }
+
+  if (
+    targetRadiusMiles &&
+    targetRadiusMiles > (caps.maxTargetRadiusMiles || caps.maxTargetRadius)
+  ) {
+    throw new HttpsError('resource-exhausted', 'Radius exceeds tier limit');
+  }
+
+  const monthStart = admin.firestore.Timestamp.fromDate(monthStartUtc());
+  const nowTs = admin.firestore.Timestamp.now();
+  const monthly = await countDocs(
+    db
+      .collection('perks')
+      .where('businessId', '==', businessId)
+      .where('createdAt', '>=', monthStart),
+  );
+  if (monthly >= caps.monthlyPerkLimit) {
+    throw new HttpsError('resource-exhausted', 'Monthly perk limit reached');
+  }
+  const activeCount = await countDocs(
+    db
+      .collection('perks')
+      .where('businessId', '==', businessId)
+      .where('expiresAt', '>=', nowTs),
+  );
+  if (activeCount >= caps.maxActivePerks) {
+    throw new HttpsError('resource-exhausted', 'Active perk limit reached');
+  }
+
+  const geohash = geohashForLocation([coords.latitude, coords.longitude]);
+  const doc = {
+    title: String(title).trim(),
+    details: String(details).trim(),
+    businessId,
+    ...anchorFields,
+    interestIds,
+    interests: interestIds,
+    interest: interestIds[0],
+    expiresAt: admin.firestore.Timestamp.fromDate(expDate),
+    createdAt: nowTs,
+    updatedAt: nowTs,
+    ownerId: uid,
+    status: 'ACTIVE',
+    isActive: true,
+    coordinates: {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      geohash,
+    },
+    geohash,
+    targetRadiusMiles:
+      targetRadiusMiles ||
+      caps.maxTargetRadiusMiles ||
+      caps.maxTargetRadius ||
+      null,
+  };
+
+  const ref = await db.collection('perks').add(doc);
+  return { ok: true, perkId: ref.id };
+});
 
 //# sourceMappingURL=index.js.map

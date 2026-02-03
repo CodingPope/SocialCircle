@@ -1,6 +1,7 @@
 // src/navigation/RootNavigation.js
 
 import { createNavigationContainerRef } from '@react-navigation/native';
+import ROUTES from './routes';
 
 export const navigationRef = createNavigationContainerRef();
 
@@ -25,7 +26,7 @@ function getActiveMainTab() {
   try {
     const state = navigationRef.getRootState?.();
     if (!state?.routes?.length) return null;
-    const mainTabsRoute = state.routes.find((r) => r.name === 'MainTabs');
+    const mainTabsRoute = state.routes.find((r) => r.name === ROUTES.MAIN_TABS);
     if (!mainTabsRoute) return null;
     const tabState = mainTabsRoute.state;
     if (tabState?.routes?.length) {
@@ -44,10 +45,10 @@ function getActiveMainTab() {
 export function navigateToOtherUserProfile(userId) {
   if (!userId) return;
   const originTab = getActiveMainTab();
-  navigate('MainTabs', {
-    screen: 'ProfileStack',
+  navigate(ROUTES.MAIN_TABS, {
+    screen: ROUTES.PROFILE_STACK,
     params: {
-      screen: 'OtherUserProfile',
+      screen: ROUTES.OTHER_USER_PROFILE,
       params: { userId, originTab },
     },
   });
@@ -55,9 +56,9 @@ export function navigateToOtherUserProfile(userId) {
 
 export function navigateToEventChat(eventId, extraParams = {}) {
   if (!eventId) return;
-  navigate('EventChat', { eventId, ...extraParams });
+  navigate(ROUTES.EVENT_CHAT, { eventId, ...extraParams });
 }
 
 export function navigateToInterestPost(postId, initialPost) {
-  navigate('InterestPost', { postId, initialPost });
+  navigate(ROUTES.INTEREST_POST, { postId, initialPost });
 }

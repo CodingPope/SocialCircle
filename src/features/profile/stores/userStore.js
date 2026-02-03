@@ -5,7 +5,7 @@ import {
   db,
   getUserData,
   updateUserData,
-} from '../../../services/firebase/config';
+} from '../../../services/firebase';
 import {
   findSoftDeletedUserByEmail,
   reactivateUser,

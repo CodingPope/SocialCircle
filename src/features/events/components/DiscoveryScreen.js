@@ -580,17 +580,39 @@ export default function DiscoveryScreen() {
           return;
         }
 
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
+        let coords = null;
 
-        const location = await Location.getCurrentPositionAsync({});
-        if (!isMounted) return;
-        setGpsLocation({ coords: location.coords });
+        // Try to get permission + current GPS
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status === 'granted') {
+            const location = await Location.getCurrentPositionAsync({});
+            coords = location.coords;
+          }
+        } catch (err) {
+          logger.warn('Discovery init: location permission/getCurrent failed', err);
+        }
 
-        const geocode = await Location.reverseGeocodeAsync(location.coords);
-        if (!isMounted) return;
-        const city = geocode[0]?.city || '';
-        setUserCity(city);
+        // Fallback: saved user location or Denver default to keep feed working when permission is denied
+        if (!coords) {
+          coords = user?.location || {
+            latitude: 39.7392,
+            longitude: -104.9903,
+          };
+        }
+
+        if (coords && coords.latitude && coords.longitude) {
+          setGpsLocation({ coords });
+          try {
+            const geocode = await Location.reverseGeocodeAsync(coords);
+            if (isMounted) {
+              const city = geocode[0]?.city || '';
+              setUserCity(city);
+            }
+          } catch (err) {
+            logger.warn('Discovery init: reverse geocode failed', err);
+          }
+        }
 
         const interests = await fetchUserInterests();
         const pinned = await loadPinnedInterests();

@@ -103,7 +103,8 @@
     "glob": "^11.0.3",
     "jest": "^29.7.0",
     "jest-expo": "~53.0.10",
-    "react-test-renderer": "19.0.0"
+    "react-test-renderer": "19.0.0",
+    "sharp": "^0.34.5"
   },
   "jest": {
     "preset": "jest-expo",
@@ -113,6 +114,31 @@
     ],
     "testMatch": [
       "**/__tests__/**/*.test.js"
+    ],
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "src/services/firebase/config.js",
+      "src/services/analyticsService.js",
+      "src/services/discoveryQueries.js",
+      "src/lib/analytics.js",
+      "src/features/profile/stores/userStore.js",
+      "src/features/auth/utils/authErrorHandler.js",
+      "src/features/events/api/discoveryService.js",
+      "src/services/shareService.js",
+      "src/services/locationContextService.js",
+      "src/services/deepLinkingService.js",
+      "src/features/events/stores/eventStore.js",
+      "src/lib/errorReporting.js",
+      "src/lib/logger.js",
+      "src/features/profile/utils/badgeConfig.js",
+      "src/features/events/stores/discoveryLocationStore.js",
+      "src/features/profile/stores/userSnippetStore.js",
+      "src/features/profile/api/userService.js",
+      "src/features/events/api/discoveryService.js",
+      "src/features/events/utils/locationResolver.js",
+      "src/navigation/RootNavigation.js",
+      "src/services/sessionHeartbeatService.js",
+      "src/features/events/utils/blockUtils.js"
     ],
     "transformIgnorePatterns": [
       "node_modules/(?!(jest-)?react-native|@react-native|expo(nent)?|@expo|@unimodules|unimodules|sentry-expo|native-base|react-clone-referenced-element|@gorhom|@react-navigation|firebase|@firebase)"

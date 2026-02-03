@@ -77,6 +77,8 @@
     <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Social Circle uses your location to show nearby events and improve discovery.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>We save event photos and profile pictures to your library on request.</string>
     <key>NSPhotoLibraryUsageDescription</key>
@@ -85,6 +87,10 @@
     <string>Allow $(PRODUCT_NAME) to access your reminders</string>
     <key>NSRemindersUsageDescription</key>
     <string>Allow reminders access if you choose to manage reminders in Social Circle.</string>
+    <key>NSUserTrackingUsageDescription</key>
+    <string>We use analytics to improve app performance and personalize your experience. Your data is never sold.</string>
+    <key>RCTNewArchEnabled</key>
+    <true/>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
     <key>UIRequiredDeviceCapabilities</key>

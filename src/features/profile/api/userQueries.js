@@ -1,4 +1,4 @@
-import { auth, db } from '../../../services/firebase/config';
+import { auth, db } from '../../../services/firebase';
 
 // Description: Fetches the current user's interests from Firestore
 export async function fetchUserInterests() {

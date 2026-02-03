@@ -1,5 +1,5 @@
 // src/lib/userProfile.js
-import { serverTimestamp } from '../../../services/firebase/config';
+import { serverTimestamp } from '../../../services/firebase';
 
 // canonical options
 const ALLOWED = ['male', 'female', 'nonbinary', 'other'];

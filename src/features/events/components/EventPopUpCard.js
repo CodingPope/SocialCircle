@@ -23,7 +23,7 @@ import {
   getDoc,
   onSnapshot, // live updates for event doc
 } from '../../../services/firebase/firestoreCompat';
-import { db, reportContent } from '../../../services/firebase/config';
+import { db, reportContent } from '../../../services/firebase';
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,

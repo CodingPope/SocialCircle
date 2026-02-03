@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { db } from '../../../services/firebase/config';
+import { db } from '../../../services/firebase';
 import { collection, getDocs } from '../../../services/firebase/firestoreCompat';
 import InterestSelector from '../../profile/components/InterestSelector';
 import { trackFilterApplySafe } from '../../../services/analyticsService';

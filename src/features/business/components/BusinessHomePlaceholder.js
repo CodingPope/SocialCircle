@@ -12,7 +12,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSessionRole } from '../../profile/stores/sessionRoleStore';
 import { useBizOnboarding } from '../stores/businessOnboardingStore';
 import { useAuth } from '../../auth/context/AuthContext';
-import { switchToPersonalAccount } from '../../../services/firebase/config';
+import { switchToPersonalAccount } from '../../../services/firebase';
 import { useTheme } from '../../../theme';
 
 export default function BusinessHomePlaceholder() {

@@ -48,6 +48,6 @@ export {
   setWithTTL,
   invalidate,
   backgroundRefresh,
-} from './utils/ttlCache';
+} from '../../lib/ttlCache';
 
 export { default as eventCategories } from './constants/categoriesData.json';
