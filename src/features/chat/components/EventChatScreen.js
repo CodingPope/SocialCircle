@@ -630,7 +630,7 @@ const EventChatScreen = () => {
           text: 'View Profile',
           onPress: () => {
             setIsModalVisible(false);
-            navigateToOtherUserProfile(attendee.id);
+            navigateToOtherUserProfile(attendee.id, { fromRootStack: true });
           },
         },
         {
@@ -1243,7 +1243,7 @@ const EventChatScreen = () => {
                   onPress={() => {
                     const targetId =
                       sender?.id || (isHost ? event?.ownerId : undefined);
-                    if (targetId) navigateToOtherUserProfile(targetId);
+                    if (targetId) navigateToOtherUserProfile(targetId, { fromRootStack: true });
                   }}
                   onLongPress={() => handleLongPressMessage(item)}
                 >
@@ -1267,7 +1267,7 @@ const EventChatScreen = () => {
                     onPress={() => {
                       const targetId =
                         sender?.id || (isHost ? event?.ownerId : undefined);
-                      if (targetId) navigateToOtherUserProfile(targetId);
+                      if (targetId) navigateToOtherUserProfile(targetId, { fromRootStack: true });
                     }}
                     onLongPress={() => handleLongPressMessage(item)}
                   >
@@ -1391,7 +1391,7 @@ const EventChatScreen = () => {
                         ],
                       });
                     } else {
-                      navigateToOtherUserProfile(ownerId);
+                      navigateToOtherUserProfile(ownerId, { fromRootStack: true });
                     }
                   }
                 }}
@@ -1648,7 +1648,7 @@ const EventChatScreen = () => {
                       style={styles.attendeePill}
                       onPress={() => {
                         setIsModalVisible(false);
-                        if (item?.id) navigateToOtherUserProfile(item.id);
+                        if (item?.id) navigateToOtherUserProfile(item.id, { fromRootStack: true });
                       }}
                       onLongPress={() => openAttendeeOptions(item)}
                       delayLongPress={350}
@@ -1693,7 +1693,7 @@ const EventChatScreen = () => {
                         onPress={() => {
                           setIsModalVisible(false);
                           if (requester?.id)
-                            navigateToOtherUserProfile(requester.id);
+                            navigateToOtherUserProfile(requester.id, { fromRootStack: true });
                         }}
                       >
                         <Image

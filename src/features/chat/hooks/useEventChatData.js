@@ -164,7 +164,21 @@ export function useEventChatData({ eventId, joinIntent, joinGraceDurationMs }) {
       if (data.ownerId) {
         try {
           const hostSnap = await db.collection('users').doc(data.ownerId).get();
-          if (hostSnap.exists) setHostUser({ id: hostSnap.id, ...hostSnap.data() });
+          if (hostSnap.exists) {
+            const hostData = hostSnap.data();
+            setHostUser({
+              id: hostSnap.id,
+              ...hostData,
+              // Normalize display name - check all possible sources
+              displayName:
+                hostData.displayName ||
+                `${hostData.firstName || ''} ${hostData.lastName || ''}`.trim() ||
+                hostData.name ||
+                'User',
+              // Normalize photo field - check all possible sources
+              photoURL: hostData.photoURL || hostData.profileImage || hostData.avatarURL || null,
+            });
+          }
         } catch {}
       }
       setLoading(false);

@@ -38,7 +38,7 @@ import {
   db,
   reportContent,
   deleteEvent,
-  functions,
+  deleteUserAccount,
 } from '../../../services/firebase';
 import { useUserStore } from '../../profile/stores/userStore';
 import { useSessionRole } from '../../profile/stores/sessionRoleStore';
@@ -360,7 +360,7 @@ export default function ProfileScreen({
     if (!user?.uid) return;
     Alert.alert(
       'Delete Account',
-      'This will permanently delete your account, profile, events, and messages. This action cannot be undone.\n\nYour account will be completely removed from our system within 24 hours.\n\nAre you sure you want to continue?',
+      'This will permanently delete your account, profile, events, and messages. This action cannot be undone.\n\nAre you sure you want to continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -371,14 +371,21 @@ export default function ProfileScreen({
               setDeletingAccount(true);
 
               // Call cloud function to permanently delete account
-              const deleteAccount =
-                functions.httpsCallable('deleteUserAccount');
-              await deleteAccount();
+              await deleteUserAccount();
 
-              // Sign out (auth user is already deleted, but clear local state)
+              // Clear local state first
               setUser(null);
 
-              // AppNavigator will render AuthStack when user is null
+              // Sign out of Firebase Auth to clear cached auth state
+              // This ensures AppNavigator shows AuthStack instead of blank screen
+              try {
+                await auth().signOut();
+              } catch (signOutErr) {
+                // Auth user was already deleted server-side, signOut may fail - that's OK
+                console.log('[ProfileScreen] SignOut after deletion:', signOutErr?.message);
+              }
+
+              // Show success message
               setTimeout(() => {
                 Alert.alert(
                   'Account Deleted',

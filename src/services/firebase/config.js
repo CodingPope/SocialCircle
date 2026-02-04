@@ -10,11 +10,7 @@ import storage from '@react-native-firebase/storage';
 import appCheck from '@react-native-firebase/app-check';
 import logger from '../../lib/logger';
 import { Alert, Platform } from 'react-native';
-import {
-  env,
-  APP_CHECK_DISABLED,
-  isDevBuild,
-} from './config/env';
+import { env, APP_CHECK_DISABLED, isDevBuild } from './config/env';
 import initAppCheck from './config/appCheck';
 
 const {
@@ -774,6 +770,45 @@ export const deleteEvent = async (eventId, userId) => {
     ) {
       const e = new Error(
         'Delete failed: not authenticated. Please re-login and try again.',
+      );
+      e.code = 'client/unauthenticated';
+      throw e;
+    }
+
+    throw error;
+  }
+};
+
+// Description: Permanently delete user account via callable (Apple compliance)
+export const deleteUserAccount = async () => {
+  // Ensure caller is authenticated - force token refresh to get fresh auth
+  const currentUser = auth().currentUser;
+  if (!currentUser) {
+    const err = new Error(
+      'User not authenticated. Please sign in and try again.',
+    );
+    err.code = 'client/unauthenticated';
+    throw err;
+  }
+
+  try {
+    // Force token refresh to ensure valid auth context
+    await currentUser.getIdToken(true);
+    logger.debug('[deleteUserAccount] Token refreshed, calling cloud function');
+
+    const deleteAccountFn =
+      functionsInstance.httpsCallable('deleteUserAccount');
+    const res = await deleteAccountFn();
+    return res?.data || { success: true };
+  } catch (error) {
+    logger.error('[deleteUserAccount] Failed:', error.message || error);
+
+    if (
+      error.code === 'functions/unauthenticated' ||
+      error.message?.toLowerCase?.().includes('unauthenticated')
+    ) {
+      const e = new Error(
+        'Deletion failed: not authenticated. Please re-login and try again.',
       );
       e.code = 'client/unauthenticated';
       throw e;

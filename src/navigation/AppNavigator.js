@@ -224,6 +224,11 @@ function RootStackScreen() {
         options={{ headerShown: false, title: 'Event Chat' }}
       />
       <RootStack.Screen
+        name={ROUTES.OTHER_USER_PROFILE}
+        component={OtherUserProfileScreen}
+        options={{ headerShown: false }}
+      />
+      <RootStack.Screen
         name={ROUTES.NOTIFICATIONS}
         component={NotificationScreen}
         options={{ headerShown: false, title: 'Notifications' }}

@@ -234,7 +234,8 @@ export default function useDiscoveryFeed(user) {
             resolve();
           },
           (error) => {
-            if (error?.code === 'permission-denied') {
+            // Handle permission-denied silently - this happens during sign out
+            if (error?.code === 'permission-denied' || error?.code === 'firestore/permission-denied') {
               setEvents([]);
               try {
                 unsubscribeRef.current && unsubscribeRef.current();
@@ -249,7 +250,8 @@ export default function useDiscoveryFeed(user) {
               resolve();
               return;
             }
-            console.error('Map events listener error:', error);
+            // Only log non-permission errors
+            console.warn('Map events listener error:', error?.message || error);
             if (isInitial) setInitialLoading(false);
             resolve();
           },

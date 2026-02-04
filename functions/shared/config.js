@@ -23,6 +23,13 @@ const ADMIN_CALLABLE_OPTIONS = Object.freeze({
   enforceAppCheck: ENFORCE_APPCHECK,
 });
 
+const BUSINESS_CALLABLE_OPTIONS = Object.freeze({
+  region: 'us-central1',
+  memory: '256MiB',
+  timeoutSeconds: 120,
+  enforceAppCheck: BUSINESS_ENFORCE_APPCHECK,
+});
+
 const SHARE_CONFIG = Object.freeze({
   apiKey:
     process.env.SHARE_DYNAMIC_LINK_API_KEY ||
@@ -52,6 +59,6 @@ module.exports = {
   BUSINESS_ENFORCE_APPCHECK,
   JOIN_CALLABLE_OPTIONS,
   ADMIN_CALLABLE_OPTIONS,
+  BUSINESS_CALLABLE_OPTIONS,
   SHARE_CONFIG,
 };
-

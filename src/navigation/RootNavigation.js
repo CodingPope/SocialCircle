@@ -42,8 +42,18 @@ function getActiveMainTab() {
 }
 
 // Convenience helpers
-export function navigateToOtherUserProfile(userId) {
+export function navigateToOtherUserProfile(userId, options = {}) {
   if (!userId) return;
+  const { fromRootStack = false } = options;
+
+  // If navigating from a RootStack screen (like EventChat), stay in RootStack
+  // so back navigation works correctly
+  if (fromRootStack) {
+    navigate(ROUTES.OTHER_USER_PROFILE, { userId });
+    return;
+  }
+
+  // Default: navigate through ProfileStack (for tab-based navigation)
   const originTab = getActiveMainTab();
   navigate(ROUTES.MAIN_TABS, {
     screen: ROUTES.PROFILE_STACK,

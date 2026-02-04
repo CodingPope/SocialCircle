@@ -29,9 +29,15 @@ const {
   BUSINESS_ENFORCE_APPCHECK,
   JOIN_CALLABLE_OPTIONS,
   ADMIN_CALLABLE_OPTIONS,
+  BUSINESS_CALLABLE_OPTIONS,
   SHARE_CONFIG,
 } = require('./shared/config');
 const { truncate, toDate } = require('./shared/helpers');
+
+// Initialize Firebase Admin BEFORE importing domain modules that use it
+admin.initializeApp();
+
+// Now safe to import modules that use admin SDK
 const { shareGenerateLink, sharePreview } = require('./domains/share');
 const { sendExpoPushMessages } = require('./domains/notifications');
 const {
@@ -54,7 +60,6 @@ exports.verifyBusinessCode = require('./domains/business').verifyBusinessCode;
 exports.addBusinessMember = require('./domains/business').addBusinessMember;
 exports.setBusinessPrivacy = require('./domains/business').setBusinessPrivacy;
 exports.submitBusiness = require('./domains/business').submitBusiness;
-admin.initializeApp();
 const db = admin.firestore(); // convenience
 const FieldValue = admin.firestore.FieldValue;
 function fieldDelete() {
@@ -326,118 +331,119 @@ exports.enableAuthUser = onCall(async (req) => {
 });
 
 // Description: Permanently delete user account and associated data (Apple compliance)
-exports.deleteUserAccount = onCall(async (req) => {
+exports.deleteUserAccount = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
   const uid = req.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'User must be authenticated');
   }
 
-  logger.info(`[deleteUserAccount] Starting deletion for user: ${uid}`);
+    logger.info(`[deleteUserAccount] Starting deletion for user: ${uid}`);
 
-  try {
-    // 1. Fetch user data before deletion
-    const userDoc = await db.collection('users').doc(uid).get();
-    const userData = userDoc.data() || {};
-
-    // 2. Revoke Apple Sign-In tokens if applicable
-    if (userData.appleAuthorizationCode) {
-      try {
-        await revokeAppleToken(userData.appleAuthorizationCode);
-        logger.info(`[deleteUserAccount] Revoked Apple tokens for: ${uid}`);
-      } catch (appleErr) {
-        logger.warn(
-          `[deleteUserAccount] Failed to revoke Apple token: ${appleErr.message}`,
-        );
-        // Continue with deletion even if token revocation fails
-      }
-    }
-
-    // 3. Delete user-generated content
-    const batch = db.batch();
-
-    // Delete user's events (as creator/host)
-    const userEvents = await db
-      .collection('events')
-      .where('createdBy', '==', uid)
-      .get();
-    userEvents.docs.forEach((doc) => batch.delete(doc.ref));
-    logger.info(
-      `[deleteUserAccount] Marking ${userEvents.size} events for deletion`,
-    );
-
-    // Remove user from event attendees (all events they joined)
-    const attendedEvents = await db
-      .collection('events')
-      .where('attendees', 'array-contains', uid)
-      .get();
-    attendedEvents.docs.forEach((doc) => {
-      batch.update(doc.ref, {
-        attendees: FieldValue.arrayRemove(uid),
-        attendeeCount: FieldValue.increment(-1),
-      });
-    });
-
-    // Delete user's messages in all chats
-    const userMessages = await db
-      .collection('messages')
-      .where('senderId', '==', uid)
-      .get();
-    userMessages.docs.forEach((doc) => batch.delete(doc.ref));
-    logger.info(
-      `[deleteUserAccount] Marking ${userMessages.size} messages for deletion`,
-    );
-
-    // Delete chats where user is a member
-    const userChats = await db
-      .collection('chats')
-      .where('members', 'array-contains', uid)
-      .get();
-    userChats.docs.forEach((doc) => batch.delete(doc.ref));
-    logger.info(
-      `[deleteUserAccount] Marking ${userChats.size} chats for deletion`,
-    );
-
-    // Delete user document
-    batch.delete(db.collection('users').doc(uid));
-
-    // Commit all Firestore deletions
-    await batch.commit();
-    logger.info(`[deleteUserAccount] Firestore data deleted for: ${uid}`);
-
-    // 4. Delete Firebase Auth user
-    await admin.auth().deleteUser(uid);
-    logger.info(`[deleteUserAccount] Firebase Auth user deleted: ${uid}`);
-
-    // 5. Delete user's storage files (profile images, event images)
     try {
-      const bucket = admin.storage().bucket();
-      await bucket.deleteFiles({ prefix: `users/${uid}/` });
-      logger.info(`[deleteUserAccount] Storage files deleted for: ${uid}`);
-    } catch (storageErr) {
-      logger.warn(
-        `[deleteUserAccount] Storage deletion failed: ${storageErr.message}`,
-      );
-      // Continue - storage may be empty or already deleted
-    }
+      // 1. Fetch user data before deletion
+      const userDoc = await db.collection('users').doc(uid).get();
+      const userData = userDoc.data() || {};
 
-    logger.info(
-      `[deleteUserAccount] Successfully completed deletion for: ${uid}`,
-    );
-    return {
-      success: true,
-      message: 'Account permanently deleted',
-    };
-  } catch (error) {
-    logger.error(
-      `[deleteUserAccount] Failed for user ${uid}:`,
-      error?.message || error,
-    );
-    throw new HttpsError(
-      'internal',
-      'Failed to delete account. Please contact support.',
-    );
-  }
-});
+      // 2. Revoke Apple Sign-In tokens if applicable
+      if (userData.appleAuthorizationCode) {
+        try {
+          await revokeAppleToken(userData.appleAuthorizationCode);
+          logger.info(`[deleteUserAccount] Revoked Apple tokens for: ${uid}`);
+        } catch (appleErr) {
+          logger.warn(
+            `[deleteUserAccount] Failed to revoke Apple token: ${appleErr.message}`,
+          );
+          // Continue with deletion even if token revocation fails
+        }
+      }
+
+      // 3. Delete user-generated content
+      const batch = db.batch();
+
+      // Delete user's events (as creator/host)
+      const userEvents = await db
+        .collection('events')
+        .where('createdBy', '==', uid)
+        .get();
+      userEvents.docs.forEach((doc) => batch.delete(doc.ref));
+      logger.info(
+        `[deleteUserAccount] Marking ${userEvents.size} events for deletion`,
+      );
+
+      // Remove user from event attendees (all events they joined)
+      const attendedEvents = await db
+        .collection('events')
+        .where('attendees', 'array-contains', uid)
+        .get();
+      attendedEvents.docs.forEach((doc) => {
+        batch.update(doc.ref, {
+          attendees: FieldValue.arrayRemove(uid),
+          attendeeCount: FieldValue.increment(-1),
+        });
+      });
+
+      // Delete user's messages in all chats
+      const userMessages = await db
+        .collection('messages')
+        .where('senderId', '==', uid)
+        .get();
+      userMessages.docs.forEach((doc) => batch.delete(doc.ref));
+      logger.info(
+        `[deleteUserAccount] Marking ${userMessages.size} messages for deletion`,
+      );
+
+      // Delete chats where user is a member
+      const userChats = await db
+        .collection('chats')
+        .where('members', 'array-contains', uid)
+        .get();
+      userChats.docs.forEach((doc) => batch.delete(doc.ref));
+      logger.info(
+        `[deleteUserAccount] Marking ${userChats.size} chats for deletion`,
+      );
+
+      // Delete user document
+      batch.delete(db.collection('users').doc(uid));
+
+      // Commit all Firestore deletions
+      await batch.commit();
+      logger.info(`[deleteUserAccount] Firestore data deleted for: ${uid}`);
+
+      // 4. Delete Firebase Auth user
+      await admin.auth().deleteUser(uid);
+      logger.info(`[deleteUserAccount] Firebase Auth user deleted: ${uid}`);
+
+      // 5. Delete user's storage files (profile images, event images)
+      try {
+        const bucket = admin.storage().bucket();
+        await bucket.deleteFiles({ prefix: `users/${uid}/` });
+        logger.info(`[deleteUserAccount] Storage files deleted for: ${uid}`);
+      } catch (storageErr) {
+        logger.warn(
+          `[deleteUserAccount] Storage deletion failed: ${storageErr.message}`,
+        );
+        // Continue - storage may be empty or already deleted
+      }
+
+      logger.info(
+        `[deleteUserAccount] Successfully completed deletion for: ${uid}`,
+      );
+      return {
+        success: true,
+        message: 'Account permanently deleted',
+      };
+    } catch (error) {
+      logger.error(
+        `[deleteUserAccount] Failed for user ${uid}:`,
+        error?.message || error,
+      );
+      throw new HttpsError(
+        'internal',
+        'Failed to delete account. Please contact support.',
+      );
+    }
+  },
+);
 
 /**
  * Revoke Apple Sign-In refresh token
