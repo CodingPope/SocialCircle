@@ -305,6 +305,10 @@ export default function MyCircle({ navigation }) {
           (friend.createdEvents || []).forEach((id) =>
             friendEventIds.push({ id, type: 'hosting', friend })
           );
+          // Check both attendingEvents (current/upcoming) and attendedEvents (past)
+          (friend.attendingEvents || []).forEach((id) =>
+            friendEventIds.push({ id, type: 'attending', friend })
+          );
           (friend.attendedEvents || []).forEach((id) =>
             friendEventIds.push({ id, type: 'attending', friend })
           );
@@ -678,12 +682,11 @@ export default function MyCircle({ navigation }) {
 
     if (!collapsedSections.friendActivities) {
       if (friendActivities.length > 0) {
-        friendActivities.forEach((item, idx) => {
-          sections.push({
-            type: 'friend-activity',
-            id: `activity-${item.event.id}-${idx}`,
-            data: item,
-          });
+        // Use a single scrollable list item for all friend activities
+        sections.push({
+          type: 'friend-activities-list',
+          id: 'friend-activities-list',
+          data: friendActivities,
         });
       } else {
         sections.push({
@@ -711,12 +714,11 @@ export default function MyCircle({ navigation }) {
           id: 'saved-loading',
         });
       } else if (savedFeed.length > 0) {
-        savedFeed.forEach((item) => {
-          sections.push({
-            type: 'saved-event',
-            id: `saved-${item.event.id}`,
-            data: item,
-          });
+        // Use a single scrollable list item for all saved events
+        sections.push({
+          type: 'saved-events-list',
+          id: 'saved-events-list',
+          data: savedFeed,
         });
       } else {
         sections.push({
@@ -943,8 +945,44 @@ export default function MyCircle({ navigation }) {
         case 'friend-activity':
           return renderFriendActivity({ item: item.data });
 
+        case 'friend-activities-list':
+          // Scrollable list with max ~4 items visible (each ~80px tall)
+          const MAX_VISIBLE_HEIGHT = 4 * 80;
+          return (
+            <View style={{ maxHeight: MAX_VISIBLE_HEIGHT }}>
+              <ScrollView
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={item.data.length > 4}
+              >
+                {item.data.map((activity, idx) => (
+                  <View key={`activity-${activity.event.id}-${idx}`}>
+                    {renderFriendActivity({ item: activity })}
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          );
+
         case 'saved-event':
           return renderSavedEvent({ item: item.data });
+
+        case 'saved-events-list':
+          // Scrollable list with max ~4 items visible (each ~80px tall)
+          const MAX_SAVED_HEIGHT = 4 * 80;
+          return (
+            <View style={{ maxHeight: MAX_SAVED_HEIGHT }}>
+              <ScrollView
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={item.data.length > 4}
+              >
+                {item.data.map((savedItem) => (
+                  <View key={`saved-${savedItem.event.id}`}>
+                    {renderSavedEvent({ item: savedItem })}
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          );
 
         case 'friends-horizontal':
           return (
