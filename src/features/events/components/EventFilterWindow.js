@@ -12,7 +12,10 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { db } from '../../../services/firebase';
-import { collection, getDocs } from '../../../services/firebase/firestoreCompat';
+import {
+  collection,
+  getDocs,
+} from '../../../services/firebase/firestoreCompat';
 import InterestSelector from '../../profile/components/InterestSelector';
 import { trackFilterApplySafe } from '../../../services/analyticsService';
 import { useTheme } from '../../../theme';
@@ -86,14 +89,14 @@ const EventFilterWindow = ({
     selectedFilters?.dateRange ||
       (selectedFilters?.date
         ? { start: selectedFilters.date, end: selectedFilters.date }
-        : null)
+        : null),
   );
   const [selectedRange, setSelectedRange] = useState(initialRange);
   const [selectedInterests, setSelectedInterests] = useState(
-    selectedFilters?.interests || userInterests || []
+    selectedFilters?.interests || userInterests || [],
   );
   const [genderOnly, setGenderOnly] = useState(
-    selectedFilters?.genderOnly || false
+    selectedFilters?.genderOnly || false,
   );
   const [activePicker, setActivePicker] = useState(null);
   const slideAnim = useRef(new Animated.Value(500)).current;
@@ -124,7 +127,7 @@ const EventFilterWindow = ({
         genderOnly: !!selectedFilters?.genderOnly,
         userInterests: (userInterests || []).slice().sort(),
       }),
-    [selectedFilters, userInterests]
+    [selectedFilters, userInterests],
   );
 
   useEffect(() => {
@@ -134,8 +137,8 @@ const EventFilterWindow = ({
           selectedFilters.dateRange ||
             (selectedFilters.date
               ? { start: selectedFilters.date, end: selectedFilters.date }
-              : null)
-        )
+              : null),
+        ),
       );
       setSelectedInterests(selectedFilters.interests || userInterests || []);
       setGenderOnly(selectedFilters.genderOnly || false);
@@ -167,7 +170,7 @@ const EventFilterWindow = ({
           }).start();
         }
       },
-    })
+    }),
   ).current;
 
   useEffect(() => {
@@ -272,20 +275,20 @@ const EventFilterWindow = ({
   const endDateValue = selectedRange?.end
     ? parseISOToDate(selectedRange.end)
     : selectedRange?.start
-    ? parseISOToDate(selectedRange.start)
-    : new Date(today);
+      ? parseISOToDate(selectedRange.start)
+      : new Date(today);
   const endMinimumDate = selectedRange?.start
     ? parseISOToDate(selectedRange.start)
     : new Date(today);
   const fallbackEndLabel = formatDisplayDate(
-    formatDateForFilter(maxSelectableDate)
+    formatDateForFilter(maxSelectableDate),
   );
 
   const toggleInterest = (interest) => {
     setSelectedInterests((prevSelected) =>
       prevSelected.includes(interest)
         ? prevSelected.filter((i) => i !== interest)
-        : [...prevSelected, interest]
+        : [...prevSelected, interest],
     );
   };
 
@@ -348,8 +351,8 @@ const EventFilterWindow = ({
                 {selectedRange?.end
                   ? formatDisplayDate(selectedRange.end)
                   : selectedRange?.start
-                  ? formatDisplayDate(selectedRange.start)
-                  : fallbackEndLabel}
+                    ? formatDisplayDate(selectedRange.start)
+                    : fallbackEndLabel}
               </Text>
             </TouchableOpacity>
           </View>
@@ -415,27 +418,32 @@ const EventFilterWindow = ({
             toggleInterest={toggleInterest}
           />
 
-          <Text style={styles.sectionTitle}>Privacy</Text>
-          <TouchableOpacity
-            style={[
-              styles.genderFilterButton,
-              genderOnly && styles.genderFilterButtonActive,
-            ]}
-            onPress={() => setGenderOnly((prev) => !prev)}
-          >
-            <Text
-              style={{
-                color: genderOnly ? '#fff' : theme.colors.text,
-                fontWeight: 'bold',
-              }}
-            >
-              {currentUserGender === 'male'
-                ? 'Male Only'
-                : currentUserGender === 'female'
-                ? 'Women Only'
-                : 'Non-Binary Only'}
-            </Text>
-          </TouchableOpacity>
+          {/* Description: Only show gender filter when user has set a gender (SC-101) */}
+          {currentUserGender ? (
+            <>
+              <Text style={styles.sectionTitle}>Privacy</Text>
+              <TouchableOpacity
+                style={[
+                  styles.genderFilterButton,
+                  genderOnly && styles.genderFilterButtonActive,
+                ]}
+                onPress={() => setGenderOnly((prev) => !prev)}
+              >
+                <Text
+                  style={{
+                    color: genderOnly ? '#fff' : theme.colors.text,
+                    fontWeight: 'bold',
+                  }}
+                >
+                  {currentUserGender === 'male'
+                    ? 'Male Only'
+                    : currentUserGender === 'female'
+                      ? 'Women Only'
+                      : 'Non-Binary Only'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
 
           <View style={styles.filterButtonsContainer}>
             <TouchableOpacity

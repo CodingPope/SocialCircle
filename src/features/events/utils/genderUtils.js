@@ -12,9 +12,9 @@ export const eventPassesGenderGate = (event = {}, user = {}) => {
   const privacy = (event?.privacy || 'public').toString().toLowerCase();
   const userSex = normalizeSex(user?.sex || user?.gender);
 
+  // Description: Gender-restricted events are hidden from users who haven't set gender
   if (privacy === 'male-only') return userSex === 'male';
   if (privacy === 'female-only') return userSex === 'female';
   if (privacy === 'nonbinary-only') return userSex === 'nonbinary';
-  return true;
+  return true; // public/rsvp/private → everyone sees it
 };
-

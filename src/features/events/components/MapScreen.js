@@ -254,6 +254,8 @@ export default function MapScreen() {
   );
 
   const [isLocating, setIsLocating] = useState(false);
+  // Description: Track location permission state for contextual prompt (SC-104)
+  const [locationPermission, setLocationPermission] = useState('undetermined');
 
   const [isSearchFocused, setIsSearchFocused] = useState(false); // ✅ TRACKS DROPDOWN STATE
 
@@ -617,10 +619,18 @@ export default function MapScreen() {
     });
   }, [userInterests]);
 
+  // Description: SC-104 — Only check existing permission on mount, never request.
+  // Location permission is requested contextually via the "Show Events Near Me" button.
   useEffect(() => {
     (async () => {
       try {
-        const granted = await ensureForegroundPermission();
+        // Only check existing permission status — do NOT request (Apple Guideline 5.1.5)
+        let granted = false;
+        try {
+          const existing = await Location.getForegroundPermissionsAsync();
+          granted = existing?.status === 'granted';
+          setLocationPermission(existing?.status || 'undetermined');
+        } catch {}
 
         // Description: Graceful degradation for Apple Guideline 5.1.5
         // Allow users to browse map even without location permission
@@ -1205,18 +1215,21 @@ export default function MapScreen() {
     setShowListView((prev) => !prev);
   };
 
-  const handleCenterOnUser = async () => {
+  // Description: SC-104 — Contextual location request with clear purpose string
+  const requestLocationAndCenter = async () => {
     if (isLocating) return;
     markInteraction();
     setIsLocating(true);
     try {
+      // Request permission (this triggers native iOS dialog with purpose string from Info.plist)
       const granted = await ensureForegroundPermission();
+      setLocationPermission(granted ? 'granted' : 'denied');
       if (!granted) {
         Alert.alert(
-          'Location Needed',
-          'Turn on location in Settings to center the map near you.',
+          'Location Access Denied',
+          'Showing all Denver events. Enable location in Settings to see nearby events.',
           [
-            { text: 'Cancel', style: 'cancel' },
+            { text: 'OK', style: 'cancel' },
             {
               text: 'Open Settings',
               onPress: () =>
@@ -1247,6 +1260,9 @@ export default function MapScreen() {
       setIsLocating(false);
     }
   };
+
+  const handleCenterOnUser = () => requestLocationAndCenter();
+  const handleShowEventsNearMe = () => requestLocationAndCenter();
 
   const formatDateForFilter = (dateObj) => {
     if (!(dateObj instanceof Date)) return null;
@@ -1625,6 +1641,26 @@ export default function MapScreen() {
         </View>
       )}
 
+      {/* Description: SC-104 — Floating contextual location button when permission not yet granted */}
+      {locationPermission !== 'granted' && (
+        <TouchableOpacity
+          style={styles.showNearMeButton}
+          onPress={handleShowEventsNearMe}
+          activeOpacity={0.85}
+        >
+          {isLocating ? (
+            <ActivityIndicator
+              size='small'
+              color='#fff'
+              style={{ marginRight: 8 }}
+            />
+          ) : (
+            <Text style={styles.showNearMeEmoji}>📍</Text>
+          )}
+          <Text style={styles.showNearMeText}>Show Events Near Me</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Left FABs */}
       <View style={styles.leftFabContainer}>
         <TouchableOpacity
@@ -1899,6 +1935,32 @@ const createStyles = (theme) =>
       shadowOpacity: theme.isDark ? 0.45 : 0.15,
       shadowRadius: theme.isDark ? 8 : 4,
       elevation: 3,
+    },
+    showNearMeButton: {
+      position: 'absolute',
+      bottom: 88,
+      left: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 12,
+      paddingHorizontal: 18,
+      borderRadius: 24,
+      zIndex: 61,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.25,
+      shadowRadius: 6,
+      elevation: 5,
+    },
+    showNearMeEmoji: {
+      fontSize: 16,
+      marginRight: 8,
+    },
+    showNearMeText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '700',
     },
     searchBarUnified: {
       position: 'absolute',

@@ -37,6 +37,19 @@ const createStyles = (theme) =>
       textAlign: 'center',
       marginBottom: theme.spacing.lg,
     },
+    greetingHeader: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: theme.isDark ? theme.colors.neutral900 : theme.colors.neutral100,
+      textAlign: 'center',
+      marginBottom: theme.spacing.sm,
+    },
+    greetingSubtitle: {
+      fontSize: 16,
+      color: theme.isDark ? theme.colors.neutral700 : theme.colors.neutral400,
+      textAlign: 'center',
+      marginBottom: theme.spacing.xl,
+    },
     input: {
       backgroundColor: theme.isDark
         ? 'rgba(30, 41, 59, 0.95)'
@@ -68,6 +81,53 @@ const createStyles = (theme) =>
       width: '100%',
       marginTop: theme.spacing.md,
     },
+    skipRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: theme.spacing.md,
+    },
+    skipButton: {
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+    },
+    skipText: {
+      fontSize: 15,
+      color: theme.isDark ? theme.colors.neutral600 : theme.colors.neutral500,
+      fontWeight: '500',
+    },
+    dobLabel: {
+      fontSize: 14,
+      color: theme.isDark ? theme.colors.neutral600 : theme.colors.neutral500,
+      textAlign: 'center',
+      marginBottom: theme.spacing.xs,
+    },
+    ageCheckbox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: theme.spacing.lg,
+      paddingHorizontal: theme.spacing.md,
+    },
+    checkbox: {
+      width: 24,
+      height: 24,
+      borderRadius: 6,
+      borderWidth: 2,
+      borderColor: theme.isDark ? theme.colors.neutral600 : theme.colors.neutral500,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: theme.spacing.sm,
+    },
+    checkboxChecked: {
+      backgroundColor: theme.colors.primary,
+      borderColor: theme.colors.primary,
+    },
+    checkboxLabel: {
+      flex: 1,
+      fontSize: 15,
+      color: theme.isDark ? theme.colors.neutral800 : theme.colors.neutral300,
+      lineHeight: 20,
+    },
   });
 
 export default function NameDobScreen({ navigation }) {
@@ -76,14 +136,26 @@ export default function NameDobScreen({ navigation }) {
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const keyboardAppearance = theme.isDark ? 'dark' : 'light';
+
+  // Description: Check if this is an Apple Sign-In user
+  const isAppleUser =
+    user?.appleRelayEmail !== undefined ||
+    user?.appleAuthorizationCode !== undefined ||
+    user?.authProvider === 'apple';
+
   // Description: Pre-populate firstName and lastName if provided by Apple Sign-In or social login
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName] = useState(user?.lastName || '');
+
+  // Description: For Apple users with name, show greeting. Without name, allow manual entry as recovery.
+  const hasAppleName = isAppleUser && !!user?.firstName;
   const hasPrefilledNames = !!(user?.firstName && user?.lastName);
   // State for name validation errors
   const [nameError, setNameError] = useState('');
   const [dob, setDob] = useState(new Date());
+  const [dobSelected, setDobSelected] = useState(false);
   const [isDatePickerVisible, setIsDatePickerVisible] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -93,6 +165,7 @@ export default function NameDobScreen({ navigation }) {
 
   const handleConfirmDate = (date) => {
     setDob(date);
+    setDobSelected(true);
     hideDatePicker();
   };
 
@@ -114,9 +187,10 @@ export default function NameDobScreen({ navigation }) {
 
   // Description: Validates name fields for length and allowed characters
   const validateNames = () => {
-    if (hasPrefilledNames) {
+    // Description: Apple users must use Apple-provided name, skip validation
+    if (hasAppleName || hasPrefilledNames) {
       setNameError('');
-      return true; // Apple provided name; do not force user to re-enter
+      return true;
     }
     const nameRegex = /^[A-Za-z\-' ]{2,30}$/;
     if (!nameRegex.test(firstName)) {
@@ -137,28 +211,47 @@ export default function NameDobScreen({ navigation }) {
 
   // Description: Skip to next step if name already provided (e.g., from Apple Sign-In)
   useEffect(() => {
-    if (user?.firstName && user?.lastName && user?.dob) {
-      // Description: User already has name and DOB from social sign-in, skip this screen
+    if (
+      user?.firstName &&
+      user?.lastName &&
+      (user?.dob || user?.dobPromptedAt)
+    ) {
+      // Description: User already has name (and DOB or was prompted), skip this screen
       navigation.reset({ index: 0, routes: [{ name: 'Sex' }] });
     }
-  }, [user?.firstName, user?.lastName, user?.dob, navigation]);
+  }, [
+    user?.firstName,
+    user?.lastName,
+    user?.dob,
+    user?.dobPromptedAt,
+    navigation,
+  ]);
 
-  // Description: Handles Next button press, validates names and age
+  // Description: Handles Next button press, validates names and age (DOB is optional)
   const onNext = async () => {
     if (!user) return;
     if (!validateNames()) return;
 
-    const today = new Date();
-    const age = today.getFullYear() - dob.getFullYear();
-    const monthDiff = today.getMonth() - dob.getMonth();
-    const dayDiff = today.getDate() - dob.getDate();
-
-    if (
-      age < 18 ||
-      (age === 18 && (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)))
-    ) {
-      setError('You must be at least 18 years old.');
+    // Description: Require age confirmation checkbox
+    if (!ageConfirmed) {
+      setError('Please confirm you are 18 or older to continue.');
       return;
+    }
+
+    // Description: Only validate age if user actively selected a DOB
+    if (dobSelected) {
+      const today = new Date();
+      const age = today.getFullYear() - dob.getFullYear();
+      const monthDiff = today.getMonth() - dob.getMonth();
+      const dayDiff = today.getDate() - dob.getDate();
+
+      if (
+        age < 18 ||
+        (age === 18 && (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)))
+      ) {
+        setError('You must be at least 18 years old.');
+        return;
+      }
     }
 
     const trimmedFirst = firstName.trim();
@@ -167,19 +260,25 @@ export default function NameDobScreen({ navigation }) {
     setLoading(true);
     setError('');
     try {
-      const firebaseDob = Timestamp.fromDate(dob);
-      await mergeUserFields(user.uid, {
+      const fields = {
         firstName: trimmedFirst,
         lastName: trimmedLast,
-        dob: firebaseDob,
+        dobPromptedAt: new Date().toISOString(),
         deviceToken: user?.deviceToken ?? null,
         pushOptIn: user?.pushOptIn ?? false,
-      });
+      };
+      let dobValue = null;
+      if (dobSelected) {
+        dobValue = Timestamp.fromDate(dob);
+        fields.dob = dobValue;
+      }
+      await mergeUserFields(user.uid, fields);
       setUser({
         ...user,
         firstName: trimmedFirst,
         lastName: trimmedLast,
-        dob: firebaseDob,
+        ...(dobSelected ? { dob: dobValue } : {}),
+        dobPromptedAt: fields.dobPromptedAt,
       });
       await logOnboardingStepComplete('name_dob');
       navigation.reset({ index: 0, routes: [{ name: 'Sex' }] });
@@ -200,54 +299,87 @@ export default function NameDobScreen({ navigation }) {
         variant='onboarding'
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
-          <Text style={styles.header}>Tell us about you</Text>
-          {/* Description: First name input with maxLength and validation */}
-          <TextInput
-            style={[styles.input, hasPrefilledNames ? { opacity: 0.6 } : null]}
-            placeholder='First name'
-            placeholderTextColor={
-              theme.isDark ? theme.colors.neutral600 : theme.colors.neutral600
-            }
-            value={firstName}
-            editable={!hasPrefilledNames}
-            selectTextOnFocus={!hasPrefilledNames}
-            onChangeText={
-              hasPrefilledNames
-                ? undefined
-                : (text) => {
-                    setFirstName(text);
-                    if (nameError) validateNames();
-                  }
-            }
-            maxLength={30}
-            autoCapitalize='words'
-            textContentType='givenName'
-            keyboardAppearance={keyboardAppearance}
-          />
-          {/* Description: Last name input with maxLength and validation */}
-          <TextInput
-            style={[styles.input, hasPrefilledNames ? { opacity: 0.6 } : null]}
-            placeholder='Last name'
-            placeholderTextColor={
-              theme.isDark ? theme.colors.neutral600 : theme.colors.neutral600
-            }
-            value={lastName}
-            editable={!hasPrefilledNames}
-            selectTextOnFocus={!hasPrefilledNames}
-            onChangeText={
-              hasPrefilledNames
-                ? undefined
-                : (text) => {
-                    setLastName(text);
-                    if (nameError) validateNames();
-                  }
-            }
-            maxLength={30}
-            autoCapitalize='words'
-            textContentType='familyName'
-            keyboardAppearance={keyboardAppearance}
-          />
+          {/* Description: Apple user with name - show greeting instead of inputs */}
+          {hasAppleName ? (
+            <>
+              <Text style={styles.greetingHeader}>
+                Hey {user.firstName}! 👋
+              </Text>
+              <Text style={styles.greetingSubtitle}>
+                Let's finish setting up your profile
+              </Text>
+            </>
+          ) : (
+            <>
+              {/* Description: Show name inputs for non-Apple users or Apple users needing recovery */}
+              <Text style={styles.header}>Tell us about you</Text>
+              {/* Description: First name input with maxLength and validation */}
+              <TextInput
+                style={styles.input}
+                placeholder='First name'
+                placeholderTextColor={
+                  theme.isDark
+                    ? theme.colors.neutral600
+                    : theme.colors.neutral600
+                }
+                value={firstName}
+                onChangeText={(text) => {
+                  setFirstName(text);
+                  if (nameError) validateNames();
+                }}
+                maxLength={30}
+                autoCapitalize='words'
+                textContentType='givenName'
+                keyboardAppearance={keyboardAppearance}
+              />
+              {/* Description: Last name input with maxLength and validation */}
+              <TextInput
+                style={styles.input}
+                placeholder='Last name'
+                placeholderTextColor={
+                  theme.isDark
+                    ? theme.colors.neutral600
+                    : theme.colors.neutral600
+                }
+                value={lastName}
+                onChangeText={(text) => {
+                  setLastName(text);
+                  if (nameError) validateNames();
+                }}
+                maxLength={30}
+                autoCapitalize='words'
+                textContentType='familyName'
+                keyboardAppearance={keyboardAppearance}
+              />
+            </>
+          )}
 
+          {/* Description: Age confirmation checkbox - required for all users */}
+          <TouchableOpacity
+            style={styles.ageCheckbox}
+            onPress={() => {
+              setAgeConfirmed(!ageConfirmed);
+              if (error === 'Please confirm you are 18 or older to continue.') {
+                setError('');
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.checkbox, ageConfirmed && styles.checkboxChecked]}>
+              {ageConfirmed && (
+                <Ionicons
+                  name='checkmark'
+                  size={18}
+                  color='#fff'
+                />
+              )}
+            </View>
+            <Text style={styles.checkboxLabel}>
+              I confirm that I am 18 years of age or older
+            </Text>
+          </TouchableOpacity>
+
+          <Text style={styles.dobLabel}>Birthday (optional)</Text>
           <TouchableOpacity style={styles.input} onPress={showDatePicker}>
             <View style={styles.dateRow}>
               <Ionicons
@@ -260,7 +392,11 @@ export default function NameDobScreen({ navigation }) {
                 }
                 style={{ marginRight: 8 }}
               />
-              <Text style={styles.dateText}>{dob.toDateString()}</Text>
+              <Text style={[styles.dateText, !dobSelected && { opacity: 0.5 }]}>
+                {dobSelected
+                  ? dob.toDateString()
+                  : 'Tap to select your birthday'}
+              </Text>
             </View>
           </TouchableOpacity>
 

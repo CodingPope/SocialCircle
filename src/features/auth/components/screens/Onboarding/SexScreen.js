@@ -16,16 +16,20 @@ import { normalizeSex } from '../../../../profile/utils/userProfile';
 import Button from '../../../../../components/ui/Button';
 import { useTheme } from '../../../../../theme';
 
-const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary'];
+const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
 
 const VALUE_TO_LABEL = {
   male: 'Male',
   female: 'Female',
   nonbinary: 'Non-binary',
+  null: 'Prefer not to say',
 };
 
-const labelToValue = (label) => normalizeSex(label) || 'male';
-const valueToLabel = (value) => VALUE_TO_LABEL[value] || 'Male';
+const labelToValue = (label) => {
+  if (label === 'Prefer not to say') return null;
+  return normalizeSex(label) || null;
+};
+const valueToLabel = (value) => VALUE_TO_LABEL[value] || 'Prefer not to say';
 
 const createStyles = (theme) =>
   StyleSheet.create({
@@ -93,6 +97,13 @@ const createStyles = (theme) =>
     nextButtonContainer: {
       marginTop: theme.spacing.lg,
     },
+    explainerText: {
+      fontSize: 13,
+      color: theme.isDark ? theme.colors.neutral600 : theme.colors.neutral500,
+      textAlign: 'center',
+      marginTop: theme.spacing.sm,
+      lineHeight: 18,
+    },
   });
 
 export default function SexScreen({ navigation }) {
@@ -100,9 +111,10 @@ export default function SexScreen({ navigation }) {
   const setUser = useUserStore((state) => state.setUser);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
-  const [selectedSex, setSelectedSex] = useState(() =>
-    valueToLabel(normalizeSex(user?.sex) || 'male')
-  );
+  const [selectedSex, setSelectedSex] = useState(() => {
+    const normalized = normalizeSex(user?.sex);
+    return normalized ? valueToLabel(normalized) : null;
+  });
   const [loading, setLoading] = useState(false);
 
   const buttonScale = new Animated.Value(1);
@@ -123,7 +135,7 @@ export default function SexScreen({ navigation }) {
           useNativeDriver: true,
         }),
       ]),
-      { iterations: 2 }
+      { iterations: 2 },
     ).start();
   }, []);
 
@@ -134,30 +146,39 @@ export default function SexScreen({ navigation }) {
     setSelectedSex((prev) => (prev === label ? prev : label));
   }, [user?.sex]);
 
-  const onNext = async () => {
+  // Description: Save gender selection (or null for skip/prefer-not-to-say) and proceed
+  const saveSexAndNavigate = async (sexValue) => {
     setLoading(true);
     try {
       if (!user?.uid) {
         console.warn('SexScreen: missing user uid when saving sex selection.');
         return;
       }
-      const normalizedSex = labelToValue(selectedSex);
       await mergeUserFields(user.uid, {
-        sex: normalizedSex,
+        sex: sexValue,
+        sexPromptedAt: new Date().toISOString(),
         deviceToken: user?.deviceToken ?? null,
         pushOptIn: user?.pushOptIn ?? false,
       });
       if (user) {
-        setUser({ ...user, sex: normalizedSex });
+        setUser({
+          ...user,
+          sex: sexValue,
+          sexPromptedAt: new Date().toISOString(),
+        });
       }
       await logOnboardingStepComplete('sex', {
-        choice: normalizedSex || 'unknown',
+        choice: sexValue || 'skipped',
       });
-      // Description: Navigate to TOS screen (LocationScreen comes later in onboarding flow)
       navigation.navigate('TOS');
     } finally {
       setLoading(false);
     }
+  };
+
+  const onNext = async () => {
+    const normalizedSex = labelToValue(selectedSex);
+    await saveSexAndNavigate(normalizedSex);
   };
 
   return (
@@ -165,7 +186,7 @@ export default function SexScreen({ navigation }) {
       <Text style={styles.header}>What's your gender?</Text>
       <TouchableOpacity
         onPress={() => {
-          navigation.navigate('NameDob');
+          navigation.reset({ index: 0, routes: [{ name: 'NameDob' }] });
         }}
         style={styles.goBackButton}
       >
@@ -197,10 +218,14 @@ export default function SexScreen({ navigation }) {
           <Button
             title={loading ? 'Saving…' : 'Next'}
             onPress={onNext}
-            disabled={loading}
+            disabled={loading || selectedSex === null}
           />
         </View>
       </Animated.View>
+      <Text style={styles.explainerText}>
+        You can add this later in Profile to access gender-specific safety
+        filters
+      </Text>
     </AnimatedGradientBackground>
   );
 }

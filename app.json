@@ -28,7 +28,7 @@
         ]
       },
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Social Circle uses your location to show nearby events and improve discovery.",
+        "NSLocationWhenInUseUsageDescription": "Social Circle needs your location to show events within 5 miles of you.",
         "NSCameraUsageDescription": "Allow camera access to take photos for events and your profile.",
         "NSPhotoLibraryUsageDescription": "Allow photo library access to choose images for events and your profile.",
         "NSPhotoLibraryAddUsageDescription": "We save event photos and profile pictures to your library on request.",

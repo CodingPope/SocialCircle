@@ -17,7 +17,6 @@ import {
   NameDobScreen,
   SexScreen,
   InterestsScreen,
-  LocationScreen,
   TOSAcceptanceScreen,
 } from '../features/auth';
 import {
@@ -70,10 +69,15 @@ function OnboardingStackScreen({ initialRouteName = ROUTES.NAME_DOB }) {
       screenOptions={{ headerShown: false }}
       initialRouteName={initialRouteName}
     >
-      <OnboardingStack.Screen name={ROUTES.NAME_DOB} component={NameDobScreen} />
+      <OnboardingStack.Screen
+        name={ROUTES.NAME_DOB}
+        component={NameDobScreen}
+      />
       <OnboardingStack.Screen name={ROUTES.SEX} component={SexScreen} />
-      <OnboardingStack.Screen name={ROUTES.TOS} component={TOSAcceptanceScreen} />
-      <OnboardingStack.Screen name={ROUTES.LOCATION} component={LocationScreen} />
+      <OnboardingStack.Screen
+        name={ROUTES.TOS}
+        component={TOSAcceptanceScreen}
+      />
       <OnboardingStack.Screen
         name={ROUTES.INTERESTS}
         component={InterestsScreen}
@@ -176,7 +180,9 @@ function MainTabs({ initialRouteName = ROUTES.MAP, onConsumeConsumerRoute }) {
         listeners={({ navigation }) => ({
           tabPress: (e) => {
             e.preventDefault();
-            navigation.navigate(ROUTES.PROFILE_STACK, { screen: ROUTES.PROFILE });
+            navigation.navigate(ROUTES.PROFILE_STACK, {
+              screen: ROUTES.PROFILE,
+            });
           },
         })}
       />
@@ -205,7 +211,9 @@ function RootStackScreen() {
   const consumerRoute =
     consumerRouteRaw === 'Profile' ? ROUTES.PROFILE : consumerRouteRaw;
   const initialTab =
-    consumerRoute === ROUTES.PROFILE ? ROUTES.PROFILE_STACK : consumerRoute || ROUTES.MAP;
+    consumerRoute === ROUTES.PROFILE
+      ? ROUTES.PROFILE_STACK
+      : consumerRoute || ROUTES.MAP;
 
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
@@ -310,8 +318,14 @@ function BizRootStackScreen() {
         component={BusinessUpgradeScreen}
         options={{ headerShown: true, title: 'Upgrade' }}
       />
-      <BizRootStack.Screen name={ROUTES.PRIVACY_INFO} component={PrivacyInfoScreen} />
-      <BizRootStack.Screen name={ROUTES.INFO_ARTICLE} component={InfoArticleScreen} />
+      <BizRootStack.Screen
+        name={ROUTES.PRIVACY_INFO}
+        component={PrivacyInfoScreen}
+      />
+      <BizRootStack.Screen
+        name={ROUTES.INFO_ARTICLE}
+        component={InfoArticleScreen}
+      />
       <BizRootStack.Screen
         name={ROUTES.TOS_ACCEPTANCE}
         component={TOSAcceptanceScreen}

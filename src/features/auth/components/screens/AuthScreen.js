@@ -366,17 +366,16 @@ export default function AuthScreen({ navigation, route }) {
     }
   }, [businessMode, setRole]);
 
+  // Description: Profile complete check — dob, sex, and location are optional per Apple guidelines
   const isProfileComplete = (userData) => {
     return (
       userData &&
       userData.firstName &&
       userData.lastName &&
-      userData.dob &&
-      userData.sex &&
+      (userData.dob || userData.dobPromptedAt) &&
+      (userData.sex || userData.sexPromptedAt) &&
       Array.isArray(userData.interests) &&
-      userData.interests.length > 0 &&
-      userData.location?.latitude != null &&
-      userData.location?.longitude != null
+      userData.interests.length > 0
     );
   };
 
@@ -446,17 +445,21 @@ export default function AuthScreen({ navigation, route }) {
         // Description: Reset session role to consumer for Apple login
         setRole('consumer');
 
-        // If new user, create minimal profile (re-use createUser from profile services)
-        if (result?.additionalUserInfo?.isNewUser) {
-          const { createUser } = require('../../../profile/api/userService');
-          const token = await registerForPushTokenAsync().catch(() => null);
-          const appleProfile = extractAppleProfileFields(
-            credential,
-            result.user,
-          );
+        const {
+          createUser,
+          mergeUserFields,
+        } = require('../../../profile/api/userService');
+        const token = await registerForPushTokenAsync().catch(() => null);
+        const appleProfile = extractAppleProfileFields(credential, result.user);
 
-          // Description: Save firstName and lastName from Apple to Firestore immediately
-          // Apple only provides fullName on FIRST sign-in, so we must capture it now
+        // Description: Check if Apple provided name/email (only on first authorization)
+        const hasAppleProvidedName = !!(
+          appleProfile.firstName || appleProfile.lastName
+        );
+        const hasAppleProvidedEmail = !!appleProfile.email;
+
+        if (result?.additionalUserInfo?.isNewUser) {
+          // Description: New user - create full profile with Apple data
           await createUser(result.user.uid, {
             email: appleProfile.email || result.user.email || '',
             firstName: appleProfile.firstName || '',
@@ -469,6 +472,23 @@ export default function AuthScreen({ navigation, route }) {
           await hydrateUserProfile(result.user.uid);
           if (token) initPushForUser(result.user.uid).catch(() => {});
         } else {
+          // Description: Existing user - update with Apple data if provided (re-authorization case)
+          if (hasAppleProvidedName || hasAppleProvidedEmail) {
+            const updates = {
+              ...(hasAppleProvidedName && appleProfile.firstName
+                ? { firstName: appleProfile.firstName }
+                : {}),
+              ...(hasAppleProvidedName && appleProfile.lastName
+                ? { lastName: appleProfile.lastName }
+                : {}),
+              ...(hasAppleProvidedEmail ? { email: appleProfile.email } : {}),
+              ...(appleProfile.appleRelayEmail
+                ? { appleRelayEmail: appleProfile.appleRelayEmail }
+                : {}),
+              appleAuthorizationCode: credential.authorizationCode || null,
+            };
+            await mergeUserFields(result.user.uid, updates);
+          }
           await hydrateUserProfile(result.user.uid);
           initPushForUser(result.user.uid).catch(() => {});
         }

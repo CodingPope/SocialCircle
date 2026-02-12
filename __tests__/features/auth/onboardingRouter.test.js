@@ -35,7 +35,8 @@ describe('getNextOnboardingStep', () => {
     expect(getNextOnboardingStep(user)).toBe('InterestsScreen');
   });
 
-  it('routes to Location when interests set but location not prompted', () => {
+  // Description: Location step removed from onboarding (SC-103) — now requested contextually on Map
+  it('returns null when interests set (location no longer in onboarding)', () => {
     const user = {
       firstName: 'A',
       lastName: 'B',
@@ -44,7 +45,7 @@ describe('getNextOnboardingStep', () => {
       tosPromptedAt: Date.now(),
       interests: ['sports'],
     };
-    expect(getNextOnboardingStep(user)).toBe('Location');
+    expect(getNextOnboardingStep(user)).toBeNull();
   });
 
   it('returns null when all onboarding steps complete', () => {
