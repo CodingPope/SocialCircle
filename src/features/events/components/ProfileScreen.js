@@ -373,11 +373,20 @@ export default function ProfileScreen({
               // Call cloud function to permanently delete account
               await deleteUserAccount();
 
-              // Clear local state first
+              // Stop all Firestore listeners before clearing state
+              // This prevents the AuthContext onSnapshot from racing
+              // with the soft-deleted doc and re-setting user
+              if (global.unsubscribeAllListeners) {
+                global.unsubscribeAllListeners.forEach((unsub) => {
+                  try { unsub(); } catch {}
+                });
+                global.unsubscribeAllListeners = [];
+              }
+
+              // Clear local state — AppNavigator will show AuthStack (welcome screen)
               setUser(null);
 
               // Sign out of Firebase Auth to clear cached auth state
-              // This ensures AppNavigator shows AuthStack instead of blank screen
               try {
                 await auth().signOut();
               } catch (signOutErr) {
@@ -389,7 +398,7 @@ export default function ProfileScreen({
               setTimeout(() => {
                 Alert.alert(
                   'Account Deleted',
-                  'Your account has been permanently deleted. All your data has been removed from our system.',
+                  'Your account has been successfully deleted.',
                   [{ text: 'OK' }],
                 );
               }, 600);

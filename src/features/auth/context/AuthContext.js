@@ -47,6 +47,13 @@ export function AuthProvider({ children }) {
       unsubscribeDoc = userDoc.onSnapshot(
         async (snapshot) => {
           const data = snapshot.data() || {};
+          // If the doc is soft-deleted, treat as no user (triggers AuthStack)
+          if (data.isDeleted) {
+            setUser(null);
+            setLoading(false);
+            try { sessionRoleStore.getState().reset(); } catch {}
+            return;
+          }
           const next = {
             uid: firebaseUser.uid,
             email: firebaseUser.email,

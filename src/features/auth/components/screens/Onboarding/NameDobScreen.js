@@ -113,7 +113,9 @@ const createStyles = (theme) =>
       height: 24,
       borderRadius: 6,
       borderWidth: 2,
-      borderColor: theme.isDark ? theme.colors.neutral600 : theme.colors.neutral500,
+      borderColor: theme.isDark
+        ? theme.colors.neutral600
+        : theme.colors.neutral500,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: theme.spacing.sm,
@@ -143,12 +145,17 @@ export default function NameDobScreen({ navigation }) {
     user?.appleAuthorizationCode !== undefined ||
     user?.authProvider === 'apple';
 
-  // Description: Pre-populate firstName and lastName if provided by Apple Sign-In or social login
+  // Description: For Apple users, check if we have a real name (not empty)
+  const hasRealAppleName =
+    isAppleUser && !!user?.firstName && user?.firstName !== 'Friend';
+
+  // Description: Pre-populate firstName and lastName; use empty string if no real name
   const [firstName, setFirstName] = useState(user?.firstName || '');
   const [lastName, setLastName] = useState(user?.lastName || '');
 
-  // Description: For Apple users with name, show greeting. Without name, allow manual entry as recovery.
-  const hasAppleName = isAppleUser && !!user?.firstName;
+  // Description: Only skip name inputs if Apple user has a real name from Apple/Firestore
+  // If name is empty or placeholder 'Friend', show editable name fields so user can provide their name
+  const hasAppleName = hasRealAppleName;
   const hasPrefilledNames = !!(user?.firstName && user?.lastName);
   // State for name validation errors
   const [nameError, setNameError] = useState('');
@@ -210,12 +217,12 @@ export default function NameDobScreen({ navigation }) {
   };
 
   // Description: Skip to next step if name already provided (e.g., from Apple Sign-In)
+  // Description: Apple users may have empty lastName; skip if firstName is present
   useEffect(() => {
-    if (
-      user?.firstName &&
-      user?.lastName &&
-      (user?.dob || user?.dobPromptedAt)
-    ) {
+    const hasName = isAppleUser
+      ? !!user?.firstName
+      : !!(user?.firstName && user?.lastName);
+    if (hasName && (user?.dob || user?.dobPromptedAt)) {
       // Description: User already has name (and DOB or was prompted), skip this screen
       navigation.reset({ index: 0, routes: [{ name: 'Sex' }] });
     }
@@ -224,6 +231,7 @@ export default function NameDobScreen({ navigation }) {
     user?.lastName,
     user?.dob,
     user?.dobPromptedAt,
+    isAppleUser,
     navigation,
   ]);
 
@@ -299,11 +307,11 @@ export default function NameDobScreen({ navigation }) {
         variant='onboarding'
       >
         <ScrollView contentContainerStyle={styles.scrollContainer}>
-          {/* Description: Apple user with name - show greeting instead of inputs */}
+          {/* Description: Apple user - show greeting instead of name inputs */}
           {hasAppleName ? (
             <>
               <Text style={styles.greetingHeader}>
-                Hey {user.firstName}! 👋
+                {user?.firstName ? `Hey ${user.firstName}! 👋` : 'Welcome! 👋'}
               </Text>
               <Text style={styles.greetingSubtitle}>
                 Let's finish setting up your profile
@@ -365,13 +373,11 @@ export default function NameDobScreen({ navigation }) {
             }}
             activeOpacity={0.7}
           >
-            <View style={[styles.checkbox, ageConfirmed && styles.checkboxChecked]}>
+            <View
+              style={[styles.checkbox, ageConfirmed && styles.checkboxChecked]}
+            >
               {ageConfirmed && (
-                <Ionicons
-                  name='checkmark'
-                  size={18}
-                  color='#fff'
-                />
+                <Ionicons name='checkmark' size={18} color='#fff' />
               )}
             </View>
             <Text style={styles.checkboxLabel}>

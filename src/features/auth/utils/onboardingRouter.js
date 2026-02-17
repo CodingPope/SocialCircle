@@ -3,7 +3,16 @@
 export function getNextOnboardingStep(userData) {
   // Name step (required); DOB is optional per Apple Guideline 5.1.1
   // Show NameDob screen if name is missing OR if user was never prompted for DOB
-  if (!userData.firstName || !userData.lastName) {
+  // Description: Apple users may have empty lastName (Apple doesn't always provide it);
+  // skip name check if firstName is present and user has Apple markers
+  const isAppleUser =
+    userData.appleRelayEmail !== undefined ||
+    userData.appleAuthorizationCode !== undefined ||
+    userData.authProvider === 'apple';
+  if (!userData.firstName) {
+    return 'NameDob';
+  }
+  if (!isAppleUser && !userData.lastName) {
     return 'NameDob';
   }
   if (!userData.dob && !userData.dobPromptedAt) {

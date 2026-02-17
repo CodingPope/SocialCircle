@@ -5,6 +5,8 @@ const {
   HttpsError,
 } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions/v2');
+const functions = require('firebase-functions');
+const crypto = require('crypto');
 const {
   onDocumentUpdated,
   onDocumentCreated,
@@ -331,165 +333,250 @@ exports.enableAuthUser = onCall(async (req) => {
 });
 
 // Description: Permanently delete user account and associated data (Apple compliance)
+// Description: Soft-delete user account with 30-day grace period.
+// Preserves user doc (for Apple Sign In name recovery).
+// Hard-deletes Auth user immediately so the user can re-register.
+// purgeDeletedAccounts (scheduled) hard-deletes Firestore doc after 30 days.
 exports.deleteUserAccount = onCall(ADMIN_CALLABLE_OPTIONS, async (req) => {
   const uid = req.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'User must be authenticated');
   }
 
-    logger.info(`[deleteUserAccount] Starting deletion for user: ${uid}`);
+  logger.info(`[deleteUserAccount] Starting soft-deletion for user: ${uid}`);
 
-    try {
-      // 1. Fetch user data before deletion
-      const userDoc = await db.collection('users').doc(uid).get();
-      const userData = userDoc.data() || {};
+  try {
+    // 1. Fetch user data before deletion
+    const userDoc = await db.collection('users').doc(uid).get();
+    const userData = userDoc.data() || {};
 
-      // 2. Revoke Apple Sign-In tokens if applicable
-      if (userData.appleAuthorizationCode) {
-        try {
-          await revokeAppleToken(userData.appleAuthorizationCode);
-          logger.info(`[deleteUserAccount] Revoked Apple tokens for: ${uid}`);
-        } catch (appleErr) {
-          logger.warn(
-            `[deleteUserAccount] Failed to revoke Apple token: ${appleErr.message}`,
-          );
-          // Continue with deletion even if token revocation fails
-        }
+    // 2. Revoke Apple Sign-In tokens if applicable
+    if (userData.appleAuthorizationCode) {
+      try {
+        await revokeAppleToken(userData.appleAuthorizationCode);
+        logger.info(`[deleteUserAccount] Revoked Apple tokens for: ${uid}`);
+      } catch (appleErr) {
+        logger.warn(
+          `[deleteUserAccount] Failed to revoke Apple token: ${appleErr.message}`,
+        );
+        // Continue with deletion even if token revocation fails
       }
+    }
 
-      // 3. Delete user-generated content
-      const batch = db.batch();
+    // 3. Delete user-generated content (immediate)
+    const batch = db.batch();
 
-      // Delete user's events (as creator/host)
-      const userEvents = await db
-        .collection('events')
-        .where('createdBy', '==', uid)
-        .get();
-      userEvents.docs.forEach((doc) => batch.delete(doc.ref));
-      logger.info(
-        `[deleteUserAccount] Marking ${userEvents.size} events for deletion`,
-      );
+    // Delete user's events (as creator/host)
+    const userEvents = await db
+      .collection('events')
+      .where('createdBy', '==', uid)
+      .get();
+    userEvents.docs.forEach((doc) => batch.delete(doc.ref));
+    logger.info(
+      `[deleteUserAccount] Marking ${userEvents.size} events for deletion`,
+    );
 
-      // Remove user from event attendees (all events they joined)
-      const attendedEvents = await db
-        .collection('events')
-        .where('attendees', 'array-contains', uid)
-        .get();
-      attendedEvents.docs.forEach((doc) => {
-        batch.update(doc.ref, {
-          attendees: FieldValue.arrayRemove(uid),
-          attendeeCount: FieldValue.increment(-1),
-        });
+    // Remove user from event attendees (all events they joined)
+    const attendedEvents = await db
+      .collection('events')
+      .where('attendees', 'array-contains', uid)
+      .get();
+    attendedEvents.docs.forEach((doc) => {
+      batch.update(doc.ref, {
+        attendees: FieldValue.arrayRemove(uid),
+        attendeeCount: FieldValue.increment(-1),
       });
+    });
 
-      // Delete user's messages in all chats
-      const userMessages = await db
-        .collection('messages')
-        .where('senderId', '==', uid)
-        .get();
-      userMessages.docs.forEach((doc) => batch.delete(doc.ref));
-      logger.info(
-        `[deleteUserAccount] Marking ${userMessages.size} messages for deletion`,
-      );
+    // Delete user's messages in all chats
+    const userMessages = await db
+      .collection('messages')
+      .where('senderId', '==', uid)
+      .get();
+    userMessages.docs.forEach((doc) => batch.delete(doc.ref));
+    logger.info(
+      `[deleteUserAccount] Marking ${userMessages.size} messages for deletion`,
+    );
 
-      // Delete chats where user is a member
-      const userChats = await db
-        .collection('chats')
-        .where('members', 'array-contains', uid)
-        .get();
-      userChats.docs.forEach((doc) => batch.delete(doc.ref));
-      logger.info(
-        `[deleteUserAccount] Marking ${userChats.size} chats for deletion`,
-      );
+    // Delete chats where user is a member
+    const userChats = await db
+      .collection('chats')
+      .where('members', 'array-contains', uid)
+      .get();
+    userChats.docs.forEach((doc) => batch.delete(doc.ref));
+    logger.info(
+      `[deleteUserAccount] Marking ${userChats.size} chats for deletion`,
+    );
 
-      // Delete user document
-      batch.delete(db.collection('users').doc(uid));
+    // 4. Soft-delete user document (preserve for 30-day recovery window)
+    // firstName, lastName, email preserved for Apple Sign In name recovery
+    batch.update(db.collection('users').doc(uid), {
+      isDeleted: true,
+      deletedAt: FieldValue.serverTimestamp(),
+      // Clear sensitive fields immediately
+      deviceTokens: FieldValue.delete(),
+      pushToken: FieldValue.delete(),
+    });
 
-      // Commit all Firestore deletions
-      await batch.commit();
-      logger.info(`[deleteUserAccount] Firestore data deleted for: ${uid}`);
+    // Commit all Firestore changes
+    await batch.commit();
+    logger.info(
+      `[deleteUserAccount] Firestore soft-delete complete for: ${uid}`,
+    );
 
-      // 4. Delete Firebase Auth user
+    // 5. Hard-delete Firebase Auth user immediately (allows re-registration)
+    try {
       await admin.auth().deleteUser(uid);
       logger.info(`[deleteUserAccount] Firebase Auth user deleted: ${uid}`);
-
-      // 5. Delete user's storage files (profile images, event images)
-      try {
-        const bucket = admin.storage().bucket();
-        await bucket.deleteFiles({ prefix: `users/${uid}/` });
-        logger.info(`[deleteUserAccount] Storage files deleted for: ${uid}`);
-      } catch (storageErr) {
-        logger.warn(
-          `[deleteUserAccount] Storage deletion failed: ${storageErr.message}`,
-        );
-        // Continue - storage may be empty or already deleted
-      }
-
-      logger.info(
-        `[deleteUserAccount] Successfully completed deletion for: ${uid}`,
-      );
-      return {
-        success: true,
-        message: 'Account permanently deleted',
-      };
-    } catch (error) {
-      logger.error(
-        `[deleteUserAccount] Failed for user ${uid}:`,
-        error?.message || error,
-      );
-      throw new HttpsError(
-        'internal',
-        'Failed to delete account. Please contact support.',
+    } catch (authErr) {
+      // Log but don't fail — Firestore soft-delete already succeeded
+      logger.warn(
+        `[deleteUserAccount] Auth deletion failed for ${uid}: ${authErr.message}`,
       );
     }
-  },
-);
+
+    // 6. Delete user's storage files (profile images, event images)
+    try {
+      const bucket = admin.storage().bucket();
+      await bucket.deleteFiles({ prefix: `users/${uid}/` });
+      logger.info(`[deleteUserAccount] Storage files deleted for: ${uid}`);
+    } catch (storageErr) {
+      logger.warn(
+        `[deleteUserAccount] Storage deletion failed: ${storageErr.message}`,
+      );
+      // Continue - storage may be empty or already deleted
+    }
+
+    logger.info(
+      `[deleteUserAccount] Soft-deletion complete for: ${uid}. Hard-delete scheduled in 30 days.`,
+    );
+    return {
+      success: true,
+      message: 'Account deleted. Data will be permanently removed in 30 days.',
+    };
+  } catch (error) {
+    logger.error(
+      `[deleteUserAccount] Failed for user ${uid}:`,
+      error?.message || error,
+    );
+    throw new HttpsError(
+      'internal',
+      'Failed to delete account. Please contact support.',
+    );
+  }
+});
 
 /**
  * Revoke Apple Sign-In refresh token
  * https://developer.apple.com/documentation/sign_in_with_apple/revoke_tokens
  */
 async function revokeAppleToken(authorizationCode) {
-  // Apple token revocation requires client_secret (JWT signed by team private key)
-  // This is a simplified implementation - in production you'd need:
-  // 1. Apple Team ID, Key ID, and private key
-  // 2. Generate client_secret JWT
-  // 3. POST to https://appleid.apple.com/auth/revoke
+  if (!authorizationCode) {
+    logger.debug('[revokeAppleToken] No authorizationCode provided, skipping.');
+    return;
+  }
 
-  // For now, we log and skip actual revocation
-  // TODO: Implement full Apple token revocation with proper credentials
-  logger.warn(
-    '[revokeAppleToken] Apple token revocation not fully implemented. Authorization code stored but not revoked.',
-  );
+  // Apple token revocation requires a client_secret JWT signed with your
+  // Sign in with Apple private key. We read these from functions config:
+  //   firebase functions:config:set apple.team_id="TEAMID" apple.key_id="KEYID" apple.client_id="com.socialcirclellc.app" apple.private_key="-----BEGIN PRIVATE KEY-----\n..."`
+  const appleConfig =
+    (functions.config && functions.config().apple) ? functions.config().apple : {};
+  const teamId = appleConfig.team_id;
+  const keyId = appleConfig.key_id;
+  const clientId = appleConfig.client_id;
+  const privateKey = appleConfig.private_key;
 
-  // Placeholder for future implementation:
-  // const clientSecret = generateAppleClientSecret();
-  // const response = await fetch('https://appleid.apple.com/auth/revoke', {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  //   body: new URLSearchParams({
-  //     client_id: 'com.socialcirclellc.app',
-  //     client_secret: clientSecret,
-  //     token: authorizationCode,
-  //     token_type_hint: 'refresh_token'
-  //   })
-  // });
+  if (!teamId || !keyId || !clientId || !privateKey) {
+    logger.warn(
+      '[revokeAppleToken] Missing Apple config (team_id/key_id/client_id/private_key). Skipping token revocation.',
+    );
+    return;
+  }
+
+  // Helper to base64url-encode a JSON object or Buffer
+  const base64url = (input) =>
+    Buffer.from(
+      typeof input === 'string' || Buffer.isBuffer(input)
+        ? input
+        : JSON.stringify(input),
+    )
+      .toString('base64')
+      .replace(/=/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
+
+  const now = Math.floor(Date.now() / 1000);
+
+  // Per Apple docs: ES256 JWT with kid header
+  const header = {
+    alg: 'ES256',
+    kid: keyId,
+    typ: 'JWT',
+  };
+  const payload = {
+    iss: teamId,
+    iat: now,
+    exp: now + 300, // 5 minutes
+    aud: 'https://appleid.apple.com',
+    sub: clientId,
+  };
+
+  const headerSegment = base64url(header);
+  const payloadSegment = base64url(payload);
+  const unsignedToken = `${headerSegment}.${payloadSegment}`;
+
+  // Sign using the Apple private key (p8) with ES256
+  const signer = crypto.createSign('sha256');
+  signer.update(unsignedToken);
+  signer.end();
+  const signature = signer.sign(privateKey);
+  const signatureSegment = base64url(signature);
+  const clientSecret = `${unsignedToken}.${signatureSegment}`;
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    token: authorizationCode,
+    token_type_hint: 'refresh_token',
+  }).toString();
+
+  const revokeUrl = 'https://appleid.apple.com/auth/revoke';
+
+  // Use global fetch if available (Node 18+), otherwise lazy-load node-fetch
+  const doFetch =
+    typeof fetch === 'function'
+      ? fetch
+      : (...args) =>
+          import('node-fetch').then((m) => m.default(...args));
+
+  try {
+    const res = await doFetch(revokeUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `Apple revoke responded with ${res.status}: ${text || res.statusText}`,
+      );
+    }
+
+    logger.info('[revokeAppleToken] Successfully revoked Apple token.');
+  } catch (err) {
+    // Important for Apple compliance: we *attempted* to revoke, but we do not block
+    // account deletion if this fails.
+    logger.warn(
+      `[revokeAppleToken] Failed to revoke Apple token: ${err.message}`,
+    );
+  }
 }
 
-// Description: Sync Firebase Auth user disabled state with Firestore isDeleted field
-exports.syncAuthWithSoftDelete = onDocumentUpdated(
-  'users/{userId}',
-  async (event) => {
-    const before = event.data.before.data();
-    const after = event.data.after.data();
-    if (!before.isDeleted && after.isDeleted) {
-      await admin.auth().updateUser(event.params.userId, { disabled: true });
-    }
-    if (before.isDeleted && !after.isDeleted) {
-      await admin.auth().updateUser(event.params.userId, { disabled: false });
-    }
-  },
-);
+// Description: syncAuthWithSoftDelete removed — Auth user is now hard-deleted
+// immediately in deleteUserAccount, so disabling/enabling is unnecessary.
+// The reactivateUser client-side flow uses findSoftDeletedUserByEmail to
+// recover name from the soft-deleted Firestore doc before creating a new user.
 
 // Description: Keep accountTier in sync with premium/popular flags.
 exports.syncUserAccountTierOnCreate = onDocumentCreated(
@@ -2262,6 +2349,55 @@ exports.computePopularity = computePopularity;
 exports.rollupDailyAnalytics = rollupDailyAnalytics;
 
 exports.sendEventReminders = sendEventReminders;
+
+// -------------------- PURGE SOFT-DELETED ACCOUNTS --------------------
+// Description: Hard-delete user docs that have been soft-deleted for 30+ days.
+// Runs daily at 03:00 UTC. Completes the deletion lifecycle started by
+// deleteUserAccount. Auth user is already hard-deleted at deletion time.
+const PURGE_GRACE_DAYS = 30;
+exports.purgeDeletedAccounts = onSchedule(
+  {
+    schedule: 'every day 03:00',
+    timeZone: 'UTC',
+    memory: '256MiB',
+    timeoutSeconds: 120,
+    region: 'us-central1',
+  },
+  async () => {
+    const cutoff = new Date(Date.now() - PURGE_GRACE_DAYS * 864e5);
+    const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoff);
+
+    const snap = await db
+      .collection('users')
+      .where('isDeleted', '==', true)
+      .where('deletedAt', '<=', cutoffTimestamp)
+      .get();
+
+    if (snap.empty) {
+      logger.log('[purgeDeletedAccounts] No accounts to purge');
+      return;
+    }
+
+    logger.log(
+      `[purgeDeletedAccounts] Purging ${snap.size} accounts deleted before ${cutoff.toISOString()}`,
+    );
+
+    let purged = 0;
+    for (const doc of snap.docs) {
+      try {
+        // Hard-delete the Firestore user doc (Auth user already deleted)
+        await doc.ref.delete();
+        purged++;
+      } catch (err) {
+        logger.error(
+          `[purgeDeletedAccounts] Failed to purge ${doc.id}: ${err.message}`,
+        );
+      }
+    }
+
+    logger.log(`[purgeDeletedAccounts] Purged ${purged}/${snap.size} accounts`);
+  },
+);
 
 // -------------------- BUSINESSES: CALLABLE API --------------------
 // Migrated to ./domains/business (keep index.js slim)
