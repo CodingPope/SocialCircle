@@ -19,6 +19,8 @@ import {
   Image,
 } from 'react-native';
 import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -32,7 +34,46 @@ import {
 } from '../../../notifications/api/pushService';
 import { auth } from '../../../../services/firebase';
 import { track as trackClient } from '../../../../lib/analytics';
-import { createUser } from '../../../profile/api/userService';
+import {
+  createUser,
+  mergeUserFields,
+  getUserById,
+} from '../../../profile/api/userService';
+import {
+  getAuthErrorMessage,
+  logAuthError,
+} from '../../utils/authErrorHandler';
+
+// Description: Extract name/email from Apple credential and Firebase user
+const extractAppleProfileFields = (appleCredential, firebaseUser) => {
+  const fullName = appleCredential?.fullName || {};
+  const displayNameParts = (firebaseUser?.displayName || '')
+    .split(' ')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const [displayFirstName, ...displayRemaining] = displayNameParts;
+
+  return {
+    email:
+      firebaseUser?.email ||
+      appleCredential?.email ||
+      firebaseUser?.providerData?.find((p) => p?.email)?.email ||
+      '',
+    firstName:
+      fullName.givenName || fullName.nickname || displayFirstName || '',
+    lastName: fullName.familyName || displayRemaining.join(' ') || '',
+    appleRelayEmail: appleCredential?.email || null,
+  };
+};
+
+// Description: Generate a secure random nonce for Apple Sign In
+async function generateNonce(length = 32) {
+  const bytes = await Crypto.getRandomBytesAsync(length);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+    '',
+  );
+}
 
 const HERO_COPY = {
   login: {
@@ -90,6 +131,159 @@ export default function LoginScreen({ navigation }) {
     }
   }, [googleResponse]);
 
+  // Description: Check Apple Sign In availability (iOS only)
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    if (Platform.OS === 'ios') {
+      AppleAuthentication.isAvailableAsync()
+        .then((v) => {
+          if (mounted) setAppleAvailable(!!v);
+        })
+        .catch(() => {});
+    }
+    return () => (mounted = false);
+  }, []);
+
+  // Description: Handle Apple Sign In without double-prompt on credential conflict
+  const handleAppleSignIn = async () => {
+    try {
+      setError('');
+      const rawNonce = await generateNonce();
+      const hashed = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        rawNonce,
+      );
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashed,
+      });
+
+      if (!credential || !credential.identityToken) {
+        throw new Error('Apple Sign-In returned no identity token.');
+      }
+
+      const oauthCredential = auth.AppleAuthProvider.credential(
+        credential.identityToken,
+        rawNonce,
+      );
+
+      try {
+        const result = await auth().signInWithCredential(oauthCredential);
+
+        const token = await registerForPushTokenAsync().catch(() => null);
+        const appleProfile = extractAppleProfileFields(credential, result.user);
+
+        const hasAppleProvidedName = !!(
+          appleProfile.firstName || appleProfile.lastName
+        );
+        const hasAppleProvidedEmail = !!appleProfile.email;
+
+        if (result?.additionalUserInfo?.isNewUser) {
+          // Description: New user — do NOT recover data from soft-deleted docs.
+          // Treat this as a fresh account after Apple Sign-In.
+          await createUser(result.user.uid, {
+            email: appleProfile.email || result.user.email || '',
+            firstName: appleProfile.firstName || '',
+            lastName: appleProfile.lastName || '',
+            appleRelayEmail: appleProfile.appleRelayEmail,
+            appleAuthorizationCode: credential.authorizationCode || null,
+            deviceToken: token || null,
+            pushOptIn: !!token,
+          });
+          if (token) initPushForUser(result.user.uid).catch(() => {});
+        } else {
+          // Description: Existing Auth user — check if Firestore doc exists and is active
+          const existingProfile = await getUserById(result.user.uid);
+
+          if (!existingProfile) {
+            // Firestore doc is missing or soft-deleted.
+            // Do NOT recover from soft-deleted docs; create a fresh profile.
+            await createUser(result.user.uid, {
+              email: appleProfile.email || result.user.email || '',
+              firstName: appleProfile.firstName || '',
+              lastName: appleProfile.lastName || '',
+              appleRelayEmail: appleProfile.appleRelayEmail,
+              appleAuthorizationCode: credential.authorizationCode || null,
+              deviceToken: token || null,
+              pushOptIn: !!token,
+            });
+          } else {
+            // Active Firestore doc exists — merge new Apple data if provided
+            if (!appleProfile.firstName && !appleProfile.lastName) {
+              if (existingProfile.firstName)
+                appleProfile.firstName = existingProfile.firstName;
+              if (existingProfile.lastName)
+                appleProfile.lastName = existingProfile.lastName;
+              if (existingProfile.email)
+                appleProfile.email = existingProfile.email;
+            }
+            if (hasAppleProvidedName || hasAppleProvidedEmail) {
+              const updates = {
+                ...(hasAppleProvidedName && appleProfile.firstName
+                  ? { firstName: appleProfile.firstName }
+                  : {}),
+                ...(hasAppleProvidedName && appleProfile.lastName
+                  ? { lastName: appleProfile.lastName }
+                  : {}),
+                ...(hasAppleProvidedEmail ? { email: appleProfile.email } : {}),
+                ...(appleProfile.appleRelayEmail
+                  ? { appleRelayEmail: appleProfile.appleRelayEmail }
+                  : {}),
+                appleAuthorizationCode: credential.authorizationCode || null,
+              };
+              await mergeUserFields(result.user.uid, updates);
+            }
+          }
+          initPushForUser(result.user.uid).catch(() => {});
+        }
+      } catch (err) {
+        // Description: Handle account-exists-with-different-credential without re-prompting
+        const code = err?.code || err?.message || '';
+        if (code.includes('account-exists-with-different-credential')) {
+          Alert.alert(
+            'Account Already Exists',
+            'An account with this email already exists using a different sign-in method. Please sign in with your original method instead.',
+            [
+              {
+                text: 'Sign in with Google',
+                onPress: () => googlePromptAsync(),
+              },
+              {
+                text: 'Sign in with Email',
+                onPress: () => setMode('login'),
+              },
+              { text: 'Cancel', style: 'cancel' },
+            ],
+          );
+        } else {
+          throw err;
+        }
+      }
+    } catch (err) {
+      const cancelCodes = [
+        'ERR_CANCELED',
+        'ERR_REQUEST_CANCELED',
+        'ERR_USER_CANCEL',
+        'ERR_APPLE_SIGNIN_CANCEL',
+      ];
+      const isCanceled =
+        (err && cancelCodes.includes(err.code)) ||
+        String(err?.message || '')
+          .toLowerCase()
+          .includes('cancel');
+      if (!isCanceled) {
+        logAuthError(err, 'apple-signin', {});
+        const { title, message } = getAuthErrorMessage(err, 'login');
+        Alert.alert(title, message);
+      }
+    }
+  };
+
   // Description: Handles login and navigates to MainTabs (Map tab) on success
   const handleLogin = async () => {
     setError('');
@@ -119,12 +313,12 @@ export default function LoginScreen({ navigation }) {
       };
       console.error(
         '[LoginScreen] signInWithEmailAndPassword failed',
-        debugInfo
+        debugInfo,
       );
       setError(
         debugInfo.nativeErrorMessage ||
           debugInfo.message ||
-          'Login failed. Please try again.'
+          'Login failed. Please try again.',
       );
     }
   };
@@ -146,7 +340,7 @@ export default function LoginScreen({ navigation }) {
               message: signInErr?.message,
               nativeErrorCode: signInErr?.nativeErrorCode,
               nativeErrorMessage: signInErr?.nativeErrorMessage,
-            }
+            },
           );
         }
         if (signInErr.code === 'auth/user-disabled') {
@@ -170,7 +364,7 @@ export default function LoginScreen({ navigation }) {
                       await reactivateUser(softDeleted.id, {});
                       Alert.alert(
                         'Account Reactivated',
-                        'Your account has been reactivated. Please log in.'
+                        'Your account has been reactivated. Please log in.',
                       );
                     } else {
                       setError('Could not find soft-deleted user.');
@@ -180,7 +374,7 @@ export default function LoginScreen({ navigation }) {
                   }
                 },
               },
-            ]
+            ],
           );
           return;
         } else if (signInErr.code === 'auth/user-not-found') {
@@ -210,12 +404,12 @@ export default function LoginScreen({ navigation }) {
       };
       console.error(
         '[LoginScreen] createUserWithEmailAndPassword failed',
-        debugInfo
+        debugInfo,
       );
       setError(
         debugInfo.nativeErrorMessage ||
           debugInfo.message ||
-          'Unable to create the account. Please try again.'
+          'Unable to create the account. Please try again.',
       );
     }
   };
@@ -398,6 +592,20 @@ export default function LoginScreen({ navigation }) {
                   </Text>
                 </View>
               ))}
+
+            {isLogin && appleAvailable && (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={
+                  AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                }
+                buttonStyle={
+                  AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={16}
+                style={styles.appleButton}
+                onPress={handleAppleSignIn}
+              />
+            )}
 
             <TouchableOpacity
               style={styles.buttonSecondary}
@@ -658,6 +866,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: 'uppercase',
     marginHorizontal: 12,
+  },
+  appleButton: {
+    width: '100%',
+    height: 48,
+    marginTop: 8,
   },
   socialButton: {
     borderWidth: 1,

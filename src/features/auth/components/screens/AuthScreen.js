@@ -40,6 +40,7 @@ import {
 } from '../../utils/authErrorHandler';
 import { useBizOnboarding } from '../../../business';
 import { Ionicons } from '@expo/vector-icons';
+import { getNextOnboardingStep } from '../../utils/onboardingRouter';
 
 const extractAppleProfileFields = (appleCredential, firebaseUser) => {
   const fullName = appleCredential?.fullName || {};
@@ -234,7 +235,7 @@ const createStyles = (theme) => {
     },
     appleButton: {
       width: '100%',
-      height: 44,
+      height: 48,
       marginTop: spacing.sm,
     },
     buttonSpacing: {
@@ -366,18 +367,9 @@ export default function AuthScreen({ navigation, route }) {
     }
   }, [businessMode, setRole]);
 
-  // Description: Profile complete check — dob, sex, and location are optional per Apple guidelines
-  const isProfileComplete = (userData) => {
-    return (
-      userData &&
-      userData.firstName &&
-      userData.lastName &&
-      (userData.dob || userData.dobPromptedAt) &&
-      (userData.sex || userData.sexPromptedAt) &&
-      Array.isArray(userData.interests) &&
-      userData.interests.length > 0
-    );
-  };
+  // Description: Profile complete check — delegate to onboarding router
+  const isProfileComplete = (userData) =>
+    getNextOnboardingStep(userData || {}) === null;
 
   // Google Auth (disabled for now but kept in)
   const [googleRequest, googleResponse, googlePromptAsync] =
@@ -459,7 +451,8 @@ export default function AuthScreen({ navigation, route }) {
         const hasAppleProvidedEmail = !!appleProfile.email;
 
         if (result?.additionalUserInfo?.isNewUser) {
-          // Description: New user - create full profile with Apple data
+          // Description: New user — do NOT recover data from soft-deleted docs.
+          // Treat this as a fresh account after Apple Sign-In.
           await createUser(result.user.uid, {
             email: appleProfile.email || result.user.email || '',
             firstName: appleProfile.firstName || '',
@@ -472,22 +465,48 @@ export default function AuthScreen({ navigation, route }) {
           await hydrateUserProfile(result.user.uid);
           if (token) initPushForUser(result.user.uid).catch(() => {});
         } else {
-          // Description: Existing user - update with Apple data if provided (re-authorization case)
-          if (hasAppleProvidedName || hasAppleProvidedEmail) {
-            const updates = {
-              ...(hasAppleProvidedName && appleProfile.firstName
-                ? { firstName: appleProfile.firstName }
-                : {}),
-              ...(hasAppleProvidedName && appleProfile.lastName
-                ? { lastName: appleProfile.lastName }
-                : {}),
-              ...(hasAppleProvidedEmail ? { email: appleProfile.email } : {}),
-              ...(appleProfile.appleRelayEmail
-                ? { appleRelayEmail: appleProfile.appleRelayEmail }
-                : {}),
+          // Description: Existing Auth user — check if Firestore doc exists and is active
+          const { getUserById } = require('../../../profile/api/userService');
+          const existingProfile = await getUserById(result.user.uid);
+
+          if (!existingProfile) {
+            // Firestore doc is missing or soft-deleted.
+            // Do NOT recover from soft-deleted docs; create a fresh profile.
+            await createUser(result.user.uid, {
+              email: appleProfile.email || result.user.email || '',
+              firstName: appleProfile.firstName || '',
+              lastName: appleProfile.lastName || '',
+              appleRelayEmail: appleProfile.appleRelayEmail,
               appleAuthorizationCode: credential.authorizationCode || null,
-            };
-            await mergeUserFields(result.user.uid, updates);
+              deviceToken: token || null,
+              pushOptIn: !!token,
+            });
+          } else {
+            // Active Firestore doc exists — merge new Apple data if provided
+            if (!appleProfile.firstName && !appleProfile.lastName) {
+              if (existingProfile.firstName)
+                appleProfile.firstName = existingProfile.firstName;
+              if (existingProfile.lastName)
+                appleProfile.lastName = existingProfile.lastName;
+              if (existingProfile.email)
+                appleProfile.email = existingProfile.email;
+            }
+            if (hasAppleProvidedName || hasAppleProvidedEmail) {
+              const updates = {
+                ...(hasAppleProvidedName && appleProfile.firstName
+                  ? { firstName: appleProfile.firstName }
+                  : {}),
+                ...(hasAppleProvidedName && appleProfile.lastName
+                  ? { lastName: appleProfile.lastName }
+                  : {}),
+                ...(hasAppleProvidedEmail ? { email: appleProfile.email } : {}),
+                ...(appleProfile.appleRelayEmail
+                  ? { appleRelayEmail: appleProfile.appleRelayEmail }
+                  : {}),
+                appleAuthorizationCode: credential.authorizationCode || null,
+              };
+              await mergeUserFields(result.user.uid, updates);
+            }
           }
           await hydrateUserProfile(result.user.uid);
           initPushForUser(result.user.uid).catch(() => {});
@@ -496,54 +515,20 @@ export default function AuthScreen({ navigation, route }) {
         // Handle account-exists-with-different-credential for Apple
         const code = err?.code || err?.message || '';
         if (code.includes('account-exists-with-different-credential')) {
-          // Save pending credential for linking after user signs in with existing provider
-          // We store it in-memory for now; for persistence consider storing in secure local storage
-          const pendingCred = oauthCredential;
-
-          // Ask user to sign in with the existing provider (we try Google if available)
+          // Description: Show a single alert — do NOT auto-trigger another sign-in flow
           Alert.alert(
-            'Account conflict',
-            'An account already exists with the same email but different sign-in method. Sign in with the existing method to link Apple to your account.',
+            'Account Already Exists',
+            'An account with this email already exists using a different sign-in method. Please sign in with your original method instead.',
             [
               {
                 text: 'Sign in with Google',
-                onPress: async () => {
-                  try {
-                    // Prompt Google sign-in flow and then link
-                    await googlePromptAsync();
-                    // Wait for googleResponse effect to handle signInWithCredential;
-                    // after user is signed in, try linking
-                    const unsubscribe = auth().onAuthStateChanged(
-                      async (user) => {
-                        if (user) {
-                          try {
-                            await user.linkWithCredential(pendingCred);
-                            Alert.alert(
-                              'Linked',
-                              'Apple account linked successfully.',
-                            );
-                          } catch (linkErr) {
-                            Alert.alert(
-                              'Link failed',
-                              linkErr?.message || String(linkErr),
-                            );
-                          }
-                          unsubscribe();
-                        }
-                      },
-                    );
-                  } catch (gErr) {
-                    Alert.alert(
-                      'Google Sign-In Failed',
-                      gErr?.message || String(gErr),
-                    );
-                  }
-                },
+                onPress: () => handleGooglePress(),
               },
               {
-                text: 'Cancel',
-                style: 'cancel',
+                text: 'Sign in with Email',
+                onPress: () => setMode('login'),
               },
+              { text: 'Cancel', style: 'cancel' },
             ],
           );
         } else {
@@ -897,6 +882,42 @@ export default function AuthScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
+            {appleAvailable && (
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={
+                  AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                }
+                buttonStyle={
+                  AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={12}
+                style={styles.appleButton}
+                onPress={handleAppleSignIn}
+              />
+            )}
+
+            {!googleDisabled && (
+              <TouchableOpacity
+                style={[styles.socialButton, { marginTop: theme.spacing.sm }]}
+                onPress={handleGooglePress}
+              >
+                <Ionicons
+                  name='logo-google'
+                  size={18}
+                  color={theme.colors.neutral900}
+                />
+                <Text style={styles.socialButtonText}>Sign in with Google</Text>
+              </TouchableOpacity>
+            )}
+
+            {(appleAvailable || !googleDisabled) && (
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerLabel}>or use email</Text>
+                <View style={styles.dividerLine} />
+              </View>
+            )}
+
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput
@@ -983,28 +1004,6 @@ export default function AuthScreen({ navigation, route }) {
                 </Text>
               </TouchableOpacity>
             </View>
-
-            {appleAvailable && (
-              <>
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={styles.dividerLabel}>or</Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={
-                    AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
-                  }
-                  buttonStyle={
-                    AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-                  }
-                  cornerRadius={8}
-                  style={styles.appleButton}
-                  onPress={handleAppleSignIn}
-                />
-              </>
-            )}
           </View>
         </View>
       </View>
