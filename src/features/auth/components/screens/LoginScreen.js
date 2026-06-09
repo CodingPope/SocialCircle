@@ -18,7 +18,7 @@ import {
   Alert,
   Image,
 } from 'react-native';
-import * as Google from 'expo-auth-session/providers/google';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
 import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
@@ -38,6 +38,7 @@ import {
   createUser,
   mergeUserFields,
   getUserById,
+  findSoftDeletedUserByEmail,
 } from '../../../profile/api/userService';
 import {
   getAuthErrorMessage,
@@ -106,30 +107,29 @@ export default function LoginScreen({ navigation }) {
   const themeMode = useThemeStore((state) => state.mode);
   const keyboardAppearance = themeMode === 'dark' ? 'dark' : 'light';
 
-  // Set up Google sign-in hook at the top level
-  // Use platform-specific client ID
-  const clientId =
-    Platform.OS === 'ios' ? GOOGLE_IOS_CLIENT_ID : GOOGLE_CLIENT_ID;
-  const [googleRequest, googleResponse, googlePromptAsync] =
-    Google.useIdTokenAuthRequest({
-      clientId,
+  // Description: Configure Google Sign-In once at mount using native SDK.
+  useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: GOOGLE_CLIENT_ID,
+      ...(Platform.OS === 'ios' && GOOGLE_IOS_CLIENT_ID
+        ? { iosClientId: GOOGLE_IOS_CLIENT_ID }
+        : {}),
     });
-  // console.log('Google Auth Request:', googleRequest);
-  useEffect(() => {
-    if (googleRequest) trackClient('google_auth_request_ready', {});
-  }, [googleRequest]);
+  }, []);
 
-  useEffect(() => {
-    if (googleResponse?.type === 'success') {
-      const { id_token } = googleResponse.params;
-      const credential = auth.GoogleAuthProvider.credential(id_token);
-      auth()
-        .signInWithCredential(credential)
-        .catch((err) => {
-          setError(err.message);
-        });
+  // Description: Native Google Sign-In → Firebase credential exchange
+  const handleGoogleSignIn = async () => {
+    try {
+      await GoogleSignin.hasPlayServices();
+      const { data } = await GoogleSignin.signIn();
+      const credential = auth.GoogleAuthProvider.credential(data.idToken);
+      await auth().signInWithCredential(credential);
+    } catch (err) {
+      if (err.code !== statusCodes.SIGN_IN_CANCELLED) {
+        setError(err.message);
+      }
     }
-  }, [googleResponse]);
+  };
 
   // Description: Check Apple Sign In availability (iOS only)
   const [appleAvailable, setAppleAvailable] = useState(false);
@@ -184,8 +184,31 @@ export default function LoginScreen({ navigation }) {
         const hasAppleProvidedEmail = !!appleProfile.email;
 
         if (result?.additionalUserInfo?.isNewUser) {
-          // Description: New user — do NOT recover data from soft-deleted docs.
-          // Treat this as a fresh account after Apple Sign-In.
+          // Description: If Apple didn't provide name (re-registration after deletion),
+          // try recovering from a soft-deleted Firestore record by email
+          if (!appleProfile.firstName && !appleProfile.lastName) {
+            const recoveryEmail = appleProfile.email || result.user.email || '';
+            if (recoveryEmail) {
+              try {
+                const {
+                  findSoftDeletedUserByEmail,
+                } = require('../../../profile/api/userService');
+                const softDeleted =
+                  await findSoftDeletedUserByEmail(recoveryEmail);
+                if (softDeleted?.data) {
+                  if (softDeleted.data.firstName)
+                    appleProfile.firstName = softDeleted.data.firstName;
+                  if (softDeleted.data.lastName)
+                    appleProfile.lastName = softDeleted.data.lastName;
+                }
+              } catch (recoveryErr) {
+                console.warn(
+                  '[LoginScreen] Soft-deleted user recovery failed:',
+                  recoveryErr?.message,
+                );
+              }
+            }
+          }
           await createUser(result.user.uid, {
             email: appleProfile.email || result.user.email || '',
             firstName: appleProfile.firstName || '',
@@ -202,7 +225,29 @@ export default function LoginScreen({ navigation }) {
 
           if (!existingProfile) {
             // Firestore doc is missing or soft-deleted.
-            // Do NOT recover from soft-deleted docs; create a fresh profile.
+            // Recover name from soft-deleted doc if Apple didn't provide it.
+            if (!appleProfile.firstName && !appleProfile.lastName) {
+              const recoveryEmail =
+                appleProfile.email || result.user.email || '';
+              if (recoveryEmail) {
+                try {
+                  const softDeleted =
+                    await findSoftDeletedUserByEmail(recoveryEmail);
+                  if (softDeleted?.data) {
+                    if (softDeleted.data.firstName)
+                      appleProfile.firstName = softDeleted.data.firstName;
+                    if (softDeleted.data.lastName)
+                      appleProfile.lastName = softDeleted.data.lastName;
+                  }
+                } catch (recoveryErr) {
+                  console.warn(
+                    '[LoginScreen] Soft-deleted recovery (existing auth):',
+                    recoveryErr?.message,
+                  );
+                }
+              }
+            }
+            // Create a fresh Firestore doc for this auth user
             await createUser(result.user.uid, {
               email: appleProfile.email || result.user.email || '',
               firstName: appleProfile.firstName || '',
@@ -569,29 +614,17 @@ export default function LoginScreen({ navigation }) {
               <View style={styles.dividerLine} />
             </View>
 
-            {isLogin &&
-              (googleRequest ? (
+            {isLogin && (
                 <TouchableOpacity
                   style={styles.socialButton}
-                  onPress={() => googlePromptAsync()}
+                  onPress={handleGoogleSignIn}
                 >
                   <Ionicons name='logo-google' size={18} color='#1F1F33' />
                   <Text style={styles.socialButtonText}>
                     Continue with Google
                   </Text>
                 </TouchableOpacity>
-              ) : (
-                <View style={styles.socialButtonDisabled}>
-                  <Ionicons
-                    name='alert-circle-outline'
-                    size={18}
-                    color='#B91C1C'
-                  />
-                  <Text style={styles.socialButtonDisabledText}>
-                    Google login unavailable (check client ID and Expo setup)
-                  </Text>
-                </View>
-              ))}
+              )}
 
             {isLogin && appleAvailable && (
               <AppleAuthentication.AppleAuthenticationButton

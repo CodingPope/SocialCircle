@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   Image,
+  Platform,
 } from 'react-native';
 import { auth, db } from '../../../../services/firebase';
 import {
@@ -17,7 +18,7 @@ import {
   getDoc,
   updateDoc,
 } from '../../../../services/firebase/firestoreCompat';
-import * as Google from 'expo-auth-session/providers/google';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
 import { useUserStore, useSessionRole } from '../../../profile';
@@ -25,7 +26,7 @@ import {
   registerForPushTokenAsync,
   initPushForUser,
 } from '../../../notifications/api/pushService';
-import { GOOGLE_CLIENT_ID } from '@env';
+import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
 import { track as trackClient } from '../../../../lib/analytics';
 import LoadingOverlay from '../../../../components/ui/LoadingOverlay';
 import AnimatedGradientBackground from '../../../../components/ui/AnimatedGradientBackground';
@@ -40,7 +41,6 @@ import {
 } from '../../utils/authErrorHandler';
 import { useBizOnboarding } from '../../../business';
 import { Ionicons } from '@expo/vector-icons';
-import { getNextOnboardingStep } from '../../utils/onboardingRouter';
 
 const extractAppleProfileFields = (appleCredential, firebaseUser) => {
   const fullName = appleCredential?.fullName || {};
@@ -367,25 +367,64 @@ export default function AuthScreen({ navigation, route }) {
     }
   }, [businessMode, setRole]);
 
-  // Description: Profile complete check — delegate to onboarding router
-  const isProfileComplete = (userData) =>
-    getNextOnboardingStep(userData || {}) === null;
+  // Description: Profile complete check — dob, sex, and location are optional per Apple guidelines
+  const isProfileComplete = (userData) => {
+    return (
+      userData &&
+      userData.firstName &&
+      userData.lastName &&
+      (userData.dob || userData.dobPromptedAt) &&
+      (userData.sex || userData.sexPromptedAt) &&
+      Array.isArray(userData.interests) &&
+      userData.interests.length > 0
+    );
+  };
 
-  // Google Auth (disabled for now but kept in)
-  const [googleRequest, googleResponse, googlePromptAsync] =
-    Google.useIdTokenAuthRequest({
-      clientId: GOOGLE_CLIENT_ID,
+  // Description: Configure Google Sign-In once at mount using native SDK.
+  // webClientId = Web-type OAuth client (type 3 in google-services.json) so Firebase can verify the token.
+  useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: GOOGLE_CLIENT_ID,
+      ...(Platform.OS === 'ios' && GOOGLE_IOS_CLIENT_ID
+        ? { iosClientId: GOOGLE_IOS_CLIENT_ID }
+        : {}),
     });
+  }, []);
 
-  // Description: Calculate googleDisabled AFTER googleRequest is declared to avoid ReferenceError
-  const googleDisabled = !googleRequest;
-
-  const handleGooglePress = useCallback(() => {
-    if (googleDisabled) {
-      return;
+  // Description: Native Google Sign-In → Firebase credential exchange
+  const handleGoogleSignIn = useCallback(async () => {
+    try {
+      setLoading(true);
+      await GoogleSignin.hasPlayServices();
+      const { data } = await GoogleSignin.signIn();
+      const credential = auth.GoogleAuthProvider.credential(data.idToken);
+      const result = await auth().signInWithCredential(credential);
+      setRole('consumer');
+      if (result.additionalUserInfo?.isNewUser) {
+        const { createUser } = require('../../../profile/api/userService');
+        const token = await registerForPushTokenAsync().catch(() => null);
+        await createUser(result.user.uid, {
+          email: result.user.email,
+          deviceToken: token || null,
+          pushOptIn: !!token,
+        });
+        if (token) initPushForUser(result.user.uid).catch(() => {});
+      } else {
+        initPushForUser(result.user.uid).catch(() => {});
+      }
+      await hydrateUserProfile(result.user.uid);
+    } catch (err) {
+      if (err.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User dismissed — swallow silently
+      } else {
+        logAuthError(err, 'google-signin', {});
+        const { title, message } = getAuthErrorMessage(err, 'login');
+        Alert.alert(title, message);
+      }
+    } finally {
+      setLoading(false);
     }
-    googlePromptAsync();
-  }, [googleDisabled, googlePromptAsync]);
+  }, [hydrateUserProfile, setRole]);
 
   const [appleAvailable, setAppleAvailable] = useState(false);
   useEffect(() => {
@@ -451,8 +490,32 @@ export default function AuthScreen({ navigation, route }) {
         const hasAppleProvidedEmail = !!appleProfile.email;
 
         if (result?.additionalUserInfo?.isNewUser) {
-          // Description: New user — do NOT recover data from soft-deleted docs.
-          // Treat this as a fresh account after Apple Sign-In.
+          // Description: New user — if Apple didn't provide name (re-registration after deletion),
+          // try recovering from a soft-deleted Firestore record by email
+          if (!appleProfile.firstName && !appleProfile.lastName) {
+            const recoveryEmail = appleProfile.email || result.user.email || '';
+            if (recoveryEmail) {
+              try {
+                const {
+                  findSoftDeletedUserByEmail,
+                } = require('../../../profile/api/userService');
+                const softDeleted =
+                  await findSoftDeletedUserByEmail(recoveryEmail);
+                if (softDeleted?.data) {
+                  if (softDeleted.data.firstName)
+                    appleProfile.firstName = softDeleted.data.firstName;
+                  if (softDeleted.data.lastName)
+                    appleProfile.lastName = softDeleted.data.lastName;
+                }
+              } catch (recoveryErr) {
+                // Description: Best-effort recovery; proceed without name if it fails
+                console.warn(
+                  '[AuthScreen] Soft-deleted user recovery failed:',
+                  recoveryErr?.message,
+                );
+              }
+            }
+          }
           await createUser(result.user.uid, {
             email: appleProfile.email || result.user.email || '',
             firstName: appleProfile.firstName || '',
@@ -466,12 +529,37 @@ export default function AuthScreen({ navigation, route }) {
           if (token) initPushForUser(result.user.uid).catch(() => {});
         } else {
           // Description: Existing Auth user — check if Firestore doc exists and is active
-          const { getUserById } = require('../../../profile/api/userService');
+          const {
+            getUserById,
+            findSoftDeletedUserByEmail,
+          } = require('../../../profile/api/userService');
           const existingProfile = await getUserById(result.user.uid);
 
           if (!existingProfile) {
             // Firestore doc is missing or soft-deleted.
-            // Do NOT recover from soft-deleted docs; create a fresh profile.
+            // Recover name from soft-deleted doc if Apple didn't provide it.
+            if (!appleProfile.firstName && !appleProfile.lastName) {
+              const recoveryEmail =
+                appleProfile.email || result.user.email || '';
+              if (recoveryEmail) {
+                try {
+                  const softDeleted =
+                    await findSoftDeletedUserByEmail(recoveryEmail);
+                  if (softDeleted?.data) {
+                    if (softDeleted.data.firstName)
+                      appleProfile.firstName = softDeleted.data.firstName;
+                    if (softDeleted.data.lastName)
+                      appleProfile.lastName = softDeleted.data.lastName;
+                  }
+                } catch (recoveryErr) {
+                  console.warn(
+                    '[AuthScreen] Soft-deleted recovery (existing auth):',
+                    recoveryErr?.message,
+                  );
+                }
+              }
+            }
+            // Create a fresh Firestore doc for this auth user
             await createUser(result.user.uid, {
               email: appleProfile.email || result.user.email || '',
               firstName: appleProfile.firstName || '',
@@ -559,38 +647,7 @@ export default function AuthScreen({ navigation, route }) {
     }
   };
 
-  useEffect(() => {
-    // Description: Handle Google sign-in and create user with full default schema if new
-    if (googleResponse?.type === 'success') {
-      const { id_token } = googleResponse.params;
-      const credential = auth.GoogleAuthProvider.credential(id_token);
-      auth()
-        .signInWithCredential(credential)
-        .then(async (result) => {
-          // Description: Reset session role to consumer for Google login
-          setRole('consumer');
-
-          if (result.additionalUserInfo?.isNewUser) {
-            const { createUser } = require('../../../profile/api/userService');
-            const token = await registerForPushTokenAsync().catch(() => null);
-            await createUser(result.user.uid, {
-              email: result.user.email,
-              deviceToken: token || null,
-              pushOptIn: !!token,
-            });
-            if (token) initPushForUser(result.user.uid).catch(() => {});
-          } else {
-            initPushForUser(result.user.uid).catch(() => {});
-          }
-          await hydrateUserProfile(result.user.uid);
-        })
-        .catch((err) => {
-          logAuthError(err, 'google-signin', {});
-          const { title, message } = getAuthErrorMessage(err, 'login');
-          Alert.alert(title, message);
-        });
-    }
-  }, [googleResponse]);
+  // Description: googleResponse useEffect removed — replaced by handleGoogleSignIn above
 
   const handleSubmit = async () => {
     if (!email || !password) {
@@ -896,11 +953,10 @@ export default function AuthScreen({ navigation, route }) {
               />
             )}
 
-            {!googleDisabled && (
-              <TouchableOpacity
-                style={[styles.socialButton, { marginTop: theme.spacing.sm }]}
-                onPress={handleGooglePress}
-              >
+            <TouchableOpacity
+              style={[styles.socialButton, { marginTop: theme.spacing.sm }]}
+              onPress={handleGoogleSignIn}
+            >
                 <Ionicons
                   name='logo-google'
                   size={18}
@@ -908,9 +964,8 @@ export default function AuthScreen({ navigation, route }) {
                 />
                 <Text style={styles.socialButtonText}>Sign in with Google</Text>
               </TouchableOpacity>
-            )}
 
-            {(appleAvailable || !googleDisabled) && (
+            {(appleAvailable) && (
               <View style={styles.dividerRow}>
                 <View style={styles.dividerLine} />
                 <Text style={styles.dividerLabel}>or use email</Text>
