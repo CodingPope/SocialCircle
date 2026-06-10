@@ -8,13 +8,13 @@ import React, {
 } from 'react';
 import { Image, ActivityIndicator, Pressable } from 'react-native';
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Modal,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -380,6 +380,7 @@ const NotificationScreen = () => {
   const user = useUserStore((state) => state.user);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const insets = useSafeAreaInsets();
 
   // Notification store
   const notifications = useNotificationStore((s) => s.notifications);
@@ -506,8 +507,8 @@ const NotificationScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerRow}>
           <TouchableOpacity
             style={styles.backButton}
@@ -600,7 +601,6 @@ const createStyles = (theme) =>
 
     header: {
       backgroundColor: theme.colors.card,
-      paddingTop: 10,
       paddingBottom: 15,
       paddingHorizontal: 16,
       borderBottomWidth: 1,

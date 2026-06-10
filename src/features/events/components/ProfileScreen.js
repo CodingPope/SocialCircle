@@ -24,6 +24,7 @@ import {
   StatusBar,
   Switch,
 } from 'react-native';
+import { SafeAreaView as ContextSafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -77,6 +78,7 @@ import { useTheme } from '../../../theme';
 import { useThemeStore } from '../../../store/themeStore';
 import VerificationModal from '../../profile/components/VerificationModal';
 import logger from '../../../lib/logger';
+import smileDefault from '../../../../assets/smileDefault.png';
 
 // Extracted components (available for progressive migration)
 // import ProfileSidebar from '../../profile/components/ProfileSidebar';
@@ -242,35 +244,35 @@ export default function ProfileScreen({
   }, [tutorialStorageKey]);
 
   // Optimistically clear badge and mark unread as read
-  const handleNotificationsPress = async () => {
-    // Optimistic UI: clear badge immediately
+  const handleNotificationsPress = () => {
+    // Navigate immediately — do not block on Firestore operations (hangs on Android offline)
     setUnreadCount(0);
-    try {
-      if (!user?.uid) {
-        navigation.navigate('Notifications');
-        return;
+    navigation.navigate('Notifications');
+
+    // Fire-and-forget: mark unread notifications as read in the background
+    if (!user?.uid) return;
+    (async () => {
+      try {
+        const q = query(
+          collection(db, 'notifications'),
+          where('recipientId', '==', user.uid),
+        );
+        const snap = await getDocs(q);
+        if (snap?.size) {
+          const batch = writeBatch(db);
+          snap.docs.forEach((d) => {
+            const data = d.data() || {};
+            if (data.isDeleted !== true && data.read !== true) {
+              batch.update(d.ref, { read: true, readAt: serverTimestamp() });
+            }
+          });
+          await batch.commit();
+        }
+      } catch (e) {
+        // Non-blocking; the Notifications screen will also mark as read via its store
+        logger.warn('Failed to mark notifications as read:', e?.message || e);
       }
-      const q = query(
-        collection(db, 'notifications'),
-        where('recipientId', '==', user.uid),
-      );
-      const snap = await getDocs(q);
-      if (snap?.size) {
-        const batch = writeBatch(db);
-        snap.docs.forEach((d) => {
-          const data = d.data() || {};
-          if (data.isDeleted !== true && data.read !== true) {
-            batch.update(d.ref, { read: true, readAt: serverTimestamp() });
-          }
-        });
-        await batch.commit();
-      }
-    } catch (e) {
-      // Non-blocking; the Notifications screen will also mark as read via its store
-      logger.warn('Failed to mark notifications as read:', e?.message || e);
-    } finally {
-      navigation.navigate('Notifications');
-    }
+    })();
   };
 
   const measureMenuButton = useCallback(() => {
@@ -378,7 +380,9 @@ export default function ProfileScreen({
               // with the soft-deleted doc and re-setting user
               if (global.unsubscribeAllListeners) {
                 global.unsubscribeAllListeners.forEach((unsub) => {
-                  try { unsub(); } catch {}
+                  try {
+                    unsub();
+                  } catch {}
                 });
                 global.unsubscribeAllListeners = [];
               }
@@ -391,7 +395,10 @@ export default function ProfileScreen({
                 await auth().signOut();
               } catch (signOutErr) {
                 // Auth user was already deleted server-side, signOut may fail - that's OK
-                console.log('[ProfileScreen] SignOut after deletion:', signOutErr?.message);
+                logger.warn(
+                  '[ProfileScreen] SignOut after deletion:',
+                  signOutErr?.message,
+                );
               }
 
               // Show success message
@@ -423,6 +430,7 @@ export default function ProfileScreen({
   const MAX_BIO_LENGTH = 100;
   const [bio, setBio] = useState(user?.bio || '');
   const [profileImage, setProfileImage] = useState(user?.profileImage || null);
+  const [avatarErrored, setAvatarErrored] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [ratingCount, setRatingCount] = useState(user?.ratingCount || 0);
   const [rating, setRating] = useState(user?.rating || 0);
@@ -560,10 +568,14 @@ export default function ProfileScreen({
 
   // --- Derived ---
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ');
+  // Resolved avatar URL (no fake placeholder; render falls back to a bundled asset).
   const avatarURL =
-    user.profileImage ||
-    user.avatarURL ||
-    'https://example.com/default-avatar.png';
+    profileImage || user.profileImage || user.avatarURL || null;
+
+  // Reset the load-error flag whenever the URL changes (e.g. after a new upload).
+  useEffect(() => {
+    setAvatarErrored(false);
+  }, [avatarURL]);
 
   // Description: Parse user join date with fallback handling
   const userSince = useMemo(() => {
@@ -631,15 +643,12 @@ export default function ProfileScreen({
     return now.toLocaleString('default', { month: 'short', year: 'numeric' });
   }, [user?.createdAt, user?.uid]);
 
-  const followerCount =
-    typeof user.followerCount === 'number'
-      ? user.followerCount
-      : Array.isArray(user.followers)
-        ? user.followers.length
-        : 0;
+  // Description: Friends = mutual connections managed by addFriend/removeFriend cloud functions
+  const friendCount = Array.isArray(user.friends) ? user.friends.length : 0;
   const eventCount =
     (Array.isArray(user.createdEvents) ? user.createdEvents.length : 0) +
-    (Array.isArray(user.attendedEvents) ? user.attendedEvents.length : 0);
+    (Array.isArray(user.attendedEvents) ? user.attendedEvents.length : 0) +
+    (Array.isArray(user.attendingEvents) ? user.attendingEvents.length : 0);
 
   // --- Refresh handler ---
   const onRefresh = useCallback(async () => {
@@ -655,13 +664,8 @@ export default function ProfileScreen({
       setRatingCount(data.ratingCount || 0);
       setVerified(data.verified || false);
 
-      // Refresh follow count
-      const followerCount =
-        typeof data.followerCount === 'number'
-          ? data.followerCount
-          : Array.isArray(data.followers)
-            ? data.followers.length
-            : 0;
+      // Sync fresh data (friends, event arrays, rating, etc.) into the Zustand store
+      setUser({ ...user, ...data });
 
       // Refresh user events
       const fetchEventsByIds = async (ids) => {
@@ -761,6 +765,18 @@ export default function ProfileScreen({
         data.createdAt,
       );
 
+      // Diagnostics for the iOS "photo + ratings not loading" report: reveals
+      // whether the signed-in uid's doc is empty (account-identity regression)
+      // vs. present-but-missing-fields vs. an image-URL load failure (see onError).
+      logger.debug('[ProfileScreen] getUserData result', {
+        uid: user?.uid,
+        docHasFields: !!data && Object.keys(data).length > 0,
+        keys: data ? Object.keys(data) : [],
+        hasProfileImage: !!data?.profileImage,
+        rating: data?.rating,
+        ratingCount: data?.ratingCount,
+      });
+
       setBio(data.bio || '');
       setProfileImage(data.profileImage || null);
       setRating(data.rating || 0);
@@ -768,9 +784,7 @@ export default function ProfileScreen({
       setVerified(data.verified || false);
 
       // Update the store with fresh data including proper timestamps
-      if (data.createdAt) {
-        setUser({ ...user, ...data });
-      }
+      setUser({ ...user, ...data });
     };
     fetchUserData();
     return () => {
@@ -1339,7 +1353,10 @@ export default function ProfileScreen({
     try {
       await switchToPersonalAccount();
     } catch (err) {
-      console.warn('[profile] Failed to switch account type', err);
+      logger.warn(
+        '[profile] Failed to switch account type',
+        err?.message || err,
+      );
     }
   };
 
@@ -1488,7 +1505,7 @@ export default function ProfileScreen({
             ]}
             {...sidebarPan.current.panHandlers}
           >
-            <SafeAreaView style={styles.sidebarSafeArea}>
+            <ContextSafeAreaView style={styles.sidebarSafeArea} edges={['top']}>
               {/* HEADER */}
               <View
                 style={[
@@ -1661,7 +1678,7 @@ export default function ProfileScreen({
                   </View>
                 )}
               </View>
-            </SafeAreaView>
+            </ContextSafeAreaView>
           </Animated.View>
         </View>
       )}
@@ -1776,7 +1793,18 @@ export default function ProfileScreen({
           <View style={styles.avatarWrapper}>
             <TouchableOpacity onPress={handleImageUpload}>
               <Image
-                source={{ uri: profileImage || avatarURL }}
+                source={
+                  avatarURL && !avatarErrored ? { uri: avatarURL } : smileDefault
+                }
+                defaultSource={smileDefault}
+                onError={(e) => {
+                  logger.warn('[ProfileScreen] Avatar failed to load', {
+                    uid: user?.uid,
+                    avatarURL,
+                    error: e?.nativeEvent?.error,
+                  });
+                  setAvatarErrored(true);
+                }}
                 style={styles.profileImage}
               />
               {isEditing && (
@@ -1809,7 +1837,7 @@ export default function ProfileScreen({
         {/* Stats Row */}
         <View style={styles.statsRow}>
           <TouchableOpacity style={styles.statCard}>
-            <Text style={styles.statValue}>{followerCount}</Text>
+            <Text style={styles.statValue}>{friendCount}</Text>
             <Text style={styles.statLabel}>Friends</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.statCard}>
@@ -2024,7 +2052,7 @@ const createStyles = (theme) =>
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+      paddingTop: 12,
       paddingBottom: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.colors.border,
@@ -2034,7 +2062,7 @@ const createStyles = (theme) =>
     sidebarHeaderBack: {
       position: 'absolute',
       left: 0,
-      top: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+      top: 12,
       zIndex: 1,
     },
 
@@ -2089,7 +2117,6 @@ const createStyles = (theme) =>
       backgroundColor: theme.colors.card,
       borderTopLeftRadius: 24,
       borderBottomLeftRadius: 24,
-      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 30 : 60,
       paddingHorizontal: 16,
       paddingBottom: 40,
       shadowColor: '#000',
@@ -2438,7 +2465,6 @@ const createStyles = (theme) =>
     },
     sidebarSafeArea: {
       flex: 1,
-      paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 40 : 80,
     },
     sidebarContentRight: {
       flex: 1,

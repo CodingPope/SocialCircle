@@ -4,7 +4,7 @@
 // Description: Initialize Firebase app first
 import '@react-native-firebase/app';
 import nativeAuth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
+import firestore, { Timestamp as _RNFTimestamp } from '@react-native-firebase/firestore';
 import functions from '@react-native-firebase/functions';
 import storage from '@react-native-firebase/storage';
 import appCheck from '@react-native-firebase/app-check';
@@ -472,15 +472,14 @@ export { authInstance };
 // Export Firestore instance and helpers
 export const db = firestoreInstance;
 export const FieldValue = firestore.FieldValue;
-export const Timestamp = firestore.Timestamp;
+// Description: Use modular Timestamp import to avoid repeated namespaced-API deprecation warnings
+export const Timestamp = _RNFTimestamp;
 export const GeoPoint = firestore.GeoPoint;
 export const serverTimestamp = () => firestore.FieldValue.serverTimestamp();
 let loggedTimestampFallback = false;
 export const getTimestampNow = () => {
   try {
-    if (firestore.Timestamp && typeof firestore.Timestamp.now === 'function') {
-      return firestore.Timestamp.now();
-    }
+    return _RNFTimestamp.now();
   } catch (error) {
     if (!loggedTimestampFallback) {
       logger.warn(
@@ -490,16 +489,9 @@ export const getTimestampNow = () => {
       loggedTimestampFallback = true;
     }
   }
-  if (
-    firestore.Timestamp &&
-    typeof firestore.Timestamp.fromDate === 'function'
-  ) {
-    if (!loggedTimestampFallback) {
-      logger.warn('[Firebase] Timestamp.now missing, using fromDate fallback');
-      loggedTimestampFallback = true;
-    }
-    return firestore.Timestamp.fromDate(new Date());
-  }
+  try {
+    return _RNFTimestamp.fromDate(new Date());
+  } catch {}
   const now = Date.now();
   if (!loggedTimestampFallback) {
     logger.warn(

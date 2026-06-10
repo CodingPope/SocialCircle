@@ -1,4 +1,26 @@
 import { db, FieldValue, Timestamp } from './config';
+import {
+  collection as _collection,
+  doc as _doc,
+  query as _query,
+  where as _where,
+  orderBy as _orderBy,
+  limit as _limit,
+  startAfter as _startAfter,
+  getDocs as _getDocs,
+  getDoc as _getDoc,
+  addDoc as _addDoc,
+  setDoc as _setDoc,
+  updateDoc as _updateDoc,
+  deleteDoc as _deleteDoc,
+  writeBatch as _writeBatch,
+  onSnapshot as _onSnapshot,
+  serverTimestamp as _serverTimestamp,
+  arrayUnion as _arrayUnion,
+  arrayRemove as _arrayRemove,
+  deleteField as _deleteField,
+  increment as _increment,
+} from '@react-native-firebase/firestore';
 
 function coerceExists(snapshot) {
   if (!snapshot) return false;
@@ -80,85 +102,41 @@ function normalizeSegments(segments) {
   return segments.flat().filter((segment) => segment != null);
 }
 
-function buildCollectionRef(instance, segments) {
+// Description: Use modular API functions; they pass MODULAR_DEPRECATION_ARG internally,
+// suppressing the @react-native-firebase deprecation warnings from namespaced calls.
+export function collection(instance, ...segments) {
+  const dbInstance = ensureDb(instance);
   const normalized = normalizeSegments(segments);
   if (normalized.length === 0) {
     throw new Error('collection() requires at least one path segment');
   }
-  let ref = instance.collection(normalized[0]);
-  for (let i = 1; i < normalized.length; i += 2) {
-    const docId = normalized[i];
-    const colName = normalized[i + 1];
-    if (docId == null) {
-      break;
-    }
-    ref = ref.doc(docId);
-    if (colName != null) {
-      ref = ref.collection(colName);
-    }
-  }
-  return ref;
-}
-
-function buildDocRef(instance, segments) {
-  const normalized = normalizeSegments(segments);
-  if (normalized.length < 2) {
-    // Fallback to doc(path)
-    const path = normalized.join('/');
-    return instance.doc(path);
-  }
-  let ref = instance.collection(normalized[0]).doc(normalized[1]);
-  for (let i = 2; i < normalized.length; i += 2) {
-    const colName = normalized[i];
-    const docId = normalized[i + 1];
-    if (colName == null || docId == null) break;
-    ref = ref.collection(colName).doc(docId);
-  }
-  return ref;
-}
-
-export function collection(instance, ...segments) {
-  const dbInstance = ensureDb(instance);
-  return buildCollectionRef(dbInstance, segments);
+  return _collection(dbInstance, normalized.join('/'));
 }
 
 export function doc(instance, ...segments) {
   const dbInstance = ensureDb(instance);
-  return buildDocRef(dbInstance, segments);
+  const normalized = normalizeSegments(segments);
+  if (normalized.length === 0) {
+    throw new Error('doc() requires at least one path segment');
+  }
+  return _doc(dbInstance, normalized.join('/'));
 }
 
-export function query(ref, ...constraints) {
-  return constraints.reduce(
-    (acc, applyConstraint) => applyConstraint(acc),
-    ref
-  );
-}
-
-export function where(field, opStr, value) {
-  return (ref) => ref.where(field, opStr, value);
-}
-
-export function orderBy(field, directionStr) {
-  return (ref) => ref.orderBy(field, directionStr);
-}
-
-export function limit(count) {
-  return (ref) => ref.limit(count);
-}
-
-export function startAfter(...args) {
-  return (ref) => ref.startAfter(...args);
-}
+export const query = _query;
+export const where = _where;
+export const orderBy = _orderBy;
+export const limit = _limit;
+export const startAfter = _startAfter;
 
 export function getDoc(ref) {
-  return ref.get().then((snapshot) => {
+  return _getDoc(ref).then((snapshot) => {
     attachExistsHelpers(snapshot);
     return snapshot;
   });
 }
 
 export function getDocs(ref) {
-  return ref.get().then((querySnapshot) => {
+  return _getDocs(ref).then((querySnapshot) => {
     // Description: Wrap query snapshot to add exists() method compatibility for Web SDK syntax
     const wrappedDocs = querySnapshot.docs.map((doc) => {
       attachExistsHelpers(doc);
@@ -173,27 +151,24 @@ export function getDocs(ref) {
 }
 
 export function addDoc(collectionRef, data) {
-  return collectionRef.add(data);
+  return _addDoc(collectionRef, data);
 }
 
 export function setDoc(docRef, data, options) {
-  if (options) {
-    return docRef.set(data, options);
-  }
-  return docRef.set(data);
+  return _setDoc(docRef, data, options);
 }
 
 export function updateDoc(docRef, data) {
-  return docRef.update(data);
+  return _updateDoc(docRef, data);
 }
 
 export function deleteDoc(docRef) {
-  return docRef.delete();
+  return _deleteDoc(docRef);
 }
 
 export function writeBatch(instance) {
   const dbInstance = ensureDb(instance);
-  return dbInstance.batch();
+  return _writeBatch(dbInstance);
 }
 
 function isObserverArg(candidate) {
@@ -296,8 +271,8 @@ export function onSnapshot(ref, ...args) {
     }
 
     return options
-      ? ref.onSnapshot(options, wrappedObserver)
-      : ref.onSnapshot(wrappedObserver);
+      ? _onSnapshot(ref, options, wrappedObserver)
+      : _onSnapshot(ref, wrappedObserver);
   }
 
   const wrappedOnNext = wrapSnapshotCallback(onNext);
@@ -307,15 +282,15 @@ export function onSnapshot(ref, ...args) {
   }
 
   return options
-    ? ref.onSnapshot(options, wrappedOnNext, onError, onCompletion)
-    : ref.onSnapshot(wrappedOnNext, onError, onCompletion);
+    ? _onSnapshot(ref, options, wrappedOnNext, onError, onCompletion)
+    : _onSnapshot(ref, wrappedOnNext, onError, onCompletion);
 }
 
-export const serverTimestamp = () => FieldValue.serverTimestamp();
-export const arrayUnion = (...values) => FieldValue.arrayUnion(...values);
-export const arrayRemove = (...values) => FieldValue.arrayRemove(...values);
-export const deleteField = () => FieldValue.delete();
-export const increment = (value) => FieldValue.increment(value);
+export const serverTimestamp = () => _serverTimestamp();
+export const arrayUnion = (...values) => _arrayUnion(...values);
+export const arrayRemove = (...values) => _arrayRemove(...values);
+export const deleteField = () => _deleteField();
+export const increment = (value) => _increment(value);
 export { Timestamp };
 export const docExists = (snapshot) => snapshotExists(snapshot);
 
