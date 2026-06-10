@@ -100,4 +100,37 @@ firestore.GeoPoint = class {
   }
 };
 
+// Modular API mocks (e.g. `import { collection, query, where } from '@react-native-firebase/firestore'`)
+export const collection = (instance, ...segments) => {
+  let ref = instance.collection(segments[0]);
+  for (let i = 1; i < segments.length; i += 2) {
+    ref = ref.doc(segments[i]);
+    if (segments[i + 1] != null) ref = ref.collection(segments[i + 1]);
+  }
+  return ref;
+};
+
+export const doc = (instance, ...segments) => {
+  let ref = instance.collection(segments[0]).doc(segments[1]);
+  for (let i = 2; i < segments.length; i += 2) {
+    ref = ref.collection(segments[i]).doc(segments[i + 1]);
+  }
+  return ref;
+};
+
+export const query = (ref, ...constraints) =>
+  constraints.reduce((acc, applyConstraint) => applyConstraint(acc), ref);
+
+export const where = (field, opStr, value) => (ref) =>
+  ref.where(field, opStr, value);
+
+export const orderBy = (field, directionStr) => (ref) =>
+  ref.orderBy(field, directionStr);
+
+export const limit = (count) => (ref) => ref.limit(count);
+
+export const getDocs = (ref) => ref.get();
+
+export const getDoc = (ref) => ref.get();
+
 export default firestore;

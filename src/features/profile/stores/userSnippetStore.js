@@ -5,6 +5,14 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../../../services/firebase';
+import {
+  collection,
+  doc,
+  query,
+  where,
+  getDoc,
+  getDocs,
+} from '../../../services/firebase/firestoreCompat';
 import logger from '../../../lib/logger';
 
 // Build a minimal snippet from a user doc
@@ -30,8 +38,8 @@ function toSnippet(uid, user) {
     typeof user?.rating === 'number'
       ? user.rating
       : typeof user?.ranking === 'number'
-      ? user.ranking
-      : null;
+        ? user.ranking
+        : null;
   return { uid, name, photoURL, verified, rating };
 }
 
@@ -80,7 +88,7 @@ export const useUserSnippetStore = create(
         const missing = ids.filter((u) => !cached.has(u));
 
         logger.debug(
-          `[UserSnippet] ensureSnippets: ${ids.length} requested, ${cached.size} cached, ${missing.length} missing`
+          `[UserSnippet] ensureSnippets: ${ids.length} requested, ${cached.size} cached, ${missing.length} missing`,
         );
 
         const fetched = [];
@@ -89,10 +97,11 @@ export const useUserSnippetStore = create(
           const chunk = missing.slice(i, i + 10);
           if (!chunk.length) continue;
           try {
-            const queryRef = db
-              .collection('users')
-              .where('__name__', 'in', chunk);
-            const snap = await queryRef.get();
+            const queryRef = query(
+              collection(db, 'users'),
+              where('__name__', 'in', chunk),
+            );
+            const snap = await getDocs(queryRef);
             snap.docs.forEach((d) => {
               const s = toSnippet(d.id, d.data());
               fetched.push(s);
@@ -102,8 +111,8 @@ export const useUserSnippetStore = create(
             const results = await Promise.all(
               chunk.map(async (uid) => {
                 try {
-                  const s = await db.collection('users').doc(uid).get();
-                  return s.exists
+                  const s = await getDoc(doc(db, 'users', uid));
+                  return s.exists()
                     ? toSnippet(uid, s.data())
                     : {
                         uid,
@@ -121,7 +130,7 @@ export const useUserSnippetStore = create(
                     rating: null,
                   };
                 }
-              })
+              }),
             );
             fetched.push(...results);
           }
@@ -181,8 +190,8 @@ export const useUserSnippetStore = create(
           useUserSnippetStore.setState({ cache: next });
         } catch {}
       },
-    }
-  )
+    },
+  ),
 );
 
 export default useUserSnippetStore;

@@ -1,10 +1,16 @@
-// Description: Minimal error reporting facade - temporarily disabled during troubleshooting
+// Description: Error reporting facade via sentry-expo
 let S = null; // module ref
 let initialized = false;
 
 function loadSentry() {
-  // Temporarily disabled - returning null to prevent module resolution issues
-  return null;
+  if (S) return S;
+  try {
+    // Lazy-require to avoid __extends/Hermes issues at cold start
+    S = require('sentry-expo');
+    return S;
+  } catch {
+    return null;
+  }
 }
 
 export function initErrorReporting(options = {}) {

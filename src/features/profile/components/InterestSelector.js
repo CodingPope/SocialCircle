@@ -12,6 +12,28 @@ import { db } from '../../../services/firebase';
 import categoriesData from '../../events/constants/categoriesData.json';
 import { useTheme } from '../../../theme';
 
+// Description: Flatten a categories array (Firestore docs and the bundled JSON
+// share the same shape) into a sorted, de-duplicated list of activity names.
+const extractActivityNames = (categories) => {
+  const names = [];
+  (Array.isArray(categories) ? categories : []).forEach((cat) => {
+    const interests = cat?.interests || [];
+    if (!Array.isArray(interests)) return;
+    interests.forEach((interest) => {
+      if (!interest) return;
+      if (typeof interest === 'string') names.push(interest);
+      else if (typeof interest.name === 'string') names.push(interest.name);
+    });
+  });
+  return [...new Set(names.map((a) => (a || '').trim()).filter(Boolean))].sort(
+    (a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' })
+  );
+};
+
+// Bundled interests ship with the app, so the picker renders instantly and never
+// hangs on a stalled native Firestore request (root cause of the Android filter bug).
+const BUNDLED_ACTIVITIES = extractActivityNames(categoriesData);
+
 const createStyles = (theme) => {
   const { colors, radii, spacing } = theme;
   return StyleSheet.create({
@@ -71,89 +93,53 @@ const InterestSelector = ({
   const setEffectiveSearch =
     typeof setSearchTerm === 'function' ? setSearchTerm : setLocalSearch;
 
-  const [activities, setActivities] = useState([]);
-  const [filteredActivities, setFilteredActivities] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [activities, setActivities] = useState(BUNDLED_ACTIVITIES);
+  const [filteredActivities, setFilteredActivities] =
+    useState(BUNDLED_ACTIVITIES);
+  const [loading, setLoading] = useState(BUNDLED_ACTIVITIES.length === 0);
   const theme = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const keyboardAppearance = theme.isDark ? 'dark' : 'light';
 
+  // Refresh from Firestore in the background. The bundled list is already
+  // rendered, so a slow or stalled native .get() (observed on Android in the
+  // filter sheet) can never block the UI — it is raced against a timeout and any
+  // failure simply keeps the bundled data.
   useEffect(() => {
-    const fetchActivities = async () => {
-      setLoading(true);
+    let cancelled = false;
+    const refreshFromFirestore = async () => {
       try {
-        const allActivities = [];
-        let usedSource = 'unknown';
-
-        // Try Firestore first
-        try {
-          const categoriesSnapshot = await db.collection('categories').get();
-          if (
-            categoriesSnapshot &&
-            categoriesSnapshot.docs &&
-            categoriesSnapshot.docs.length
-          ) {
-            usedSource = 'firestore';
-            for (const categoryDoc of categoriesSnapshot.docs) {
-              const categoryData = categoryDoc.data() || {};
-              const interests = categoryData.interests || [];
-              if (Array.isArray(interests)) {
-                interests.forEach((interest) => {
-                  // interest may be an object or a string
-                  if (!interest) return;
-                  if (typeof interest === 'string')
-                    allActivities.push(interest);
-                  else if (typeof interest.name === 'string')
-                    allActivities.push(interest.name);
-                });
-              }
-            }
-          } else {
-            // No docs in Firestore -> fallback to local JSON
-            throw new Error('No categories in Firestore');
-          }
-        } catch (err) {
-          // Fallback: use bundled categoriesData.json
-          try {
-            if (Array.isArray(categoriesData)) {
-              usedSource = 'bundled_json';
-              categoriesData.forEach((cat) => {
-                const interests = cat?.interests || [];
-                if (Array.isArray(interests)) {
-                  interests.forEach((interest) => {
-                    if (!interest) return;
-                    if (typeof interest === 'string')
-                      allActivities.push(interest);
-                    else if (typeof interest.name === 'string')
-                      allActivities.push(interest.name);
-                  });
-                }
-              });
-            }
-          } catch (fallbackErr) {
-            console.error('Fallback categories parse error', fallbackErr);
-          }
-        }
-
-        const sorted = [
-          ...new Set(
-            allActivities.map((a) => (a || '').trim()).filter(Boolean)
+        const snapshot = await Promise.race([
+          db.collection('categories').get(),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('categories-fetch-timeout')),
+              4000
+            )
           ),
-        ].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
-        setActivities(sorted);
-        setFilteredActivities(sorted);
-        console.debug(
-          `[InterestSelector] loaded ${sorted.length} activities (source=${usedSource})`
+        ]);
+        if (cancelled || !snapshot?.docs?.length) return;
+        const fromFirestore = extractActivityNames(
+          snapshot.docs.map((d) => d.data() || {})
         );
-      } catch (error) {
-        console.error('Error fetching activities:', error);
-        setActivities([]);
-        setFilteredActivities([]);
+        if (fromFirestore.length) {
+          setActivities(fromFirestore);
+        }
+      } catch (err) {
+        // Expected when offline or when the native Firestore channel stalls;
+        // the bundled list stays visible.
+        console.debug(
+          '[InterestSelector] categories refresh skipped:',
+          err?.message || err
+        );
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-    fetchActivities();
+    refreshFromFirestore();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

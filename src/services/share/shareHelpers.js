@@ -1,5 +1,12 @@
 import { Platform } from 'react-native';
 import { getUniversalLinkSettings } from '../deepLinkingService';
+
+// Description: Platform-aware download links for share messages
+const IOS_DOWNLOAD_URL = 'https://testflight.apple.com/join/qSuvsM4q';
+const ANDROID_DOWNLOAD_URL =
+  'https://play.google.com/store/apps/details?id=com.socialcirclellc.app';
+export const DOWNLOAD_URL =
+  Platform.OS === 'android' ? ANDROID_DOWNLOAD_URL : IOS_DOWNLOAD_URL;
 import {
   getEventCityLabel,
   shouldMaskRsvpDetails,
@@ -81,7 +88,7 @@ export function fallbackUrl(type, id) {
 
 export function buildEventMessage(event, preview = {}, options = {}) {
   const maskDetails = options?.maskDetails === true;
-  const testflightUrl = 'https://testflight.apple.com/join/qSuvsM4q';
+  const testflightUrl = DOWNLOAD_URL;
   const lines = [];
   const title =
     sanitize(event?.title) ||
@@ -117,7 +124,7 @@ export function buildEventMessage(event, preview = {}, options = {}) {
 }
 
 export function buildPostMessage(post, preview = {}) {
-  const testflightUrl = 'https://testflight.apple.com/join/qSuvsM4q';
+  const testflightUrl = DOWNLOAD_URL;
   const author = sanitize(
     post?.creatorSnapshot?.displayName ||
       post?.creatorSnapshot?.name ||
@@ -143,7 +150,7 @@ export function buildPostMessage(post, preview = {}) {
 }
 
 export function buildProfileMessage(profile, preview = {}) {
-  const testflightUrl = 'https://testflight.apple.com/join/qSuvsM4q';
+  const testflightUrl = DOWNLOAD_URL;
   const displayName = sanitize(
     profile?.displayName ||
       `${profile?.firstName || ''} ${profile?.lastName || ''}` ||
@@ -176,8 +183,8 @@ export function buildEventSharePayload(event, context = {}) {
   const maskDetails = shouldMaskRsvpDetails(event, context?.viewerId || null);
   return {
     message: buildEventMessage(event, {}, { maskDetails }),
-    url: 'https://testflight.apple.com/join/qSuvsM4q',
-    subject:
-      sanitize(event?.title) || 'Check out this event on Social Circle',
+    // url is iOS-only in Share.share(); Android reads it from the message body
+    url: DOWNLOAD_URL,
+    subject: sanitize(event?.title) || 'Check out this event on Social Circle',
   };
 }

@@ -51,7 +51,9 @@ export function AuthProvider({ children }) {
           if (data.isDeleted) {
             setUser(null);
             setLoading(false);
-            try { sessionRoleStore.getState().reset(); } catch {}
+            try {
+              sessionRoleStore.getState().reset();
+            } catch {}
             return;
           }
           const next = {
@@ -66,7 +68,7 @@ export function AuthProvider({ children }) {
               .setRole(
                 String(data.type || '').toLowerCase() === 'business'
                   ? 'business'
-                  : 'consumer'
+                  : 'consumer',
               );
           } catch {}
           setLoading(false);
@@ -99,7 +101,7 @@ export function AuthProvider({ children }) {
           try {
             analyticsInit({ ...next, analyticsOptIn: false });
           } catch {}
-        }
+        },
       );
 
       // Track globally so logout can proactively stop it

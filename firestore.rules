@@ -389,6 +389,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Business upgrade requests: authenticated users can create their own requests;
+    // no client reads or updates (admin only).
+    match /businessUpgradeRequests/{requestId} {
+      allow create: if signedIn() &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.status == 'PENDING';
+      allow read, update, delete: if false;
+    }
+
     match /{document=**} { allow read, write: if false; }
   }
 }

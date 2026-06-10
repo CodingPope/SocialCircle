@@ -1,4 +1,12 @@
 import { db, Timestamp, getTimestampNow } from '../../../services/firebase';
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocs,
+} from '@react-native-firebase/firestore';
 import { geohashQueryBounds, distanceBetween } from 'geofire-common';
 import { getWithTTL } from '../../../lib/ttlCache';
 
@@ -30,15 +38,16 @@ export async function fetchHotEvents(
       const promises = [];
       for (const interestChunk of interestChunks) {
         for (const b of bounds) {
-          const queryRef = db
-            .collection('events')
-            .where('geohash', '>=', b[0])
-            .where('geohash', '<=', b[1])
-            .where('interest', 'in', interestChunk)
-            .where('status', '==', 'active')
-            .where('isDeleted', '==', false)
-            .where('date', '>=', getTimestampNow());
-          promises.push(queryRef.get());
+          const eventsQuery = query(
+            collection(db, 'events'),
+            where('geohash', '>=', b[0]),
+            where('geohash', '<=', b[1]),
+            where('interest', 'in', interestChunk),
+            where('status', '==', 'active'),
+            where('isDeleted', '==', false),
+            where('date', '>=', getTimestampNow()),
+          );
+          promises.push(getDocs(eventsQuery));
         }
       }
 
@@ -101,15 +110,17 @@ export async function fetchNewEvents(
 
     const doFetch = async () => {
       const promises = bounds.map((b) =>
-        db
-          .collection('events')
-          .where('geohash', '>=', b[0])
-          .where('geohash', '<=', b[1])
-          .where('interest', '==', selectedInterest)
-          .where('status', '==', 'active')
-          .where('isDeleted', '==', false)
-          .where('createdAt', '>=', twentyFourHoursAgo)
-          .get(),
+        getDocs(
+          query(
+            collection(db, 'events'),
+            where('geohash', '>=', b[0]),
+            where('geohash', '<=', b[1]),
+            where('interest', '==', selectedInterest),
+            where('status', '==', 'active'),
+            where('isDeleted', '==', false),
+            where('createdAt', '>=', twentyFourHoursAgo),
+          ),
+        ),
       );
 
       const snapshots = await Promise.all(promises);
@@ -171,16 +182,18 @@ export async function fetchThisWeekEvents(
 
     const doFetch = async () => {
       const promises = bounds.map((b) =>
-        db
-          .collection('events')
-          .where('geohash', '>=', b[0])
-          .where('geohash', '<=', b[1])
-          .where('interest', '==', selectedInterest)
-          .where('status', '==', 'active')
-          .where('isDeleted', '==', false)
-          .where('date', '>=', now)
-          .where('date', '<=', weekFromNow)
-          .get(),
+        getDocs(
+          query(
+            collection(db, 'events'),
+            where('geohash', '>=', b[0]),
+            where('geohash', '<=', b[1]),
+            where('interest', '==', selectedInterest),
+            where('status', '==', 'active'),
+            where('isDeleted', '==', false),
+            where('date', '>=', now),
+            where('date', '<=', weekFromNow),
+          ),
+        ),
       );
 
       const snapshots = await Promise.all(promises);
@@ -261,16 +274,18 @@ export async function fetchTodayEvents(
 
     const doFetch = async () => {
       const promises = bounds.map((b) =>
-        db
-          .collection('events')
-          .where('geohash', '>=', b[0])
-          .where('geohash', '<=', b[1])
-          .where('interest', '==', selectedInterest)
-          .where('status', '==', 'active')
-          .where('isDeleted', '==', false)
-          .where('date', '>=', startTs)
-          .where('date', '<=', endTs)
-          .get(),
+        getDocs(
+          query(
+            collection(db, 'events'),
+            where('geohash', '>=', b[0]),
+            where('geohash', '<=', b[1]),
+            where('interest', '==', selectedInterest),
+            where('status', '==', 'active'),
+            where('isDeleted', '==', false),
+            where('date', '>=', startTs),
+            where('date', '<=', endTs),
+          ),
+        ),
       );
 
       const snapshots = await Promise.all(promises);
@@ -314,14 +329,16 @@ export async function fetchTodayEvents(
 export async function fetchGenericEvents(pageSize = 20) {
   try {
     const now = getTimestampNow();
-    const snap = await db
-      .collection('events')
-      .where('status', '==', 'active')
-      .where('isDeleted', '==', false)
-      .where('date', '>=', now)
-      .orderBy('date', 'asc')
-      .limit(Math.max(5, Math.min(pageSize, 50)))
-      .get();
+    const snap = await getDocs(
+      query(
+        collection(db, 'events'),
+        where('status', '==', 'active'),
+        where('isDeleted', '==', false),
+        where('date', '>=', now),
+        orderBy('date', 'asc'),
+        limit(Math.max(5, Math.min(pageSize, 50))),
+      ),
+    );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   } catch (err) {
     console.error('Error fetching generic events:', err);

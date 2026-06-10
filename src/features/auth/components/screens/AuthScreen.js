@@ -18,7 +18,10 @@ import {
   getDoc,
   updateDoc,
 } from '../../../../services/firebase/firestoreCompat';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
 import { useUserStore, useSessionRole } from '../../../profile';
@@ -957,15 +960,15 @@ export default function AuthScreen({ navigation, route }) {
               style={[styles.socialButton, { marginTop: theme.spacing.sm }]}
               onPress={handleGoogleSignIn}
             >
-                <Ionicons
-                  name='logo-google'
-                  size={18}
-                  color={theme.colors.neutral900}
-                />
-                <Text style={styles.socialButtonText}>Sign in with Google</Text>
-              </TouchableOpacity>
+              <Ionicons
+                name='logo-google'
+                size={18}
+                color={theme.colors.neutral900}
+              />
+              <Text style={styles.socialButtonText}>Sign in with Google</Text>
+            </TouchableOpacity>
 
-            {(appleAvailable) && (
+            {appleAvailable && (
               <View style={styles.dividerRow}>
                 <View style={styles.dividerLine} />
                 <Text style={styles.dividerLabel}>or use email</Text>

@@ -1,6 +1,17 @@
 // Description: Zustand store for notifications (subscribe, mark as read, soft delete)
 import { create } from 'zustand';
 import { db, serverTimestamp } from '../../../services/firebase';
+import {
+  collection,
+  doc,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+  updateDoc,
+  writeBatch,
+} from '../../../services/firebase/firestoreCompat';
 import logger from '../../../lib/logger';
 
 export const useNotificationStore = create((set, get) => ({
@@ -45,12 +56,14 @@ export const useNotificationStore = create((set, get) => ({
 
       set({ loading: true, error: null });
       // Limit notifications query to most recent 100 to prevent unbounded reads
-      const queryRef = db
-        .collection('notifications')
-        .where('recipientId', '==', userId)
-        .orderBy('createdAt', 'desc')
-        .limit(100);
-      const unsub = queryRef.onSnapshot(
+      const queryRef = query(
+        collection(db, 'notifications'),
+        where('recipientId', '==', userId),
+        orderBy('createdAt', 'desc'),
+        limit(100),
+      );
+      const unsub = onSnapshot(
+        queryRef,
         async (snap) => {
           const list = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
@@ -70,7 +83,7 @@ export const useNotificationStore = create((set, get) => ({
             unreadCount: get().unreadCount,
             hasUnread: get().unreadCount > 0,
           });
-        }
+        },
       );
 
       set({ _unsubscribe: unsub, activeUid: userId });
@@ -107,7 +120,7 @@ export const useNotificationStore = create((set, get) => ({
   markAsRead: async (id) => {
     if (!id) return;
     try {
-      await db.collection('notifications').doc(id).update({
+      await updateDoc(doc(db, 'notifications', id), {
         read: true,
         readAt: serverTimestamp(),
       });
@@ -117,7 +130,7 @@ export const useNotificationStore = create((set, get) => ({
     }
     set((state) => {
       const next = state.notifications.map((n) =>
-        n.id === id ? { ...n, read: true } : n
+        n.id === id ? { ...n, read: true } : n,
       );
       const unread = next.filter((n) => !n.read).length;
       return {
@@ -136,9 +149,9 @@ export const useNotificationStore = create((set, get) => ({
     const unread = list.filter((n) => !n.read);
     if (!unread.length) return;
     try {
-      const batch = db.batch();
+      const batch = writeBatch(db);
       unread.forEach((n) => {
-        const docRef = db.collection('notifications').doc(n.id);
+        const docRef = doc(db, 'notifications', n.id);
         batch.update(docRef, {
           read: true,
           readAt: serverTimestamp(),
@@ -150,7 +163,7 @@ export const useNotificationStore = create((set, get) => ({
     }
     set((state) => {
       const next = state.notifications.map((n) =>
-        unread.some((u) => u.id === n.id) ? { ...n, read: true } : n
+        unread.some((u) => u.id === n.id) ? { ...n, read: true } : n,
       );
       return {
         notifications: next,
@@ -164,7 +177,7 @@ export const useNotificationStore = create((set, get) => ({
   softDelete: async (id) => {
     if (!id) return;
     try {
-      await db.collection('notifications').doc(id).update({
+      await updateDoc(doc(db, 'notifications', id), {
         isDeleted: true,
         deletedAt: serverTimestamp(),
       });
@@ -175,7 +188,7 @@ export const useNotificationStore = create((set, get) => ({
         notifications: s.notifications.filter((n) => n.id !== id),
         unreadCount: Math.max(
           0,
-          s.notifications.filter((n) => n.id !== id && !n.read).length
+          s.notifications.filter((n) => n.id !== id && !n.read).length,
         ),
         hasUnread:
           s.notifications.filter((n) => n.id !== id && !n.read).length > 0,

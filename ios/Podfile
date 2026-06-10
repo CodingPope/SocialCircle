@@ -71,5 +71,25 @@ target 'SocialCircle' do
         end
       end
     end
+
+    # Workaround: fmt 11.0.2 (pulled in via gRPC-C++) only disables its
+    # consteval-based format-string validation for Apple Clang < 14000029.
+    # Newer Xcode toolchains regressed that consteval evaluation, causing
+    # "call to consteval function ... is not a constant expression" errors in
+    # fmt/format-inl.h. Drop the upper bound so any Apple Clang takes the safe
+    # (non-consteval) path; this only disables a compile-time format-string
+    # check, fmt::format still behaves the same at runtime.
+    fmt_base_header = File.join(installer.sandbox.pod_dir('fmt').to_s, 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base_header)
+      contents = File.read(fmt_base_header)
+      patched = contents.sub(
+        '#elif defined(__apple_build_version__) && __apple_build_version__ < 14000029L',
+        '#elif defined(__apple_build_version__)'
+      )
+      if patched != contents
+        File.chmod(0644, fmt_base_header)
+        File.write(fmt_base_header, patched)
+      end
+    end
   end
 end

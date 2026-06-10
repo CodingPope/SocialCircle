@@ -10,8 +10,6 @@ import {
   StyleSheet,
   Switch,
   Animated,
-  Platform,
-  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -140,7 +138,7 @@ export default function ProfileSidebar({
         ]}
         {...panHandlers}
       >
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top']}>
           {/* Header */}
           <View
             style={[styles.header, { borderBottomColor: theme.colors.border }]}
@@ -247,7 +245,6 @@ const styles = StyleSheet.create({
     height: '100%',
     borderTopLeftRadius: 24,
     borderBottomLeftRadius: 24,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 30 : 60,
     paddingHorizontal: 16,
     paddingBottom: 40,
     shadowColor: '#000',
@@ -258,13 +255,12 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 40 : 80,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+    paddingTop: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
     position: 'relative',
@@ -272,7 +268,7 @@ const styles = StyleSheet.create({
   backButton: {
     position: 'absolute',
     left: 0,
-    top: Platform.OS === 'android' ? StatusBar.currentHeight + 10 : 20,
+    top: 12,
     zIndex: 1,
   },
   headerTitle: {

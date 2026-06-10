@@ -18,7 +18,10 @@ import {
   Alert,
   Image,
 } from 'react-native';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
 import { GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '@env';
@@ -615,16 +618,16 @@ export default function LoginScreen({ navigation }) {
             </View>
 
             {isLogin && (
-                <TouchableOpacity
-                  style={styles.socialButton}
-                  onPress={handleGoogleSignIn}
-                >
-                  <Ionicons name='logo-google' size={18} color='#1F1F33' />
-                  <Text style={styles.socialButtonText}>
-                    Continue with Google
-                  </Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={styles.socialButton}
+                onPress={handleGoogleSignIn}
+              >
+                <Ionicons name='logo-google' size={18} color='#1F1F33' />
+                <Text style={styles.socialButtonText}>
+                  Continue with Google
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {isLogin && appleAvailable && (
               <AppleAuthentication.AppleAuthenticationButton

@@ -13,6 +13,7 @@ import { db } from './src/services/firebase/config';
 import AppNavigator from './src/navigation/AppNavigator';
 import Constants from 'expo-constants';
 import { initErrorReporting } from './src/lib/errorReporting';
+import logger from './src/lib/logger';
 import { screen as analyticsScreen } from './src/services/analyticsService';
 import { AuthProvider } from './src/features/auth/context/AuthContext';
 
@@ -29,12 +30,15 @@ import AppProviders from './src/providers/AppProviders';
 SplashScreen.preventAutoHideAsync().catch((err) => {
   console.error('[App] Failed to prevent auto hide splash:', err);
 });
-console.log('[App] Initializing Social Circle app');
-console.log('Sentry initialization disabled - troubleshooting __extends error');
+logger.debug('[App] Initializing Social Circle app');
+
+// Initialize Sentry error reporting at startup (no-op if DSN is empty)
+initErrorReporting({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN || '',
+  environment: process.env.EXPO_PUBLIC_SENTRY_ENV || 'development',
+});
 
 function AppContent() {
-  console.log('[AppContent] Component rendering');
-
   // Description: Get user from Zustand store
   const user = useUserStore((state) => state.user);
   const storeLoading = useUserStore((state) => state.loading);
@@ -47,13 +51,6 @@ function AppContent() {
   const [appReady, setAppReady] = useState(false);
   const themeMode = useThemeStore((state) => state.mode);
 
-  console.log('[AppContent] State:', {
-    storeLoading,
-    checking,
-    appReady,
-    hasUser: !!user,
-  });
-
   // Import onboarding router utility
   const {
     getNextOnboardingStep,
@@ -63,10 +60,10 @@ function AppContent() {
   useEffect(() => {
     const timeout = setTimeout(() => {
       if (!appReady) {
-        console.warn(
+        logger.warn(
           '[AppContent] Timeout reached without app ready. Force hiding splash screen.',
         );
-        console.warn('[AppContent] Debug state:', {
+        logger.warn('[AppContent] Debug state:', {
           storeLoading,
           checking,
           appReady,
@@ -84,20 +81,15 @@ function AppContent() {
 
   // Description: Hide splash screen once app is ready
   useEffect(() => {
-    console.log('[AppContent] Splash screen check:', {
-      storeLoading,
-      checking,
-      appReady,
-      shouldHide: !storeLoading && !checking && appReady,
-    });
     if (!storeLoading && !checking && appReady) {
       const hideSplash = async () => {
         try {
-          console.log('[AppContent] Hiding splash screen');
           await SplashScreen.hideAsync();
-          console.log('[AppContent] Splash screen hidden successfully');
         } catch (err) {
-          console.log('[AppContent] Splash already hidden or error:', err);
+          logger.warn(
+            '[AppContent] Splash already hidden or error:',
+            err?.message || err,
+          );
         }
       };
       // Small delay to ensure smooth transition
@@ -137,70 +129,57 @@ function AppContent() {
 
   // NEW: Start auth listener once on mount (since AuthProvider is not used)
   useEffect(() => {
-    console.log('[AppContent] Setting up auth listener');
+    logger.debug('[AppContent] Setting up auth listener');
     try {
       const listen = useUserStore.getState().listenAuthState;
       if (typeof listen === 'function') {
-        console.log('[AppContent] Calling listenAuthState');
         listen();
       } else {
-        console.error(
+        logger.error(
           '[AppContent] listenAuthState is not a function:',
           typeof listen,
         );
       }
     } catch (err) {
-      console.error('[AppContent] Failed to start auth listener:', err);
+      logger.error(
+        '[AppContent] Failed to start auth listener:',
+        err?.message || err,
+      );
     }
   }, []);
 
   useEffect(() => {
-    console.log('[AppContent] Checking user profile. User UID:', user?.uid);
+    logger.debug('[AppContent] Checking user profile. User UID:', user?.uid);
     const check = async () => {
       if (user) {
-        console.log('[AppContent] User exists, fetching profile data');
         try {
           const userDocRef = db.collection('users').doc(user.uid);
           const snap = await userDocRef.get();
-          console.log('[AppContent] User doc exists:', snap.exists);
           if (snap.exists) {
             const data = snap.data();
             const nextStep = getNextOnboardingStep(data);
-            console.log('[AppContent] Next onboarding step:', nextStep);
+            logger.debug('[AppContent] Next onboarding step:', nextStep);
             setOnboardingStep(nextStep);
             setProfileComplete(!nextStep);
           } else {
-            console.log(
-              '[AppContent] User doc does not exist, setting onboarding to NameDob',
-            );
             setProfileComplete(false);
             setOnboardingStep('NameDob');
           }
         } catch (err) {
-          console.error('[AppContent] Error fetching user profile:', err);
+          logger.error(
+            '[AppContent] Error fetching user profile:',
+            err?.message || err,
+          );
           setProfileComplete(false);
           setOnboardingStep('NameDob');
         }
-      } else {
-        console.log('[AppContent] No user, skipping profile check');
       }
-      console.log('[AppContent] Setting checking to false');
       setChecking(false);
     };
     check();
   }, [user]);
 
   const showLoadingOverlay = storeLoading || checking;
-
-  console.log('[AppContent] Render state:', {
-    showLoadingOverlay,
-    storeLoading,
-    checking,
-    appReady,
-    hasUser: !!user,
-    profileComplete,
-    onboardingStep,
-  });
 
   useEffect(() => {
     if (user?.uid && user?.analyticsOptIn) {
@@ -227,16 +206,17 @@ function AppContent() {
         ref={navigationRef}
         theme={navigationTheme}
         onReady={() => {
-          console.log('[NavigationContainer] onReady called (with onboarding)');
           try {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
             navigationRef.routeNameRef = rn;
-            console.log('[NavigationContainer] Current route:', rn);
+            logger.debug('[NavigationContainer] onReady, current route:', rn);
             if (rn) analyticsScreen(rn);
-            console.log('[NavigationContainer] Setting appReady to true');
             setAppReady(true);
           } catch (err) {
-            console.error('[NavigationContainer] Error in onReady:', err);
+            logger.error(
+              '[NavigationContainer] Error in onReady:',
+              err?.message || err,
+            );
           }
         }}
         onStateChange={async () => {
@@ -259,16 +239,17 @@ function AppContent() {
         ref={navigationRef}
         theme={navigationTheme}
         onReady={() => {
-          console.log('[NavigationContainer] onReady called (normal flow)');
           try {
             const rn = navigationRef.current?.getCurrentRoute()?.name;
             navigationRef.routeNameRef = rn;
-            console.log('[NavigationContainer] Current route:', rn);
+            logger.debug('[NavigationContainer] onReady, current route:', rn);
             if (rn) analyticsScreen(rn);
-            console.log('[NavigationContainer] Setting appReady to true');
             setAppReady(true);
           } catch (err) {
-            console.error('[NavigationContainer] Error in onReady:', err);
+            logger.error(
+              '[NavigationContainer] Error in onReady:',
+              err?.message || err,
+            );
           }
         }}
         onStateChange={async () => {
@@ -297,8 +278,6 @@ function AppContent() {
 export default function App() {
   // Description: Get theme mode from store and pass to ThemeProvider
   const themeMode = useThemeStore((state) => state.mode);
-
-  console.log('[App] Rendering root component');
 
   return (
     <ErrorBoundary>

@@ -13,6 +13,7 @@ import {
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { db } from '../../../../../services/firebase';
+import categoriesData from '../../../../../features/events/constants/categoriesData.json';
 import { useUserStore } from '../../../../profile';
 import AnimatedGradientBackground from '../../../../../components/ui/AnimatedGradientBackground';
 import {
@@ -284,10 +285,43 @@ function InterestsScreen({ navigation }) {
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const categorySnap = await db.collection('categories').get();
+        // Build a docs-like list so the transform below works for either source.
+        const toDocList = (cats) =>
+          (Array.isArray(cats) ? cats : []).map((cat) => ({
+            id: cat.id,
+            data: () => cat,
+          }));
+        // Timeout-race the fetch so a stalled native .get() (Android) can't strand
+        // onboarding with no interests; fall back to the bundled categories.
+        let categoryDocs;
+        try {
+          const categorySnap = await Promise.race([
+            db.collection('categories').get(),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error('categories-fetch-timeout')),
+                4000
+              )
+            ),
+          ]);
+          categoryDocs = categorySnap?.docs?.length
+            ? categorySnap.docs
+            : toDocList(categoriesData);
+        } catch (fetchErr) {
+          console.warn(
+            '[Onboarding] categories fetch failed, using bundled:',
+            fetchErr?.message || fetchErr
+          );
+          categoryDocs = toDocList(categoriesData);
+        }
         let userSnap = null;
         try {
-          userSnap = await db.collection('users').get();
+          userSnap = await Promise.race([
+            db.collection('users').get(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('users-fetch-timeout')), 4000)
+            ),
+          ]);
         } catch (countErr) {
           console.warn('Failed to load interest adoption counts', countErr);
         }
@@ -338,7 +372,7 @@ function InterestsScreen({ navigation }) {
           return { ...item };
         };
 
-        const baseCategories = categorySnap.docs.map((categoryDoc) => {
+        const baseCategories = categoryDocs.map((categoryDoc) => {
           const data = categoryDoc.data() || {};
           const normalizedInterests = Array.isArray(data.interests)
             ? data.interests

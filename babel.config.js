@@ -13,6 +13,7 @@ module.exports = {
           'GOOGLE_MAPS_API_KEY',
           'GOOGLE_CLIENT_ID',
           'GOOGLE_IOS_CLIENT_ID',
+          'GOOGLE_ANDROID_CLIENT_ID',
           'GOOGLE_EXPO_CLIENT_ID',
           'EAS_PROJECT_ID',
           'IOS_BUNDLE_ID',

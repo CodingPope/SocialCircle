@@ -1,0 +1,28 @@
+diff --git a/node_modules/react-native-image-crop-picker/ios/src/ImageCropPicker.mm b/node_modules/react-native-image-crop-picker/ios/src/ImageCropPicker.mm
+index 354ad09..93b8cd5 100644
+--- a/node_modules/react-native-image-crop-picker/ios/src/ImageCropPicker.mm
++++ b/node_modules/react-native-image-crop-picker/ios/src/ImageCropPicker.mm
+@@ -119,8 +119,21 @@ RCT_EXPORT_MODULE(RNCImageCropPicker);
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject {
+     
+-    self.resolve = resolve;
+-    self.reject = reject;
++    // Guard against settling the promise more than once. Some flows (notably
++    // cancelling the QB picker after a selection) fire a reject after the promise
++    // was already resolved, which crashes the New Architecture bridge with
++    // "Tried to reject a promise after it's already been resolved".
++    __block BOOL promiseSettled = NO;
++    self.resolve = ^(id result) {
++        if (promiseSettled) { return; }
++        promiseSettled = YES;
++        resolve(result);
++    };
++    self.reject = ^(NSString *code, NSString *message, NSError *error) {
++        if (promiseSettled) { return; }
++        promiseSettled = YES;
++        reject(code, message, error);
++    };
+     self.options = [NSMutableDictionary dictionaryWithDictionary:self.defaultOptions];
+     for (NSString *key in options.keyEnumerator) {
+         [self.options setValue:options[key] forKey:key];

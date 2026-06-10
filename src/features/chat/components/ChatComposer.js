@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
 export default function ChatComposer({
@@ -17,6 +18,7 @@ export default function ChatComposer({
   loading,
 }) {
   const styles = getStyles(theme);
+  const insets = useSafeAreaInsets();
   const [sending, setSending] = useState(false);
 
   const handleSend = async () => {
@@ -33,7 +35,12 @@ export default function ChatComposer({
   };
 
   return (
-    <View style={styles.composerContainer}>
+    <View
+      style={[
+        styles.composerContainer,
+        { paddingBottom: Math.max(insets.bottom, 12) },
+      ]}
+    >
       <TextInput
         style={styles.input}
         value={input}
@@ -62,7 +69,8 @@ const getStyles = (theme) =>
     composerContainer: {
       flexDirection: 'row',
       alignItems: 'center',
-      padding: 12,
+      paddingTop: 12,
+      paddingHorizontal: 12,
       backgroundColor: theme.colors.card,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.border,

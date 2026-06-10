@@ -1,10 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  db,
-  callFirebaseFunction,
-} from '../../../services/firebase';
+import { db, callFirebaseFunction } from '../../../services/firebase';
 
 // Description: Zustand store for events, RSVP, waitlist, and event creation
 export const useEventStore = create(
@@ -29,12 +26,29 @@ export const useEventStore = create(
           needsRefresh: false,
         }),
 
-      // Fetch events from Firestore
-      fetchEvents: async () => {
+      // Fetch events from Firestore via Cloud Function (delegates to server-side geohash query)
+      // Accepts optional { interests, location, radiusInM } to scope the query
+      fetchEvents: async ({
+        interests = [],
+        location = null,
+        radiusInM = 32093,
+      } = {}) => {
         set({ loading: true });
         try {
-          // TODO: Firestore query for events
-          // ...
+          const data = await callFirebaseFunction('getEvents', {
+            interests,
+            ...(location ? { location } : {}),
+            radiusInM,
+          });
+          const events = Array.isArray(data?.events)
+            ? data.events
+            : Array.isArray(data)
+              ? data
+              : [];
+          get().setEvents(events);
+        } catch (err) {
+          // Non-fatal: UI falls back to useDiscoveryFeed hook
+          console.warn('[eventStore] fetchEvents failed:', err?.message || err);
         } finally {
           set({ loading: false });
         }
@@ -59,7 +73,7 @@ export const useEventStore = create(
                       ? Array.from(new Set([...ev.attendees, userId]))
                       : [userId],
                   }
-                : ev
+                : ev,
             ),
           }));
 
@@ -105,7 +119,7 @@ export const useEventStore = create(
                         ? ev.waitlistCount + 1
                         : 1,
                   }
-                : ev
+                : ev,
             ),
           }));
 
@@ -119,9 +133,26 @@ export const useEventStore = create(
       },
 
       // Create a new event
+      // Note: Full creation logic lives in CreateEventScreen.js (direct Firestore write).
+      // This store action is available as a callable shim for programmatic callers.
       createEvent: async (eventData) => {
-        // TODO: Firestore event creation logic
-        // ...
+        if (!eventData) return null;
+        try {
+          const data = await callFirebaseFunction('createEvent', eventData);
+          if (data?.eventId) {
+            // Optimistically add to local store if server returns the doc
+            if (data.event) {
+              set((state) => ({
+                events: [data.event, ...state.events],
+              }));
+            }
+            return data.eventId;
+          }
+          return null;
+        } catch (err) {
+          console.warn('[eventStore] createEvent failed:', err?.message || err);
+          throw err;
+        }
       },
 
       // ...other event actions (e.g., update, delete)
@@ -162,6 +193,6 @@ export const useEventStore = create(
           }
         } catch {}
       },
-    }
-  )
+    },
+  ),
 );
