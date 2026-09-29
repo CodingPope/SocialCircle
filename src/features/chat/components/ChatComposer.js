@@ -5,6 +5,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   StyleSheet,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -27,6 +29,9 @@ export default function ChatComposer({
     try {
       await onSend(input.trim());
       setInput('');
+      if (Platform.OS === 'android') {
+        Keyboard.dismiss();
+      }
     } catch (err) {
       // swallow; parent handles alerts
     } finally {
@@ -48,6 +53,7 @@ export default function ChatComposer({
         placeholder='Message'
         placeholderTextColor={theme.colors.textSecondary}
         editable={!disabled && !loading && !sending}
+        underlineColorAndroid='transparent'
       />
       <TouchableOpacity
         style={styles.sendButton}

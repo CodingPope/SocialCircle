@@ -13,6 +13,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Keyboard,
+  LayoutAnimation,
+  UIManager,
   TouchableOpacity,
   Modal,
   Alert,
@@ -100,6 +103,11 @@ const HERO_STATS = [
   { value: '<5 min', label: 'Avg. reply time' },
 ];
 
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -133,6 +141,25 @@ export default function LoginScreen({ navigation }) {
       }
     }
   };
+
+  // Description: Hide hero when keyboard opens so the form card stays fully visible
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvent, () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardVisible(true);
+    });
+    const onHide = Keyboard.addListener(hideEvent, () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardVisible(false);
+    });
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, []);
 
   // Description: Check Apple Sign In availability (iOS only)
   const [appleAvailable, setAppleAvailable] = useState(false);
@@ -486,9 +513,14 @@ export default function LoginScreen({ navigation }) {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={100}
+      keyboardVerticalOffset={0}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {!keyboardVisible && (
         <View style={styles.heroContainer}>
           <LinearGradient
             colors={['#11092F', '#332266']}
@@ -502,7 +534,7 @@ export default function LoginScreen({ navigation }) {
                 <Text style={styles.heroEyebrowText}>{heroCopy.eyebrow}</Text>
               </View>
               <Image
-                source={require('assets/SocialCircleLogoClear.png')}
+                source={require('../../../../../assets/SocialCircleLogoClear.png')}
                 style={styles.heroLogo}
               />
             </View>
@@ -518,6 +550,7 @@ export default function LoginScreen({ navigation }) {
             </View>
           </LinearGradient>
         </View>
+        )}
 
         <View style={styles.formSection}>
           <View style={styles.modeSwitch}>
@@ -611,13 +644,15 @@ export default function LoginScreen({ navigation }) {
               </LinearGradient>
             </TouchableOpacity>
 
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
+            {!keyboardVisible && (
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+            )}
 
-            {isLogin && (
+            {!keyboardVisible && isLogin && (
               <TouchableOpacity
                 style={styles.socialButton}
                 onPress={handleGoogleSignIn}
@@ -629,7 +664,7 @@ export default function LoginScreen({ navigation }) {
               </TouchableOpacity>
             )}
 
-            {isLogin && appleAvailable && (
+            {!keyboardVisible && isLogin && appleAvailable && (
               <AppleAuthentication.AppleAuthenticationButton
                 buttonType={
                   AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
@@ -669,11 +704,13 @@ export default function LoginScreen({ navigation }) {
           </Text>
         </View>
 
-        <View style={styles.footerCopy}>
-          <Text style={styles.footerText}>
-            By continuing you agree to our Terms of Service and Privacy Policy.
-          </Text>
-        </View>
+        {!keyboardVisible && (
+          <View style={styles.footerCopy}>
+            <Text style={styles.footerText}>
+              By continuing you agree to our Terms of Service and Privacy Policy.
+            </Text>
+          </View>
+        )}
 
         <Modal visible={showReset} animationType='fade' transparent>
           <View style={styles.modalContainer}>

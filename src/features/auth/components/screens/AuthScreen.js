@@ -991,6 +991,7 @@ export default function AuthScreen({ navigation, route }) {
                 style={styles.input}
                 placeholderTextColor={theme.colors.neutral500}
                 keyboardAppearance={keyboardAppearance}
+                underlineColorAndroid='transparent'
               />
             </View>
 
@@ -1008,6 +1009,7 @@ export default function AuthScreen({ navigation, route }) {
                 style={styles.input}
                 placeholderTextColor={theme.colors.neutral500}
                 keyboardAppearance={keyboardAppearance}
+                underlineColorAndroid='transparent'
               />
             </View>
 
@@ -1026,6 +1028,7 @@ export default function AuthScreen({ navigation, route }) {
                   style={styles.input}
                   placeholderTextColor={theme.colors.neutral500}
                   keyboardAppearance={keyboardAppearance}
+                  underlineColorAndroid='transparent'
                 />
               </View>
             )}

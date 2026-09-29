@@ -124,7 +124,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.6,
     shadowOffset: { width: 0, height: 0 },
     shadowRadius: 60,
-    elevation: 20,
+    // No elevation: Android elevation on a colored circle creates an octagonal
+    // shadow artifact due to the outline provider; the glow is purely opacity-driven.
   },
   logoContainer: {
     justifyContent: 'center',

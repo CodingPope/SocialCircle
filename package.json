@@ -3,7 +3,7 @@
   "version": "1.0.7",
   "main": "index.js",
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package && node scripts/fix-expo-ws-fragments.js",
     "start": "expo start --dev-client",
     "start:clear": "expo start --dev-client -c",
     "android": "expo run:android",
@@ -107,7 +107,8 @@
     "jest-expo": "~53.0.10",
     "patch-package": "^8.0.1",
     "react-test-renderer": "19.0.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "typescript": "~5.8.3"
   },
   "jest": {
     "preset": "jest-expo",

@@ -13,6 +13,7 @@ import {
   Image,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   StyleSheet,
   Linking,
@@ -156,6 +157,21 @@ const EventChatScreen = () => {
   const [pinnedDraft, setPinnedDraft] = useState('');
   const [pinnedSaving, setPinnedSaving] = useState(false);
   const [leaveInProgress, setLeaveInProgress] = useState(false);
+  const [androidKeyboardHeight, setAndroidKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setAndroidKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setAndroidKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
   const [hasShownAccessAlert, setHasShownAccessAlert] = useState(false);
   const sidebarScrollRef = useRef(null);
   const [sidebarScrollOffset, setSidebarScrollOffset] = useState(0);
@@ -1198,8 +1214,8 @@ const EventChatScreen = () => {
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={0}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? -insets.bottom : 0}
       >
         {/* Chat Messages */}
         <MessageList
@@ -1327,6 +1343,9 @@ const EventChatScreen = () => {
             </Text>
           </View>
         )}
+      </KeyboardAvoidingView>
+      {/* Android: spacer pushes KAV up by exactly the keyboard height via flex */}
+      {Platform.OS === 'android' && <View style={{ height: androidKeyboardHeight }} />}
 
         {/* Event Info Modal */}
         <Modal
@@ -1993,7 +2012,6 @@ const EventChatScreen = () => {
           isCreator={isCreator}
           onRemove={handleRemoveUser}
         />
-      </KeyboardAvoidingView>
       {leaveInProgress && (
         <View style={styles.pendingOverlay} pointerEvents='auto'>
           <View style={styles.pendingOverlayCard}>

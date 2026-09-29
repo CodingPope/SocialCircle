@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Image } from 'react-native';
+import { StyleSheet, View, Image, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
@@ -123,26 +123,30 @@ const InitialSplash = ({ visible }) => {
         style={StyleSheet.absoluteFill}
       />
       <Animated.View style={[styles.halo, haloStyle]} />
-      <Animated.View style={[styles.logoCard, logoStyle]}>
-        <LinearGradient
-          colors={['rgba(255,255,255,0.65)', 'rgba(255,255,255,0.15)']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-        <Image
-          source={require('../../../assets/SocialCircleLogoClear.png')}
-          style={styles.logo}
-          resizeMode='contain'
-        />
-        <Animated.View style={[styles.shimmer, shimmerStyle]}>
+      <Animated.View style={[styles.logoCardShadow, logoStyle]}>
+        <View style={styles.logoCard}>
           <LinearGradient
-            colors={['transparent', 'rgba(255,255,255,0.65)', 'transparent']}
+            colors={['rgba(255,255,255,0.65)', 'rgba(255,255,255,0.15)']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={styles.shimmerGradient}
+            style={[StyleSheet.absoluteFill, styles.logoCardGradient]}
           />
-        </Animated.View>
+          <Image
+            source={require('../../../assets/SocialCircleLogoClear.png')}
+            style={styles.logo}
+            resizeMode='contain'
+          />
+          {Platform.OS !== 'android' && (
+            <Animated.View style={[styles.shimmer, shimmerStyle]}>
+              <LinearGradient
+                colors={['transparent', 'rgba(255,255,255,0.65)', 'transparent']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.shimmerGradient}
+              />
+            </Animated.View>
+          )}
+        </View>
       </Animated.View>
     </Animated.View>
   );
@@ -167,19 +171,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     opacity: 0.3,
   },
-  logoCard: {
+  // Outer wrapper: handles shadow/elevation only (no overflow) to avoid Android octagon
+  logoCardShadow: {
     width: 220,
     height: 220,
     borderRadius: 110,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(5, 4, 10, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
     shadowColor: '#000',
     shadowOpacity: 0.35,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 20 },
-    elevation: 20,
+    elevation: Platform.OS === 'android' ? 20 : 0,
+  },
+  // Inner view: handles circular clipping only (no elevation)
+  logoCard: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    // overflow: 'hidden' removed — on Android it clips to an octagon polygon.
+    // Instead, borderRadius is applied directly to children that need clipping.
+    backgroundColor: 'rgba(5, 4, 10, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Gradient uses explicit borderRadius instead of relying on parent overflow:hidden
+  logoCardGradient: {
+    borderRadius: 110,
   },
   logo: {
     width: 170,
