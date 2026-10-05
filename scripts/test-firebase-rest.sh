@@ -1,9 +1,13 @@
 #!/bin/bash
 # Description: Test Firebase Auth API directly to isolate the issue
 
-API_KEY="***REMOVED_GOOGLE_API_KEY***"
-TEST_EMAIL="qwer@gmail.com"
-TEST_PASSWORD="test123"  # UPDATE THIS WITH ACTUAL PASSWORD
+if [ -z "$FIREBASE_WEB_API_KEY" ]; then
+  echo "❌ Set FIREBASE_WEB_API_KEY in your environment before running this script (do not hardcode it)." >&2
+  exit 1
+fi
+API_KEY="$FIREBASE_WEB_API_KEY"
+TEST_EMAIL="${TEST_EMAIL:-qwer@gmail.com}"
+TEST_PASSWORD="${TEST_PASSWORD:-test123}"  # UPDATE THIS WITH ACTUAL PASSWORD, or export TEST_PASSWORD
 
 echo "🧪 Testing Firebase Auth REST API..."
 echo ""
